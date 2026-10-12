@@ -1,9 +1,12 @@
 <!--
-  The workflow library: the workflows shipped with IRIS, by category.
-  Each one can be read or edited as JSON, then added as an inactive copy
-  the user owns; the shipped workflow itself never changes.
+  The workflow library: the workflows shipped with IRIS and the ones
+  users published, by category. Each one can be read or edited as JSON,
+  then added as an inactive copy the user owns; adding never changes the
+  library. The publisher of an entry (or an administrator) saves an
+  edited JSON back to the library, or removes the entry.
 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { mode } from 'mode-watcher';
 	import {
 		BracesIcon,
@@ -11,13 +14,18 @@
 		KeyRoundIcon,
 		LibraryIcon,
 		PlusIcon,
+		SaveIcon,
 		SparklesIcon,
+		Trash2Icon,
+		UserIcon,
 		WrenchIcon
 	} from 'lucide-svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import ApiError from '$lib/components/ui/api-error.svelte';
 	import JsonEditor from '$lib/components/common/editors/JsonEditor.svelte';
+	import { toast } from '$lib/components/ui/toast';
+	import { formatDateTime } from '$lib/utils/time-formatter';
 	import {
 		AiWorkflowsService,
 		type AiImportResult,
@@ -36,15 +44,16 @@
 	let { open = $bindable(), canWrite, onAdded }: Props = $props();
 
 	let entries = $state<AiLibraryEntry[] | null>(null);
-	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let selectedId = $state<string | null>(null);
 	let editing = $state(false);
 	let text = $state('');
 	let jsonError = $state<string | null>(null);
 	let adding = $state(false);
+	let saving = $state(false);
 
 	const selected = $derived(entries?.find((e) => e.id === selectedId) ?? null);
+	const edited = $derived(!!selected && text !== JSON.stringify(selected.document, null, 2));
 	const categories = $derived.by(() => {
 		const groups: { name: string; entries: AiLibraryEntry[] }[] = [];
 		for (const entry of entries ?? []) {
@@ -56,16 +65,15 @@
 	});
 
 	async function load() {
-		loading = true;
 		error = null;
 		const res = await AiWorkflowsService.library();
-		loading = false;
 		if (!res.ok || !Array.isArray(res.data)) {
 			error = describeApiError(res.data, res.error?.message ?? 'Failed to load the library');
 			return;
 		}
 		entries = res.data;
-		if (!selectedId && entries.length) select(entries[0]);
+		const current = entries.find((e) => e.id === selectedId) ?? entries[0];
+		if (current) select(current);
 	}
 
 	function select(entry: AiLibraryEntry) {
@@ -75,16 +83,62 @@
 		jsonError = null;
 	}
 
-	async function add() {
-		if (!selected) return;
-		let document: unknown;
+	function parsed(): { document: unknown } | null {
 		try {
-			document = JSON.parse(text);
+			return { document: JSON.parse(text) };
 		} catch (e) {
 			jsonError = `Invalid JSON: ${(e as Error).message}`;
 			editing = true;
+			return null;
+		}
+	}
+
+	function publisher(entry: AiLibraryEntry): string {
+		return entry.owner?.name || entry.owner?.login || 'a deleted user';
+	}
+
+	async function saveToLibrary() {
+		if (!selected?.entry_id) return;
+		const json = parsed();
+		if (!json) return;
+		saving = true;
+		const res = await AiWorkflowsService.updateLibraryEntry(selected.entry_id, json);
+		saving = false;
+		if (!res.ok) {
+			jsonError = describeApiError(res.data, res.error?.message ?? 'The library was not updated');
 			return;
 		}
+		const updated = res.data as AiLibraryEntry;
+		entries = (entries ?? []).map((e) => (e.id === updated.id ? updated : e));
+		select(updated);
+		toast({ title: `“${updated.name}” updated in the library`, variant: 'success' });
+	}
+
+	async function removeFromLibrary() {
+		const entry = selected;
+		if (!entry?.entry_id) return;
+		if (
+			!confirm(
+				`Remove “${entry.name}” from the library? Workflows already added from it keep their copy.`
+			)
+		)
+			return;
+		const res = await AiWorkflowsService.removeLibraryEntry(entry.entry_id);
+		if (!res.ok) {
+			jsonError = describeApiError(res.data, res.error?.message ?? 'The entry was not removed');
+			return;
+		}
+		entries = (entries ?? []).filter((e) => e.id !== entry.id);
+		selectedId = null;
+		if (entries.length) select(entries[0]);
+		toast({ title: `“${entry.name}” removed from the library`, variant: 'success' });
+	}
+
+	async function add() {
+		if (!selected) return;
+		const json = parsed();
+		if (!json) return;
+		const document = json.document;
 		adding = true;
 		const res = await AiWorkflowsService.importWorkflow(document);
 		adding = false;
@@ -101,8 +155,9 @@
 		);
 	}
 
+	// Reloaded on every opening: entries get published from elsewhere
 	$effect(() => {
-		if (open && !entries && !loading) load();
+		if (open) untrack(load);
 	});
 </script>
 
@@ -113,13 +168,14 @@
 				<LibraryIcon size={14} /> Workflow library
 			</Dialog.Title>
 			<Dialog.Description class="text-xs">
-				Workflows shipped with IRIS. Adding one creates an inactive copy you own: adapt it (its JSON
-				can be edited before adding it), fill in what it needs, then activate it.
+				Workflows shipped with IRIS or published by users (Publish, in the editor or the workflow
+				list). Adding one creates an inactive copy you own: adapt it (its JSON can be edited before
+				adding it), fill in what it needs, then activate it.
 			</Dialog.Description>
 		</Dialog.Header>
 		{#if error}
 			<ApiError {error} onRetry={load} />
-		{:else if loading || !entries}
+		{:else if !entries}
 			<p class="p-3 text-xs text-muted-foreground">Loading…</p>
 		{:else if entries.length === 0}
 			<p class="p-3 text-xs text-muted-foreground">The library is empty.</p>
@@ -140,6 +196,11 @@
 								data-testid={`wf-library-${entry.id}`}
 							>
 								<span class="min-w-0 flex-1 truncate">{entry.name}</span>
+								{#if entry.source === 'user'}
+									<span title={`Published by ${publisher(entry)}`} class="shrink-0">
+										<UserIcon size={11} class="text-muted-foreground" />
+									</span>
+								{/if}
 								{#if entry.warnings.length}
 									<CircleAlertIcon size={11} class="shrink-0 text-amber-600" />
 								{/if}
@@ -169,6 +230,13 @@
 								</span>
 							{/if}
 						</div>
+						{#if selected.source === 'user'}
+							<p class="text-2xs text-muted-foreground" data-testid="wf-library-publisher">
+								Published by {publisher(selected)}{selected.updated_at
+									? `, updated ${formatDateTime(selected.updated_at)}`
+									: ''}
+							</p>
+						{/if}
 						<p class="whitespace-pre-line text-xs text-muted-foreground">{selected.description}</p>
 
 						{#if selected.requirements.keystore.length || selected.requirements.tools.length}
@@ -229,7 +297,32 @@
 									{adding ? 'Adding…' : 'Add to my workflows'}
 								</Button>
 							{/if}
-							{#if text !== JSON.stringify(selected.document, null, 2)}
+							{#if canWrite && selected.can_edit}
+								{#if edited}
+									<Button
+										variant="outline"
+										size="sm"
+										class="h-7"
+										onclick={saveToLibrary}
+										disabled={saving}
+										title="Replace the published workflow with the edited JSON"
+										data-testid="wf-library-save"
+									>
+										<SaveIcon size={12} class="mr-1" />
+										{saving ? 'Saving…' : 'Save to the library'}
+									</Button>
+								{/if}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="h-7 text-muted-foreground hover:text-destructive"
+									onclick={removeFromLibrary}
+									data-testid="wf-library-remove"
+								>
+									<Trash2Icon size={12} class="mr-1" /> Remove from the library
+								</Button>
+							{/if}
+							{#if edited}
 								<span class="text-2xs text-amber-600">Edited: the copy gets your changes</span>
 								<Button
 									variant="ghost"

@@ -468,6 +468,8 @@ export interface AiDocumentRequirements {
 export interface AiWorkflowDocument {
 	format: 'iris-ai-workflow';
 	format_version: number;
+	/** Where the library lists it. */
+	category?: string;
 	exported_at: string | null;
 	iris_version: string | null;
 	workflow: Partial<AiWorkflowBody>;
@@ -497,11 +499,25 @@ export interface AiImportResult<T> {
 	block?: T;
 }
 
-/** A workflow shipped with IRIS, added as a copy (`importWorkflow`). */
+/**
+ * A workflow of the library, added as a copy (`importWorkflow`): shipped
+ * with IRIS, or published by a user.
+ */
 export interface AiLibraryEntry {
-	/** The file name without its extensions. */
+	/** Shipped: the file name without its extensions; published: `user-<entry_id>`. */
 	id: string;
-	file: string;
+	/** Null for a published entry. */
+	file: string | null;
+	source: 'shipped' | 'user';
+	/** The id of a published entry (`updateLibraryEntry`), null for a shipped one. */
+	entry_id: number | null;
+	/** Who published it (null when shipped, or the user was deleted). */
+	owner_id: number | null;
+	owner: AiUserRef | null;
+	/** The publisher or an administrator, never for a shipped entry. */
+	can_edit: boolean;
+	created_at: string | null;
+	updated_at: string | null;
 	name: string;
 	description: string;
 	category: string;
@@ -512,6 +528,15 @@ export interface AiLibraryEntry {
 	document: AiWorkflowDocument;
 	/** What the caller lacks to run it: keystore entries, disabled tools. */
 	warnings: AiValidationError[];
+}
+
+/** `name`, `description` and `category` replace the ones of the workflow. */
+export interface AiLibraryPublishBody {
+	workflow_id?: number;
+	document?: unknown;
+	name?: string;
+	description?: string | null;
+	category?: string | null;
 }
 
 export interface AiAuthoringGuide {
@@ -780,6 +805,29 @@ export class AiWorkflowsService {
 
 	static async library(options: ApiOptions = {}): Promise<RequestResponse<AiLibraryEntry[]>> {
 		return ApiService.get<AiLibraryEntry[]>(`${BASE}/library`, options);
+	}
+
+	/** Publishes a workflow the caller owns (`workflow_id`) or a workflow `document`. */
+	static async publishToLibrary(
+		body: AiLibraryPublishBody,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<AiLibraryEntry>> {
+		return ApiService.post<AiLibraryEntry>(`${BASE}/library`, body, options);
+	}
+
+	static async updateLibraryEntry(
+		entryId: number,
+		body: Partial<AiLibraryPublishBody>,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<AiLibraryEntry>> {
+		return ApiService.put<AiLibraryEntry>(`${BASE}/library/${entryId}`, body, options);
+	}
+
+	static async removeLibraryEntry(
+		entryId: number,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<null>> {
+		return ApiService.delete<null>(`${BASE}/library/${entryId}`, options);
 	}
 
 	// ---- Saved blocks

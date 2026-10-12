@@ -60,6 +60,19 @@ describe('AiWorkflowsService', () => {
 		expect(mockGet).toHaveBeenCalledWith('/ai-workflows/library', {});
 	});
 
+	it('publishes, updates and removes library entries', async () => {
+		await AiWorkflowsService.publishToLibrary({ workflow_id: 3, category: 'Triage' });
+		expect(mockPost).toHaveBeenCalledWith(
+			'/ai-workflows/library',
+			{ workflow_id: 3, category: 'Triage' },
+			{}
+		);
+		await AiWorkflowsService.updateLibraryEntry(7, { name: 'Renamed' });
+		expect(mockPut).toHaveBeenCalledWith('/ai-workflows/library/7', { name: 'Renamed' }, {});
+		await AiWorkflowsService.removeLibraryEntry(7);
+		expect(mockDelete).toHaveBeenCalledWith('/ai-workflows/library/7', {});
+	});
+
 	it('creates and updates', async () => {
 		await AiWorkflowsService.create(body);
 		expect(mockPost).toHaveBeenCalledWith('/ai-workflows', body, {});

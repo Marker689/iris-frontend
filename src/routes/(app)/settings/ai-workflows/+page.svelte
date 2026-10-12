@@ -1,6 +1,6 @@
 <!--
   AI workflows: list with trigger, active toggle, owner, version and
-  last-24h run counts; new / import / edit / export / delete / run
+  last-24h run counts; new / import / edit / export / publish / delete / run
   actions, the workflow library and the JSON authoring guide. The editor
   lives at `./[id]` (`./new` to create), runs at `./runs`.
 -->
@@ -9,6 +9,7 @@
 	import { goto } from '$app/navigation';
 	import {
 		BookOpenIcon,
+		BookUpIcon,
 		DownloadIcon,
 		LibraryIcon,
 		ListIcon,
@@ -41,6 +42,7 @@
 	import RunDialog from './components/RunDialog.svelte';
 	import AuthoringGuideDialog from './components/AuthoringGuideDialog.svelte';
 	import LibraryDialog from './components/LibraryDialog.svelte';
+	import PublishDialog from './components/PublishDialog.svelte';
 	import {
 		describeApiError,
 		describeWarnings,
@@ -68,6 +70,8 @@
 	let runOpen = $state(false);
 	let guideOpen = $state(false);
 	let libraryOpen = $state(false);
+	let publishTarget = $state<AiWorkflowSummary | null>(null);
+	let publishOpen = $state(false);
 	let importing = $state(false);
 
 	async function importWorkflow() {
@@ -423,6 +427,20 @@
 												<Button
 													variant="ghost"
 													size="icon"
+													class="h-7 w-7"
+													title="Publish to the library"
+													aria-label={`Publish ${workflow.name} to the library`}
+													onclick={() => {
+														publishTarget = workflow;
+														publishOpen = true;
+													}}
+													data-testid={`wf-publish-${workflow.id}`}
+												>
+													<BookUpIcon size={13} />
+												</Button>
+												<Button
+													variant="ghost"
+													size="icon"
 													class="h-7 w-7 text-muted-foreground hover:text-destructive"
 													title="Delete"
 													aria-label={`Delete ${workflow.name}`}
@@ -466,3 +484,11 @@
 
 <AuthoringGuideDialog bind:open={guideOpen} />
 <LibraryDialog bind:open={libraryOpen} {canWrite} onAdded={onLibraryAdded} />
+{#if publishTarget}
+	<PublishDialog
+		bind:open={publishOpen}
+		workflowId={publishTarget.id}
+		workflowName={publishTarget.name}
+		workflowDescription={publishTarget.description}
+	/>
+{/if}

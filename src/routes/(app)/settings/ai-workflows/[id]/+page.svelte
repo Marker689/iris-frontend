@@ -2,9 +2,10 @@
   AI workflow editor (`/settings/ai-workflows/new` creates one).
 
   Header: name, active, JSON view, validate / save / versions / runs /
-  run / export. Left panel: the workflow settings (trigger, scope, audience,
-  budgets, write allowlist, owner). Centre: the xyflow canvas with its
-  palette and saved blocks; each node shows how many events it processed.
+  run / export / publish to the library. Left panel: the workflow
+  settings (trigger, scope, audience, budgets, write allowlist, owner).
+  Centre: the xyflow canvas with its palette and saved blocks; each node
+  shows how many events it processed.
   Right drawer: the selected node's config, and its events (browse them
   one by one, replay one).
 
@@ -21,6 +22,7 @@
 	import {
 		ArrowLeftIcon,
 		BookOpenIcon,
+		BookUpIcon,
 		BracesIcon,
 		CheckCircle2Icon,
 		CircleAlertIcon,
@@ -89,6 +91,7 @@
 	import TriggerConfigForm from '../components/TriggerConfigForm.svelte';
 	import MultiSelect, { type MultiSelectItem } from '../components/MultiSelect.svelte';
 	import RunDialog from '../components/RunDialog.svelte';
+	import PublishDialog from '../components/PublishDialog.svelte';
 	import VersionsDialog from '../components/VersionsDialog.svelte';
 	import NodeEventsPanel from '../components/NodeEventsPanel.svelte';
 	import NodeTestPanel from '../components/NodeTestPanel.svelte';
@@ -149,6 +152,7 @@
 	let settingsOpen = $state(true);
 	let versionsOpen = $state(false);
 	let runOpen = $state(false);
+	let publishOpen = $state(false);
 	let guideOpen = $state(false);
 	let jsonOpen = $state(false);
 	let drawerTab = $state<'config' | 'events' | 'test'>('config');
@@ -856,6 +860,18 @@
 				>
 					<DownloadIcon size={12} class="mr-1" /> Export
 				</Button>
+				{#if canWrite}
+					<Button
+						variant="outline"
+						size="sm"
+						class="h-7"
+						onclick={() => (publishOpen = true)}
+						title="Publish the saved version to the library, for every user to add a copy"
+						data-testid="wf-publish"
+					>
+						<BookUpIcon size={12} class="mr-1" /> Publish
+					</Button>
+				{/if}
 				<Button variant="outline" size="sm" class="h-7" onclick={() => (versionsOpen = true)}>
 					<HistoryIcon size={12} class="mr-1" /> Versions
 				</Button>
@@ -1300,5 +1316,12 @@
 		entityTypes={manualEntityTypes}
 		{dirty}
 		onStarted={onRunStarted}
+	/>
+	<PublishDialog
+		bind:open={publishOpen}
+		workflowId={workflow.id}
+		workflowName={workflow.name}
+		workflowDescription={workflow.description}
+		{dirty}
 	/>
 {/if}
