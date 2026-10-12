@@ -68,6 +68,12 @@
 	import PollCard from './components/PollCard.svelte';
 	import PollComposer from './components/PollComposer.svelte';
 	import {
+		composerTopicFor,
+		matchesTopics,
+		messageTopicId,
+		unreadByTopic
+	} from './components/stream-topics';
+	import {
 		WarRoomChatService,
 		type ChatMessage,
 		type ChatMessageKind,
@@ -152,8 +158,7 @@
 	const showTopicChips = $derived(selectedTopicIds.size > 1);
 
 	const topicChipName = (m: ChatMessage): string | null => {
-		if (m.message_id < 0) return null; // user-activity row — no topic
-		const id = m.topic_id ?? mainTopic?.topic_id ?? null;
+		const id = messageTopicId(m, mainTopic?.topic_id ?? null);
 		if (id == null) return null;
 		return topicById.get(id)?.name ?? null;
 	};
@@ -526,7 +531,15 @@
 		return Array.from(selectedTopicIds);
 	});
 
+	// Bumped whenever what the stream shows changes (topics, search). A
+	// list answer requested under an older generation is dropped: a slow
+	// response for the previous topic must never land in the new one.
+	let streamGeneration = 0;
+	// Highest chat id the unread counters have seen (see `unreadByTopic`).
+	let unreadWatermark: number | null = null;
+
 	const load = async () => {
+		const generation = streamGeneration;
 		loading = true;
 		const search = appliedSearch || undefined;
 		const res = await WarRoomChatService.list(warRoomId, {
@@ -534,6 +547,7 @@
 			search,
 			topicIds: currentTopicIdsFilter
 		});
+		if (generation !== streamGeneration) return;
 		if (res.ok && Array.isArray(res.data)) {
 			messages = [...res.data].reverse();
 			if (res.data.length < 80) exhausted = true;
@@ -543,8 +557,17 @@
 		scrollToBottom();
 	};
 
+	// Start the stream over under the current topics / search.
+	const reloadStream = () => {
+		streamGeneration += 1;
+		exhausted = false;
+		messages = [];
+		return load();
+	};
+
 	const loadOlder = async () => {
 		if (loadingMore || exhausted || messages.length === 0) return;
+		const generation = streamGeneration;
 		loadingMore = true;
 		const before = messages[0].message_id;
 		const search = appliedSearch || undefined;
@@ -555,6 +578,7 @@
 			topicIds: currentTopicIdsFilter
 		});
 		loadingMore = false;
+		if (generation !== streamGeneration) return;
 		if (res.ok && Array.isArray(res.data)) {
 			if (res.data.length === 0) {
 				exhausted = true;
@@ -582,39 +606,35 @@
 
 	const pollNewer = async () => {
 		if (messages.length === 0) return load();
-		const seen = new Set(messages.map(messageKey));
+		const generation = streamGeneration;
 		const search = appliedSearch || undefined;
 		// Poll UNFILTERED (no topic filter) so we can (a) show only the
 		// selected topics in the stream and (b) bump unread counters on
 		// the ones the operator isn't currently viewing.
 		const res = await WarRoomChatService.list(warRoomId, { limit: 50, search });
+		// The topics or search changed meanwhile: `reloadStream` refills.
+		if (generation !== streamGeneration) return;
 		if (!res.ok || !Array.isArray(res.data)) return;
 		const incoming = res.data as ChatMessage[];
-		// Bump unread counters for any brand-new message on a topic
-		// that isn't in the current selection. Runs BEFORE we filter
-		// down to `matchesTopicFilter` so muted topics still notify.
-		if (topics.length > 0 && selectedTopicIds.size > 0) {
-			const mainId = mainTopic?.topic_id ?? null;
-			for (const m of incoming) {
-				if (seen.has(messageKey(m))) continue;
-				// NULL topic_id on a chat row means Main; skip
-				// user-activity rows (message_id < 0) — those come
-				// from case activity, not a topic.
-				if (m.message_id < 0) continue;
-				const topicId = m.topic_id ?? mainId;
-				if (topicId != null && !selectedTopicIds.has(topicId)) {
-					bumpTopicUnread(topicId);
-				}
-			}
+		const mainId = mainTopic?.topic_id ?? null;
+		// Count new messages on the topics not in view, before filtering
+		// down to the selection so muted topics still notify.
+		const unread = unreadByTopic(
+			incoming,
+			unreadWatermark,
+			topics.length > 0 ? selectedTopicIds : new Set(),
+			mainId
+		);
+		unreadWatermark = unread.watermark;
+		if (topics.length > 0) {
+			for (const [topicId, count] of unread.counts) bumpTopicUnread(topicId, count);
 		}
-		const matchesTopicFilter = (m: ChatMessage) => {
-			if (topics.length === 0 || selectedTopicIds.size === 0) return true;
-			if (m.message_id < 0) return true; // user-activity rows have no topic
-			const mainId = mainTopic?.topic_id ?? null;
-			const topicId = m.topic_id ?? mainId;
-			return topicId != null && selectedTopicIds.has(topicId);
-		};
-		const fresh = incoming.filter((m) => !seen.has(messageKey(m))).filter(matchesTopicFilter);
+		// Taken after the await: `messages` may have been refilled meanwhile.
+		const seen = new Set(messages.map(messageKey));
+		const selection = topics.length > 0 ? selectedTopicIds : new Set<number>();
+		const fresh = incoming
+			.filter((m) => !seen.has(messageKey(m)))
+			.filter((m) => matchesTopics(m, selection, mainId));
 
 		// Merge server state for live-changing fields on rows we
 		// already have. Reactions, polls and edited bodies all mutate
@@ -672,9 +692,7 @@
 			const next = streamSearch.trim();
 			if (next === appliedSearch) return;
 			appliedSearch = next;
-			exhausted = false;
-			messages = [];
-			void load();
+			void reloadStream();
 		}, 250);
 	};
 
@@ -683,9 +701,7 @@
 		streamSearch = '';
 		if (appliedSearch !== '') {
 			appliedSearch = '';
-			exhausted = false;
-			messages = [];
-			void load();
+			void reloadStream();
 		}
 	};
 
@@ -696,8 +712,11 @@
 		// helpers below don't depend on prefs, they'll rerender when
 		// the filters settle.
 		void loadFilterPrefs();
-		void loadTopics();
-		void load();
+		// Topics first: the first page must already be filtered on the
+		// selected topic, or every topic's messages show up under Main.
+		void loadTopics().then((reloaded) => {
+			if (!reloaded) void load();
+		});
 		void loadAttachedCases();
 		void loadThreads();
 		void loadTraceLog();
@@ -1303,30 +1322,37 @@
 	// / trace-log. Backends predating the topics migration return an
 	// empty list — in that case the sidebar section stays hidden and
 	// the composer/filter fall through to "no topic selection".
-	const loadTopics = async () => {
+	// Resolves true when it reloaded the stream for a new selection.
+	const loadTopics = async (): Promise<boolean> => {
 		const res = await WarRoomChatService.listTopics(warRoomId);
-		if (!res.ok || !Array.isArray(res.data)) return;
+		if (!res.ok || !Array.isArray(res.data)) return false;
 		const next = res.data as ChatTopic[];
 		topics = next;
 		// Seed selection to Main on the very first fetch — subsequent
 		// polls leave the operator's picks alone.
+		let selectionChanged = false;
 		if (selectedTopicIds.size === 0) {
 			const main = next.find((t) => t.is_main);
 			if (main) {
 				selectedTopicIds = new Set([main.topic_id]);
 				composerTopicId = main.topic_id;
+				selectionChanged = true;
 			}
 		}
 		// Any topic that vanished server-side (rare — no hard delete)
 		// gets dropped from the selection so the filter isn't a no-op.
 		const knownIds = new Set(next.map((t) => t.topic_id));
 		const filtered = new Set<number>();
-		let selectionChanged = false;
+		let vanished = false;
 		for (const id of selectedTopicIds) {
 			if (knownIds.has(id)) filtered.add(id);
-			else selectionChanged = true;
+			else vanished = true;
 		}
-		if (selectionChanged) selectedTopicIds = filtered;
+		if (vanished) selectedTopicIds = filtered;
+		// Whatever is on screen was fetched under another selection.
+		if (!selectionChanged && !vanished) return false;
+		void reloadStream();
+		return true;
 	};
 
 	const toggleTopicSelection = (topic: ChatTopic) => {
@@ -1357,9 +1383,9 @@
 			if (!topic.archived_at) composerTopicId = topic.topic_id;
 		}
 		selectedTopicIds = next;
-		exhausted = false;
-		messages = [];
-		void load();
+		// Don't keep posting into a topic just taken out of view.
+		composerTopicId = composerTopicFor(composerTopicId, next, topics, mainTopic?.topic_id ?? null);
+		void reloadStream();
 	};
 
 	const selectOnlyTopic = (topic: ChatTopic) => {
@@ -1369,9 +1395,7 @@
 			const { [topic.topic_id]: _, ...rest } = topicUnread;
 			topicUnread = rest;
 		}
-		exhausted = false;
-		messages = [];
-		void load();
+		void reloadStream();
 	};
 
 	const submitNewTopic = async () => {
@@ -1452,11 +1476,11 @@
 
 	// Poll-tick unread bump. Called from `pollNewer` whenever a fresh
 	// message lands on a topic that isn't currently selected.
-	const bumpTopicUnread = (topicId: number) => {
+	const bumpTopicUnread = (topicId: number, count = 1) => {
 		if (selectedTopicIds.has(topicId)) return;
 		topicUnread = {
 			...topicUnread,
-			[topicId]: (topicUnread[topicId] ?? 0) + 1
+			[topicId]: (topicUnread[topicId] ?? 0) + count
 		};
 	};
 
@@ -1519,11 +1543,9 @@
 						const { [targetTopicId]: _, ...rest } = topicUnread;
 						topicUnread = rest;
 					}
-					exhausted = false;
-					messages = [];
 					// Reload synchronously so the target row is in the DOM
 					// before we try to scroll it into view.
-					await load();
+					await reloadStream();
 					await tick();
 				}
 			}
@@ -2458,9 +2480,7 @@
 								const next = streamSearch.trim();
 								if (next !== appliedSearch) {
 									appliedSearch = next;
-									exhausted = false;
-									messages = [];
-									void load();
+									void reloadStream();
 								}
 							} else if (e.key === 'Escape') {
 								e.preventDefault();
