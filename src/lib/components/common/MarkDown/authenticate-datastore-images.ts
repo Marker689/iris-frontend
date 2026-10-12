@@ -5,7 +5,11 @@
  *     ![](/api/v2/cases/3056/datastore/files/5853)
  *     [report.pdf](/api/v2/cases/3056/datastore/files/5853)
  *
- * which Showdown renders as raw `<img>` / `<a>` elements. Both
+ * or at war-room datastore files,
+ *
+ *     ![](/api/v2/war-rooms/7/datastore/12/content)
+ *
+ * which Showdown renders as raw `<img>` / `<a>` elements. These
  * endpoints are gated by a bearer token (see
  * `app/blueprints/rest/v2/cases.py`), so a plain `<img src>` /
  * `<a href>` click — which carries cookies but NOT `Authorization` —
@@ -15,8 +19,8 @@
  * datastore reference it finds:
  *
  *   * `<img>` — fetch through the bearer-authenticated
- *     `CaseDatastoreService.fetchFileBlobUrl()` and swap `src` for a
- *     transient blob URL.
+ *     `fetchFileBlobUrl()` of the matching datastore service and swap
+ *     `src` for a transient blob URL.
  *   * `<a>` — restyle as a labelled "file chip" (icon + filename)
  *     and intercept clicks so the file is fetched with bearer auth
  *     and either opened in a new tab (default) or saved as a download
@@ -38,11 +42,37 @@
  */
 
 import { CaseDatastoreService } from '$lib/services/case-datastore.service';
+import { WarRoomDatastoreService } from '$lib/services/war-room-datastore.service';
 
 // Match both relative paths and absolute URLs pointing at the v2
-// datastore endpoint. The case id and file id are the two capture
-// groups.
+// datastore endpoints. The owner (case or war room) id and the file id
+// are the two capture groups.
 const DATASTORE_PATH_RE = /\/api\/v2\/cases\/(\d+)\/datastore\/files\/(\d+)(?:\?|#|$)/;
+const WAR_ROOM_DATASTORE_PATH_RE =
+	/\/api\/v2\/war-rooms\/(\d+)\/datastore\/(\d+)\/content(?:\?|#|$)/;
+
+type DatastoreRef = { kind: 'case' | 'war-room'; ownerId: number; fileId: number };
+
+export const parseDatastoreUrl = (url: string): DatastoreRef | null => {
+	const caseMatch = DATASTORE_PATH_RE.exec(url);
+	const warRoomMatch = caseMatch ? null : WAR_ROOM_DATASTORE_PATH_RE.exec(url);
+	const m = caseMatch ?? warRoomMatch;
+	if (!m) return null;
+	const ownerId = Number(m[1]);
+	const fileId = Number(m[2]);
+	if (!Number.isFinite(ownerId) || !Number.isFinite(fileId)) return null;
+	return { kind: caseMatch ? 'case' : 'war-room', ownerId, fileId };
+};
+
+const fetchBlobUrl = async (
+	ref: DatastoreRef
+): Promise<{ url: string; filename: string | null } | null> => {
+	if (ref.kind === 'case') {
+		return CaseDatastoreService.fetchFileBlobUrl(ref.ownerId, ref.fileId);
+	}
+	const url = await WarRoomDatastoreService.fetchFileBlobUrl(ref.ownerId, ref.fileId);
+	return url ? { url, filename: null } : null;
+};
 
 const PROCESSED_ATTR = 'data-iris-ds-auth';
 const LINK_PROCESSED_ATTR = 'data-iris-ds-link';
@@ -93,18 +123,14 @@ export const authenticateDatastoreImages = (
 		const src = img.getAttribute('src');
 		if (!src) return;
 
-		const m = DATASTORE_PATH_RE.exec(src);
-		if (!m) return;
-
-		const caseId = Number(m[1]);
-		const fileId = Number(m[2]);
-		if (!Number.isFinite(caseId) || !Number.isFinite(fileId)) return;
+		const ref = parseDatastoreUrl(src);
+		if (!ref) return;
 
 		// Mark up-front to make the swap idempotent even if multiple
 		// observers fire on the same node before our async fetch resolves.
 		img.setAttribute(PROCESSED_ATTR, '1');
 
-		void CaseDatastoreService.fetchFileBlobUrl(caseId, fileId).then((result) => {
+		void fetchBlobUrl(ref).then((result) => {
 			if (!result) {
 				// Keep the original src so the broken-image icon is visible
 				// rather than silently masking the failure. Clear the flag
@@ -123,12 +149,9 @@ export const authenticateDatastoreImages = (
 		const href = a.getAttribute('href');
 		if (!href) return;
 
-		const m = DATASTORE_PATH_RE.exec(href);
-		if (!m) return;
-
-		const caseId = Number(m[1]);
-		const fileId = Number(m[2]);
-		if (!Number.isFinite(caseId) || !Number.isFinite(fileId)) return;
+		const ref = parseDatastoreUrl(href);
+		if (!ref) return;
+		const { fileId } = ref;
 
 		a.setAttribute(LINK_PROCESSED_ATTR, '1');
 
@@ -170,7 +193,7 @@ export const authenticateDatastoreImages = (
 			// instead of open-in-tab.
 			if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
 			e.preventDefault();
-			void openOrDownload(caseId, fileId, label, e.altKey);
+			void openOrDownload(ref, label, e.altKey);
 		};
 		a.addEventListener('click', onClick);
 		clickHandlers.push({ el: a, fn: onClick });
@@ -183,17 +206,16 @@ export const authenticateDatastoreImages = (
 };
 
 const openOrDownload = async (
-	caseId: number,
-	fileId: number,
+	ref: DatastoreRef,
 	filename: string,
 	asDownload: boolean
 ): Promise<void> => {
-	const fetched = await CaseDatastoreService.fetchFileBlobUrl(caseId, fileId);
+	const fetched = await fetchBlobUrl(ref);
 	if (!fetched) {
 		// Best-effort signal. Surface a console error here rather than
 		// a toast — the helper has no Svelte/toast context to pull from
 		// and the calling MarkDownPreview is a leaf component.
-		console.error('[datastore] failed to fetch file', { caseId, fileId });
+		console.error('[datastore] failed to fetch file', ref);
 		return;
 	}
 

@@ -85,6 +85,13 @@ export class WarRoomDatastoreService {
 		return `/api/v2/war-rooms/${warRoomId}/datastore/${fileId}/content`;
 	}
 
+	// Same shape as `CaseDatastoreService.getMarkdownLink`: pasted into a
+	// note, the markdown renderer fetches it with the bearer token.
+	static getMarkdownLink(warRoomId: number, fileId: number, label: string): string {
+		const safeLabel = label.replace(/[[\]]/g, '');
+		return `[${safeLabel}](${WarRoomDatastoreService.downloadUrl(warRoomId, fileId)})`;
+	}
+
 	/**
 	 * Fetch a file's bytes with the current bearer token and return an
 	 * object URL suitable for `<img src>` or `<a href download>`. The

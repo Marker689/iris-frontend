@@ -500,6 +500,7 @@
 							initialMode="edit"
 							collabMode="sitrep"
 							sitrepId={detail.sitrep_id}
+							{warRoomId}
 						/>
 					{/key}
 				{:else}

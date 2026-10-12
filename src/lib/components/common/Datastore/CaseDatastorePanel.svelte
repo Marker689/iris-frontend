@@ -44,6 +44,7 @@
 		type DragSource
 	} from '$lib/components/common/Datastore/DatastoreTreeNode.svelte';
 	import DatastoreEditFileDialog from '$lib/components/common/Datastore/DatastoreEditFileDialog.svelte';
+	import { datastoreCopyToClipboard } from '$lib/components/common/Datastore/datastore-clipboard';
 	import type { DataStoreFile } from '$lib/types/resources/datastore';
 
 	const panel = getContext<DatastorePanelContext>(DATASTORE_PANEL_CTX);
@@ -138,15 +139,6 @@
 	let editingFile = $state<DataStoreFile | null>(null);
 	let editOpen = $state(false);
 
-	const writeClipboard = async (text: string, label: string) => {
-		try {
-			await navigator.clipboard.writeText(text);
-			toast({ title: `${label} copied`, variant: 'success' });
-		} catch {
-			toast({ title: 'Copy failed', variant: 'destructive' });
-		}
-	};
-
 	const handleFileAction = async (
 		action: 'preview' | 'download' | 'copy-link' | 'copy-markdown' | 'edit' | 'delete' | 'select',
 		fileId: number
@@ -203,11 +195,11 @@
 				return;
 			}
 			case 'copy-link':
-				await writeClipboard(url, 'Link');
+				await datastoreCopyToClipboard(url, 'Link');
 				return;
 			case 'copy-markdown': {
 				const label = file?.file_original_name ?? `File #${fileId}`;
-				await writeClipboard(
+				await datastoreCopyToClipboard(
 					CaseDatastoreService.getMarkdownLink(caseId, fileId, label),
 					'Markdown link'
 				);

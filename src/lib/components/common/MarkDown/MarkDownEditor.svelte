@@ -70,6 +70,7 @@
 		type CaseDatastoreContext
 	} from '$lib/contexts/case-datastore.context.svelte';
 	import { CaseDatastoreService } from '$lib/services/case-datastore.service';
+	import { WarRoomDatastoreService } from '$lib/services/war-room-datastore.service';
 	import { AlertService } from '$lib/services/alerts.service';
 	import type { Alert } from '$lib/types/resources/alert';
 	import { toast } from '$lib/stores/toast.store';
@@ -460,8 +461,27 @@
 		CURSOR_PALETTE[Math.abs(userId) % CURSOR_PALETTE.length];
 
 	// --- Image upload ---
+	// Images go to the case datastore, or to the war room's own datastore
+	// for war-room notes, summary and sitreps, which have no case.
+	const canUploadImages = $derived(!!caseId || !!warRoomId);
+
 	const uploadImage = async (file: File): Promise<string | null> => {
-		if (!caseId) return null;
+		const filename = file.name || `image-${Date.now()}.png`;
+
+		if (!caseId) {
+			if (!warRoomId) return null;
+			const named = file.name ? file : new File([file], filename, { type: file.type });
+			const res = await WarRoomDatastoreService.upload(Number(warRoomId), named);
+			if (res.ok && res.data && typeof res.data === 'object' && 'file_id' in res.data) {
+				return WarRoomDatastoreService.downloadUrl(Number(warRoomId), res.data.file_id);
+			}
+			toast({
+				title: 'Could not upload image',
+				description: typeof res.data === 'string' ? res.data : undefined,
+				variant: 'destructive'
+			});
+			return null;
+		}
 
 		const base64 = await new Promise<string>((resolve) => {
 			const reader = new FileReader();
@@ -471,8 +491,6 @@
 			};
 			reader.readAsDataURL(file);
 		});
-
-		const filename = file.name || `image-${Date.now()}.png`;
 
 		// v2 case-scoped datastore upload. The backend returns a full
 		// `/api/v2/cases/{caseId}/datastore/files/{fileId}` URL which is
@@ -491,7 +509,7 @@
 	};
 
 	const handleImageUpload = async (file: File) => {
-		if (!editor || !caseId) return;
+		if (!editor || !canUploadImages) return;
 
 		uploading = true;
 		try {
@@ -536,7 +554,7 @@
 		// 1. Image files on the clipboard — upload and insert as <img>.
 		//    Covers: screenshots (Cmd-Shift-4), "copy image" from browsers,
 		//    pasting a file from the OS file manager.
-		if (items && caseId) {
+		if (items && canUploadImages) {
 			for (const item of items) {
 				if (item.kind === 'file' && item.type.startsWith('image/')) {
 					event.preventDefault();
@@ -571,7 +589,7 @@
 	};
 
 	const handleDrop = (_view: unknown, event: DragEvent) => {
-		if (!caseId) return false;
+		if (!canUploadImages) return false;
 
 		const files = event.dataTransfer?.files;
 		if (!files?.length) return false;
@@ -1677,7 +1695,7 @@
 				<LinkIcon size="12" />
 			</button>
 
-			{#if caseId}
+			{#if canUploadImages}
 				<button
 					class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					disabled={uploading}

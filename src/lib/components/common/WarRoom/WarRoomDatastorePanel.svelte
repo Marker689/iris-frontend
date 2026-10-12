@@ -27,6 +27,7 @@
 		DatabaseIcon,
 		Download,
 		File as FileIcon,
+		Link as LinkIcon,
 		RefreshCwIcon,
 		Trash2,
 		UploadIcon,
@@ -48,6 +49,7 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { toast } from '$lib/components/ui/toast';
 	import DatastoreTreeNode from '$lib/components/common/Datastore/DatastoreTreeNode.svelte';
+	import { datastoreCopyToClipboard } from '$lib/components/common/Datastore/datastore-clipboard';
 	import type {
 		DataStoreTree,
 		DataStoreTreeNode as DataStoreTreeNodeT
@@ -308,11 +310,18 @@
 			return;
 		}
 
+		// Same links as the case panel, so they paste into war-room notes,
+		// summary and sitreps exactly as they do into case notes.
 		if (action === 'copy-link') {
-			void navigator.clipboard
-				.writeText(`${window.location.origin}/case/${caseId}/datastore`)
-				.then(() => toast({ title: 'Case datastore link copied' }))
-				.catch(() => toast({ title: 'Could not copy link', variant: 'destructive' }));
+			await datastoreCopyToClipboard(CaseDatastoreService.getViewUrl(caseId, fileId), 'Link');
+			return;
+		}
+
+		if (action === 'copy-markdown') {
+			await datastoreCopyToClipboard(
+				CaseDatastoreService.getMarkdownLink(caseId, fileId, filename || `File #${fileId}`),
+				'Markdown link'
+			);
 			return;
 		}
 
@@ -435,6 +444,19 @@
 									{/if}
 								</p>
 							</div>
+							<button
+								type="button"
+								class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+								onclick={() =>
+									datastoreCopyToClipboard(
+										WarRoomDatastoreService.getMarkdownLink(warRoomId, f.file_id, f.filename),
+										'Markdown link'
+									)}
+								aria-label="Copy as markdown link"
+								title="Copy as markdown link"
+							>
+								<LinkIcon class="h-3 w-3" />
+							</button>
 							<a
 								href={WarRoomDatastoreService.downloadUrl(warRoomId, f.file_id)}
 								class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"

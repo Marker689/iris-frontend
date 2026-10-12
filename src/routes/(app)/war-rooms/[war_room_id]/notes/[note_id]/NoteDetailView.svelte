@@ -24,7 +24,7 @@
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
 
 	let {
-		warRoomId: _warRoomId,
+		warRoomId,
 		noteId,
 		onAfterDelete
 	}: {
@@ -196,6 +196,7 @@
 					}}
 					onSave={saveNote}
 					warRoomNoteId={note.note_id}
+					{warRoomId}
 					collabMode="war-room-note"
 					{savedAt}
 					onRemoteSave={handleRemoteSave}
