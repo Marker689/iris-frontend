@@ -1,35 +1,22 @@
 <!--
   War-room datastore side panel.
 
-  Visually identical to the case-side `CaseDatastorePanel` — same
-  `DatastoreTreeNode` chrome, search box, click-to-preview/download —
-  but the **root** is synthesised: one folder per attached case, each
-  containing that case's tree as `children`. So the tree reads:
-
-      ▼ Case #42 — [DATABREACH] Foo
-          ▼ Evidences
-          ▼ IOCs
-              📄 phish.eml
-      ▼ Case #57 — [PHISH] Bar
-          ▼ Notes Upload
-              📄 …
-
-  Read-only on case datastores: file actions resolve to download via
-  the authenticated blob URL; folder edits route the operator to the
-  case page where the full mutation surface lives. War-room files
-  (uploaded directly to the room) still get their own flat list at
-  the top of the panel.
+  Files uploaded to the room itself are listed first, then one section
+  per attached case holding that case's tree. The case trees are the
+  same component as the case panel (`CaseDatastoreTree`), so files and
+  folders there have the same menu and behaviour: preview, download,
+  copy link / markdown link, edit, delete, folder actions, drag to move
+  and drop from the OS onto a folder to upload. Dropping anywhere else
+  uploads to the war room.
 -->
 <script lang="ts">
 	import { formatDateTime } from '$lib/utils/time-formatter';
 	import { getContext } from 'svelte';
 	import {
 		DatabaseIcon,
-		Download,
 		File as FileIcon,
-		Link as LinkIcon,
+		MoreHorizontalIcon,
 		RefreshCwIcon,
-		Trash2,
 		UploadIcon,
 		XIcon
 	} from 'lucide-svelte';
@@ -43,17 +30,23 @@
 		type WarRoomDatastoreFile
 	} from '$lib/services/war-room-datastore.service';
 	import { WarRoomsService, type WarRoomCaseAttachment } from '$lib/services/war-rooms.service';
-	import { CaseDatastoreService } from '$lib/services/case-datastore.service';
 	import Button from '$lib/components/ui/button/button.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuItem,
+		DropdownMenuSeparator,
+		DropdownMenuTrigger
+	} from '$lib/components/ui/dropdown-menu';
 	import { toast } from '$lib/components/ui/toast';
-	import DatastoreTreeNode from '$lib/components/common/Datastore/DatastoreTreeNode.svelte';
-	import { datastoreCopyToClipboard } from '$lib/components/common/Datastore/datastore-clipboard';
-	import type {
-		DataStoreTree,
-		DataStoreTreeNode as DataStoreTreeNodeT
-	} from '$lib/types/resources/datastore';
+	import WarRoomCaseDatastoreSection from '$lib/components/common/WarRoom/WarRoomCaseDatastoreSection.svelte';
+	import {
+		datastoreCopyToClipboard,
+		datastoreDownloadBlobUrl,
+		datastoreOpenBlobUrl
+	} from '$lib/components/common/Datastore/datastore-actions';
 
 	const panel = getContext<WarRoomDatastorePanelContext>(WAR_ROOM_DATASTORE_PANEL_CTX);
 
@@ -69,67 +62,12 @@
 	let inputEl: HTMLInputElement | null = $state(null);
 	let lastWarRoomId: number | null = null;
 
-	// --- Aggregated case trees -------------------------------------------
-	// `caseTrees` holds each attached case's full v2 tree, keyed by
-	// case_id. They get merged into a single synthetic root tree
-	// (`mergedTree`) the `DatastoreTreeNode` recursive renderer can
-	// chew on the same way it does for a real case.
-	type CaseTreeState = {
-		loading: boolean;
-		error: string | null;
-		tree: DataStoreTree;
-	};
-	let caseTrees = $state<Record<number, CaseTreeState>>({});
-	// file_id → { case_id, file_original_name } index, populated whenever
-	// we load a tree. The file-action handler looks up the owning case
-	// here so it can call the correct `CaseDatastoreService` endpoint,
-	// and keeps the original filename around so `<a download>` produces
-	// the real name instead of a UUID blob URL.
-	type FileEntry = { caseId: number; filename: string };
-	let fileIndex = $state<Record<number, FileEntry>>({});
+	// Bumped by the refresh button so each case section reloads its tree.
+	let refreshKey = $state(0);
+	// War-room file whose action menu is open (click or right-click).
+	let menuFileId = $state<number | null>(null);
 
 	let searchTerm = $state('');
-
-	const indexFiles = (tree: DataStoreTree, caseId: number) => {
-		for (const node of Object.values(tree)) {
-			if (node.type === 'file') {
-				fileIndex[node.file_id] = {
-					caseId,
-					filename: node.file_original_name
-				};
-			} else if (node.type === 'directory') {
-				indexFiles(node.children, caseId);
-			}
-		}
-	};
-
-	const loadCaseTree = async (caseId: number) => {
-		caseTrees[caseId] = {
-			loading: true,
-			error: null,
-			tree: caseTrees[caseId]?.tree ?? {}
-		};
-		const res = await CaseDatastoreService.getTree(caseId);
-		if (res.ok && res.data && typeof res.data !== 'string') {
-			// Backend wraps in { data: <tree> } same as the case context.
-			const payload = res.data as unknown as { data?: DataStoreTree } | DataStoreTree;
-			const treeData =
-				'data' in (payload as { data?: unknown }) && (payload as { data?: unknown }).data
-					? (payload as { data: DataStoreTree }).data
-					: (payload as DataStoreTree);
-			caseTrees[caseId] = { loading: false, error: null, tree: treeData };
-			indexFiles(treeData, caseId);
-		} else {
-			caseTrees[caseId] = {
-				loading: false,
-				error:
-					typeof res.data === 'string'
-						? res.data
-						: (res.error?.message ?? 'Failed to load datastore'),
-				tree: caseTrees[caseId]?.tree ?? {}
-			};
-		}
-	};
 
 	const load = async () => {
 		if (!warRoomId) return;
@@ -145,10 +83,6 @@
 			}
 			if (casesRes.ok && Array.isArray(casesRes.data)) {
 				attachedCases = casesRes.data;
-				// Fan-out the case-tree fetches. We don't await them
-				// individually — the panel renders skeletons inside each
-				// case folder until its tree lands.
-				await Promise.all(attachedCases.map((c) => loadCaseTree(c.case_id)));
 			}
 		} finally {
 			loadingMeta = false;
@@ -159,6 +93,7 @@
 		if (isRefreshing) return;
 		isRefreshing = true;
 		try {
+			refreshKey++;
 			await load();
 		} finally {
 			isRefreshing = false;
@@ -226,112 +161,43 @@
 		return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 	};
 
-	// --- Synthetic merged tree -------------------------------------------
-	// We build one virtual folder per attached case. The dict key is
-	// `d-c<caseId>` so it stays distinct from real folder keys
-	// (`d-<path_id>`), and the synthetic `path_id` is a large negative
-	// number derived from the case id — large enough that it can't
-	// collide with any real path id.
-	const mergedTree = $derived.by<DataStoreTree>(() => {
-		const out: DataStoreTree = {};
-		for (const att of attachedCases) {
-			const state = caseTrees[att.case_id];
-			const childTree = state?.tree ?? {};
-			out[`d-c${att.case_id}`] = {
-				type: 'directory',
-				name: `Case #${att.case_id} — ${att.case_name}`,
-				is_root: true,
-				children: childTree
-			} as DataStoreTreeNodeT;
+	// --- War-room file actions -------------------------------------------
+	// Same menu as a case file, minus "Edit metadata" (war-room files have
+	// no editable metadata).
+	const handleWarRoomFileAction = async (
+		action: 'preview' | 'download' | 'copy-link' | 'copy-markdown' | 'delete',
+		f: WarRoomDatastoreFile
+	) => {
+		switch (action) {
+			case 'preview':
+				datastoreOpenBlobUrl(await WarRoomDatastoreService.fetchFileBlobUrl(warRoomId, f.file_id));
+				return;
+			case 'download':
+				datastoreDownloadBlobUrl(
+					await WarRoomDatastoreService.fetchFileBlobUrl(warRoomId, f.file_id),
+					f.filename
+				);
+				return;
+			case 'copy-link':
+				await datastoreCopyToClipboard(
+					WarRoomDatastoreService.getViewUrl(warRoomId, f.file_id),
+					'Link'
+				);
+				return;
+			case 'copy-markdown':
+				await datastoreCopyToClipboard(
+					WarRoomDatastoreService.getMarkdownLink(warRoomId, f.file_id, f.filename),
+					'Markdown link'
+				);
+				return;
+			case 'delete':
+				await remove(f);
+				return;
 		}
-		return out;
-	});
-
-	// Action routers ------------------------------------------------------
-	const handleFolderAction = (action: string, _folderId: number) => {
-		if (action === 'select') return;
-		toast({
-			title: 'Open the case to manage folders',
-			description: 'The war-room datastore is read-only for attached cases.'
-		});
 	};
 
-	const handleFileAction = async (action: string, fileId: number) => {
-		const entry = fileIndex[fileId];
-		if (!entry) {
-			toast({ title: 'File not found', variant: 'destructive' });
-			return;
-		}
-		const { caseId, filename } = entry;
-
-		// `preview` / `download` / row-click `select` all want the bytes.
-		// `fetchFileBlobUrl` is the bearer-aware helper that produces a
-		// short-lived blob URL; using the raw `/api/v2/cases/<id>/datastore/files/<fid>`
-		// in a plain `<a href>` would 401 because the browser doesn't
-		// attach the Authorization header on naked navigations.
-		if (action === 'preview' || action === 'select') {
-			const fetched = await CaseDatastoreService.fetchFileBlobUrl(caseId, fileId);
-			if (!fetched) {
-				toast({
-					title: 'Could not open file',
-					description: 'The server rejected the request.',
-					variant: 'destructive'
-				});
-				return;
-			}
-			const w = window.open(fetched.url, '_blank', 'noopener');
-			// Revoke after the new tab has had a chance to take ownership
-			// of the blob — same 60s window the case-side panel uses.
-			setTimeout(() => URL.revokeObjectURL(fetched.url), 60_000);
-			if (!w) {
-				toast({ title: 'Pop-up blocked', variant: 'warning' });
-			}
-			return;
-		}
-
-		if (action === 'download') {
-			const fetched = await CaseDatastoreService.fetchFileBlobUrl(caseId, fileId);
-			if (!fetched) {
-				toast({
-					title: 'Could not download file',
-					description: 'The server rejected the request.',
-					variant: 'destructive'
-				});
-				return;
-			}
-			const a = document.createElement('a');
-			a.href = fetched.url;
-			a.download = filename || fetched.filename || '';
-			a.rel = 'noopener';
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			URL.revokeObjectURL(fetched.url);
-			return;
-		}
-
-		// Same links as the case panel, so they paste into war-room notes,
-		// summary and sitreps exactly as they do into case notes.
-		if (action === 'copy-link') {
-			await datastoreCopyToClipboard(CaseDatastoreService.getViewUrl(caseId, fileId), 'Link');
-			return;
-		}
-
-		if (action === 'copy-markdown') {
-			await datastoreCopyToClipboard(
-				CaseDatastoreService.getMarkdownLink(caseId, fileId, filename || `File #${fileId}`),
-				'Markdown link'
-			);
-			return;
-		}
-
-		toast({
-			title: 'Open the case to make this change',
-			description: `Open case #${caseId} → Datastore for full controls.`
-		});
-	};
-
-	const isLoadingCases = $derived(Object.values(caseTrees).some((s) => s.loading));
+	const warRoomFileMatches = (f: WarRoomDatastoreFile) =>
+		!searchTerm || f.filename.toLowerCase().includes(searchTerm.toLowerCase());
 </script>
 
 <div
@@ -347,6 +213,7 @@
 		dragOver = true;
 	}}
 	ondragleave={() => (dragOver = false)}
+	ondropcapture={() => (dragOver = false)}
 	ondrop={onDrop}
 >
 	<header class="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
@@ -431,47 +298,61 @@
 					Drop a file to stash a war-room-level artefact.
 				</p>
 			{:else}
-				<ul class="flex flex-col">
-					{#each warRoomFiles as f (f.file_id)}
-						<li class="group flex items-center gap-2 px-3 py-1.5">
-							<FileIcon class="h-3 w-3 shrink-0 text-muted-foreground" />
-							<div class="min-w-0 flex-1">
-								<p class="truncate text-xs font-medium">{f.filename}</p>
-								<p class="text-2xs text-muted-foreground">
-									{humanSize(f.size_bytes)}
-									{#if f.uploaded_at}
-										· {formatDateTime(f.uploaded_at)}
-									{/if}
-								</p>
-							</div>
-							<button
-								type="button"
-								class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-								onclick={() =>
-									datastoreCopyToClipboard(
-										WarRoomDatastoreService.getMarkdownLink(warRoomId, f.file_id, f.filename),
-										'Markdown link'
-									)}
-								aria-label="Copy as markdown link"
-								title="Copy as markdown link"
+				<ul class="flex flex-col px-1 py-1">
+					{#each warRoomFiles.filter(warRoomFileMatches) as f (f.file_id)}
+						<li>
+							<DropdownMenu
+								open={menuFileId === f.file_id}
+								onOpenChange={(o) => (menuFileId = o ? f.file_id : null)}
 							>
-								<LinkIcon class="h-3 w-3" />
-							</button>
-							<a
-								href={WarRoomDatastoreService.downloadUrl(warRoomId, f.file_id)}
-								class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-								title="Download"
-							>
-								<Download class="h-3 w-3" />
-							</a>
-							<button
-								type="button"
-								class="rounded p-1 text-muted-foreground opacity-0 transition hover:bg-muted/50 hover:text-destructive group-hover:opacity-100"
-								onclick={() => remove(f)}
-								aria-label="Delete"
-							>
-								<Trash2 class="h-3 w-3" />
-							</button>
+								<DropdownMenuTrigger class="w-full">
+									<div
+										class="group/item flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-muted/60"
+										role="button"
+										tabindex="0"
+										oncontextmenu={(e) => {
+											e.preventDefault();
+											menuFileId = f.file_id;
+										}}
+									>
+										<FileIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+										<div class="min-w-0 flex-1">
+											<p class="truncate text-xs font-medium" title={f.filename}>{f.filename}</p>
+											<p class="text-2xs text-muted-foreground">
+												{humanSize(f.size_bytes)}
+												{#if f.uploaded_at}
+													· {formatDateTime(f.uploaded_at)}
+												{/if}
+											</p>
+										</div>
+										<MoreHorizontalIcon
+											size={14}
+											class="shrink-0 text-muted-foreground opacity-0 group-hover/item:opacity-100"
+										/>
+									</div>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" class="min-w-[180px]">
+									<DropdownMenuItem onclick={() => handleWarRoomFileAction('preview', f)}>
+										Preview
+									</DropdownMenuItem>
+									<DropdownMenuItem onclick={() => handleWarRoomFileAction('download', f)}>
+										Download
+									</DropdownMenuItem>
+									<DropdownMenuItem onclick={() => handleWarRoomFileAction('copy-link', f)}>
+										Copy link
+									</DropdownMenuItem>
+									<DropdownMenuItem onclick={() => handleWarRoomFileAction('copy-markdown', f)}>
+										Copy as markdown link
+									</DropdownMenuItem>
+									<DropdownMenuSeparator />
+									<DropdownMenuItem
+										class="text-destructive"
+										onclick={() => handleWarRoomFileAction('delete', f)}
+									>
+										Delete file
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
 						</li>
 					{/each}
 				</ul>
@@ -487,24 +368,23 @@
 				<span class="text-2xs tabular-nums text-muted-foreground">
 					({attachedCases.length})
 				</span>
-				{#if isLoadingCases}
-					<span class="text-2xs italic text-muted-foreground">loading…</span>
-				{/if}
 			</div>
 
 			{#if attachedCases.length === 0}
 				<p class="px-3 py-3 text-center text-2xs text-muted-foreground">
 					No cases attached. Anything attached later appears here automatically.
 				</p>
-			{:else if Object.keys(mergedTree).length === 0}
-				<Skeleton class="mx-2 h-24 w-[calc(100%-1rem)]" />
 			{:else}
-				<DatastoreTreeNode
-					tree={mergedTree}
-					filter={searchTerm}
-					onFolderAction={handleFolderAction}
-					onFileAction={handleFileAction}
-				/>
+				<div class="flex flex-col gap-1">
+					{#each attachedCases as c (c.case_id)}
+						<WarRoomCaseDatastoreSection
+							caseId={c.case_id}
+							caseName={c.case_name}
+							filter={searchTerm}
+							{refreshKey}
+						/>
+					{/each}
+				</div>
 			{/if}
 		</section>
 	</div>

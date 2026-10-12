@@ -85,11 +85,19 @@ export class WarRoomDatastoreService {
 		return `/api/v2/war-rooms/${warRoomId}/datastore/${fileId}/content`;
 	}
 
-	// Same shape as `CaseDatastoreService.getMarkdownLink`: pasted into a
-	// note, the markdown renderer fetches it with the bearer token.
+	// Same shapes as `CaseDatastoreService.getViewUrl` / `getMarkdownLink`:
+	// pasted into a note, the markdown renderer fetches them with the
+	// bearer token.
+	static getViewUrl(warRoomId: number, fileId: number): string {
+		const path = WarRoomDatastoreService.downloadUrl(warRoomId, fileId);
+		if (typeof window === 'undefined') return path;
+		const base = (ApiService.baseUrl ?? '').replace(/\/$/, '');
+		return base ? `${base}${path}` : path;
+	}
+
 	static getMarkdownLink(warRoomId: number, fileId: number, label: string): string {
 		const safeLabel = label.replace(/[[\]]/g, '');
-		return `[${safeLabel}](${WarRoomDatastoreService.downloadUrl(warRoomId, fileId)})`;
+		return `[${safeLabel}](${WarRoomDatastoreService.getViewUrl(warRoomId, fileId)})`;
 	}
 
 	/**

@@ -29,10 +29,8 @@
 		CASE_DATASTORE_CTX,
 		type CaseDatastoreContext
 	} from '$lib/contexts/case-datastore.context.svelte';
-	import { CaseDatastoreService } from '$lib/services/case-datastore.service';
 	import Button from '$lib/components/ui/button/button.svelte';
 	import { Input } from '$lib/components/ui/input';
-	import { Skeleton } from '$lib/components/ui/skeleton';
 	import {
 		Tooltip,
 		TooltipContent,
@@ -40,12 +38,8 @@
 		TooltipTrigger
 	} from '$lib/components/ui/tooltip';
 	import { toast } from '$lib/stores/toast.store';
-	import DatastoreTreeNode, {
-		type DragSource
-	} from '$lib/components/common/Datastore/DatastoreTreeNode.svelte';
-	import DatastoreEditFileDialog from '$lib/components/common/Datastore/DatastoreEditFileDialog.svelte';
-	import { datastoreCopyToClipboard } from '$lib/components/common/Datastore/datastore-clipboard';
-	import type { DataStoreFile } from '$lib/types/resources/datastore';
+	import CaseDatastoreTree from '$lib/components/common/Datastore/CaseDatastoreTree.svelte';
+	import { datastoreUploadFiles } from '$lib/components/common/Datastore/datastore-actions';
 
 	const panel = getContext<DatastorePanelContext>(DATASTORE_PANEL_CTX);
 	const datastore = getContext<CaseDatastoreContext>(CASE_DATASTORE_CTX);
@@ -54,7 +48,6 @@
 	let searchTerm = $state('');
 
 	const caseId = $derived(Number(page.params.case_id));
-	const selectedFileId = $derived<number | undefined>(datastore.ui.selectedFileId);
 
 	const refresh = async () => {
 		if (isRefreshing) return;
@@ -80,10 +73,8 @@
 	$effect(() => {
 		if (!panel.state.open) return;
 		const handler = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') {
-				if (contextMenu.open) closeContextMenu();
-				else panel.close();
-			}
+			// An open context menu catches Escape first (see CaseDatastoreTree).
+			if (e.key === 'Escape') panel.close();
 		};
 		document.addEventListener('keydown', handler);
 		return () => document.removeEventListener('keydown', handler);
@@ -103,216 +94,9 @@
 		datastore.ui.showAddFolderModal = true;
 	};
 
-	const handleFolderAction = async (
-		action: 'add-file' | 'add-folder' | 'rename' | 'delete',
-		folderId: number
-	) => {
-		switch (action) {
-			case 'add-file':
-				openAddFile(folderId);
-				return;
-			case 'add-folder':
-				openAddFolder(folderId);
-				return;
-			case 'rename': {
-				const name = window.prompt('New folder name');
-				if (!name?.trim()) return;
-				const ok = await datastore.renameFolder(folderId, { folder_name: name.trim() });
-				toast({
-					title: ok ? 'Folder renamed' : 'Rename failed',
-					variant: ok ? 'success' : 'destructive'
-				});
-				return;
-			}
-			case 'delete': {
-				if (!window.confirm('Delete this folder and all its contents?')) return;
-				const ok = await datastore.deleteFolder(folderId);
-				toast({
-					title: ok ? 'Folder deleted' : 'Delete failed',
-					variant: ok ? 'success' : 'destructive'
-				});
-				return;
-			}
-		}
-	};
-
-	let editingFile = $state<DataStoreFile | null>(null);
-	let editOpen = $state(false);
-
-	const handleFileAction = async (
-		action: 'preview' | 'download' | 'copy-link' | 'copy-markdown' | 'edit' | 'delete' | 'select',
-		fileId: number
-	) => {
-		const file = datastore.fileById[fileId];
-		// Plain link form is only safe for copy-link / markdown embeds —
-		// those land in a place that performs its own authenticated fetch.
-		// For in-app preview / download we have to fetch with the bearer
-		// header attached and hand the browser a blob URL.
-		const url = CaseDatastoreService.getViewUrl(caseId, fileId);
-
-		switch (action) {
-			case 'select':
-				datastore.selectFile(fileId);
-				return;
-			case 'preview': {
-				const fetched = await CaseDatastoreService.fetchFileBlobUrl(caseId, fileId);
-				if (!fetched) {
-					toast({
-						title: 'Could not open file',
-						description: 'The server rejected the request.',
-						variant: 'destructive'
-					});
-					return;
-				}
-				const w = window.open(fetched.url, '_blank', 'noopener');
-				// Revoke after the new tab has had a chance to take ownership
-				// of the blob URL. 60s is generous and avoids the tab losing
-				// the resource if the user takes a moment to focus it.
-				setTimeout(() => URL.revokeObjectURL(fetched.url), 60_000);
-				if (!w) {
-					toast({ title: 'Pop-up blocked', variant: 'warning' });
-				}
-				return;
-			}
-			case 'download': {
-				const fetched = await CaseDatastoreService.fetchFileBlobUrl(caseId, fileId);
-				if (!fetched) {
-					toast({
-						title: 'Could not download file',
-						description: 'The server rejected the request.',
-						variant: 'destructive'
-					});
-					return;
-				}
-				const a = document.createElement('a');
-				a.href = fetched.url;
-				a.download = file?.file_original_name ?? fetched.filename ?? '';
-				a.rel = 'noopener';
-				document.body.appendChild(a);
-				a.click();
-				a.remove();
-				URL.revokeObjectURL(fetched.url);
-				return;
-			}
-			case 'copy-link':
-				await datastoreCopyToClipboard(url, 'Link');
-				return;
-			case 'copy-markdown': {
-				const label = file?.file_original_name ?? `File #${fileId}`;
-				await datastoreCopyToClipboard(
-					CaseDatastoreService.getMarkdownLink(caseId, fileId, label),
-					'Markdown link'
-				);
-				return;
-			}
-			case 'edit':
-				editingFile = file ?? null;
-				editOpen = true;
-				return;
-			case 'delete': {
-				if (!window.confirm('Delete this file?')) return;
-				const ok = await datastore.deleteFile(fileId);
-				toast({
-					title: ok ? 'File deleted' : 'Delete failed',
-					variant: ok ? 'success' : 'destructive'
-				});
-				return;
-			}
-		}
-	};
-
-	// --- Context menu ---
-	// One floating menu controlled by `contextMenu`; the tree dispatches
-	// folder/file targets via callbacks. Positioned at the click point and
-	// clamped to viewport so it never overflows on the right edge.
-	type ContextTarget =
-		| { kind: 'folder'; id: number; isRoot: boolean }
-		| { kind: 'file'; id: number };
-
-	let contextMenu = $state<{
-		open: boolean;
-		x: number;
-		y: number;
-		target: ContextTarget | null;
-	}>({ open: false, x: 0, y: 0, target: null });
-
-	const closeContextMenu = () => {
-		contextMenu = { open: false, x: 0, y: 0, target: null };
-	};
-
-	const openContextMenu = (target: ContextTarget, x: number, y: number) => {
-		// Clamp roughly — the menu is ~220px wide, ~280px tall in its largest
-		// folder variant. Real width is measured by the browser; this just
-		// keeps it from spawning off-screen.
-		const W = 220;
-		const H = 280;
-		const cx = Math.min(x, window.innerWidth - W - 8);
-		const cy = Math.min(y, window.innerHeight - H - 8);
-		contextMenu = { open: true, x: cx, y: cy, target };
-	};
-
-	$effect(() => {
-		if (!contextMenu.open) return;
-		const onClick = (e: MouseEvent) => {
-			const root = document.getElementById('ds-ctx-menu');
-			if (root && root.contains(e.target as Node)) return;
-			closeContextMenu();
-		};
-		// `mousedown` instead of `click` so the menu closes on the same press
-		// that lands on another row, before that row's own handler runs.
-		setTimeout(() => document.addEventListener('mousedown', onClick), 0);
-		return () => document.removeEventListener('mousedown', onClick);
-	});
-
-	// --- Drag and drop ---
-	let dropTargetFolderId = $state<number | null>(null);
 	// Tracks whether an external-file drag is currently over the panel body
 	// (so we can show the big "drop to upload" overlay).
 	let bodyDropActive = $state(false);
-
-	const moveSource = async (source: DragSource, targetFolderId: number) => {
-		if (source.kind === 'file') {
-			const ok = await datastore.moveFile(source.id, targetFolderId);
-			toast({
-				title: ok ? 'File moved' : 'Move failed',
-				variant: ok ? 'success' : 'destructive'
-			});
-		} else {
-			const ok = await datastore.moveFolder(source.id, targetFolderId);
-			toast({
-				title: ok ? 'Folder moved' : 'Move failed',
-				variant: ok ? 'success' : 'destructive'
-			});
-		}
-		dropTargetFolderId = null;
-	};
-
-	const uploadFiles = async (folderId: number, files: FileList) => {
-		// Sequential uploads keep the toast count and error reporting clear,
-		// and avoid hammering the server with N concurrent multipart writes.
-		// Most cases will be 1–3 files; anything bigger we let the user
-		// queue via repeat drops.
-		let ok = 0;
-		let failed = 0;
-		for (const file of Array.from(files)) {
-			const created = await datastore.uploadFile(folderId, { file_original_name: file.name }, file);
-			if (created) ok++;
-			else failed++;
-		}
-		if (ok > 0) {
-			toast({
-				title: `Uploaded ${ok} file${ok === 1 ? '' : 's'}`,
-				variant: 'success'
-			});
-		}
-		if (failed > 0) {
-			toast({
-				title: `Failed to upload ${failed} file${failed === 1 ? '' : 's'}`,
-				variant: 'destructive'
-			});
-		}
-		bodyDropActive = false;
-	};
 
 	// Body-level drag handlers: catch OS-file drops that don't land on a
 	// specific folder row. We upload to the root folder in that case.
@@ -346,7 +130,8 @@
 			bodyDropActive = false;
 			return;
 		}
-		await uploadFiles(target, files);
+		await datastoreUploadFiles(datastore, target, files);
+		bodyDropActive = false;
 	};
 </script>
 
@@ -436,37 +221,16 @@
 			ondragover={handleBodyDragOver}
 			ondragleave={handleBodyDragLeave}
 			ondrop={handleBodyDrop}
+			ondropcapture={() => (bodyDropActive = false)}
 		>
-			{#if datastore.tree.status === 'loading' && Object.keys(datastore.tree.data).length === 0}
-				<div class="flex flex-col gap-2 p-2">
-					{#each Array(6) as _}
-						<Skeleton class="h-5 w-full" />
-					{/each}
-				</div>
-			{:else if datastore.tree.status === 'error'}
-				<p class="px-2 text-xs text-destructive">
-					{datastore.tree.error ?? 'Failed to load'}
-				</p>
-			{:else if Object.keys(datastore.tree.data).length === 0}
-				<p class="px-2 text-xs text-muted-foreground">
-					No files yet — drop one here or use the + button above.
-				</p>
-			{:else}
-				<DatastoreTreeNode
-					tree={datastore.tree.data}
-					{selectedFileId}
-					{dropTargetFolderId}
+			{#key caseId}
+				<CaseDatastoreTree
+					{datastore}
+					{caseId}
 					filter={searchTerm}
-					onFolderAction={handleFolderAction}
-					onFileAction={handleFileAction}
-					onContextMenuFolder={(id, isRoot, x, y) =>
-						openContextMenu({ kind: 'folder', id, isRoot }, x, y)}
-					onContextMenuFile={(id, x, y) => openContextMenu({ kind: 'file', id }, x, y)}
-					onMove={(source, targetFolderId) => moveSource(source, targetFolderId)}
-					onUploadFiles={(folderId, files) => uploadFiles(folderId, files)}
-					onDragTargetChange={(id) => (dropTargetFolderId = id)}
+					emptyMessage="No files yet — drop one here or use the + button above."
 				/>
-			{/if}
+			{/key}
 
 			{#if bodyDropActive}
 				<div
@@ -481,130 +245,3 @@
 		</div>
 	</div>
 {/if}
-
-{#if contextMenu.open && contextMenu.target}
-	{@const target = contextMenu.target}
-	<div
-		id="ds-ctx-menu"
-		role="menu"
-		class="fixed z-[100] min-w-[200px] overflow-hidden rounded-md border border-border bg-popover py-1 text-sm shadow-md"
-		style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
-	>
-		{#if target.kind === 'folder'}
-			<button
-				type="button"
-				class="block w-full px-3 py-1.5 text-left hover:bg-muted"
-				onclick={() => {
-					closeContextMenu();
-					handleFolderAction('add-file', target.id);
-				}}
-			>
-				Add file here
-			</button>
-			<button
-				type="button"
-				class="block w-full px-3 py-1.5 text-left hover:bg-muted"
-				onclick={() => {
-					closeContextMenu();
-					handleFolderAction('add-folder', target.id);
-				}}
-			>
-				Add subfolder
-			</button>
-			{#if !target.isRoot}
-				<div class="my-1 border-t border-border" role="separator"></div>
-				<button
-					type="button"
-					class="block w-full px-3 py-1.5 text-left hover:bg-muted"
-					onclick={() => {
-						closeContextMenu();
-						handleFolderAction('rename', target.id);
-					}}
-				>
-					Rename
-				</button>
-				<button
-					type="button"
-					class="block w-full px-3 py-1.5 text-left text-destructive hover:bg-muted"
-					onclick={() => {
-						closeContextMenu();
-						handleFolderAction('delete', target.id);
-					}}
-				>
-					Delete folder
-				</button>
-			{/if}
-		{:else}
-			<button
-				type="button"
-				class="block w-full px-3 py-1.5 text-left hover:bg-muted"
-				onclick={() => {
-					closeContextMenu();
-					handleFileAction('preview', target.id);
-				}}
-			>
-				Preview
-			</button>
-			<button
-				type="button"
-				class="block w-full px-3 py-1.5 text-left hover:bg-muted"
-				onclick={() => {
-					closeContextMenu();
-					handleFileAction('download', target.id);
-				}}
-			>
-				Download
-			</button>
-			<button
-				type="button"
-				class="block w-full px-3 py-1.5 text-left hover:bg-muted"
-				onclick={() => {
-					closeContextMenu();
-					handleFileAction('copy-link', target.id);
-				}}
-			>
-				Copy link
-			</button>
-			<button
-				type="button"
-				class="block w-full px-3 py-1.5 text-left hover:bg-muted"
-				onclick={() => {
-					closeContextMenu();
-					handleFileAction('copy-markdown', target.id);
-				}}
-			>
-				Copy as markdown link
-			</button>
-			<div class="my-1 border-t border-border" role="separator"></div>
-			<button
-				type="button"
-				class="block w-full px-3 py-1.5 text-left hover:bg-muted"
-				onclick={() => {
-					closeContextMenu();
-					handleFileAction('edit', target.id);
-				}}
-			>
-				Edit metadata
-			</button>
-			<button
-				type="button"
-				class="block w-full px-3 py-1.5 text-left text-destructive hover:bg-muted"
-				onclick={() => {
-					closeContextMenu();
-					handleFileAction('delete', target.id);
-				}}
-			>
-				Delete file
-			</button>
-		{/if}
-	</div>
-{/if}
-
-<DatastoreEditFileDialog
-	bind:open={editOpen}
-	file={editingFile}
-	onOpenChange={(o) => {
-		editOpen = o;
-		if (!o) editingFile = null;
-	}}
-/>
