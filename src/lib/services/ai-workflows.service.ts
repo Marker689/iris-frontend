@@ -196,6 +196,8 @@ export interface AiToolInfo {
 	input_schema: Record<string, unknown>;
 	/** False when the MCP settings currently hide the tool (it would fail at run time). */
 	enabled?: boolean;
+	/** False for the tools an `ai_agent` node may not use (action / suggest nodes only). */
+	agent?: boolean;
 }
 
 export interface AiHookInfo {

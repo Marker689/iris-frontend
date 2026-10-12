@@ -73,14 +73,17 @@
 	const typeInfo = $derived(catalogue?.node_types?.find((t) => t.type === nodeType));
 
 	const tools = $derived(catalogue?.tools ?? []);
+	// What an agent may be given: the tools kept for action / suggest nodes are left out
 	const toolItems = $derived<MultiSelectItem[]>(
-		tools.map((t) => ({
-			value: t.name,
-			label: t.name,
-			description: `${t.enabled === false ? '[disabled in MCP settings] ' : ''}${t.description}`,
-			badge: t.classification,
-			badgeClass: CLASSIFICATION_TONES[t.classification]
-		}))
+		tools
+			.filter((t) => t.agent !== false || list<string>(c.tools).includes(t.name))
+			.map((t) => ({
+				value: t.name,
+				label: t.name,
+				description: `${t.enabled === false ? '[disabled in MCP settings] ' : ''}${t.description}`,
+				badge: t.classification,
+				badgeClass: CLASSIFICATION_TONES[t.classification]
+			}))
 	);
 	const toolInfo = (name: unknown) => tools.find((t) => t.name === name);
 
@@ -117,7 +120,7 @@
 
 	let users = $state<MultiSelectItem[]>([]);
 	onMount(async () => {
-		if (nodeType !== 'notify') return;
+		if (nodeType !== 'notify' && nodeType !== 'ask_analyst') return;
 		const res = await UsersService.listMentionable('');
 		if (res.ok && res.data && typeof res.data === 'object') {
 			users = (res.data.data ?? []).map((u) => ({
@@ -295,6 +298,22 @@
 			{/each}
 		</select>
 	</label>
+{/snippet}
+
+{#snippet userPicker()}
+	<MultiSelect
+		items={[
+			...users,
+			...list<number>(c.user_ids)
+				.filter((id) => !users.some((u) => u.value === String(id)))
+				.map((id) => ({ value: String(id), label: `#${id}` }))
+		]}
+		values={list<number>(c.user_ids).map(String)}
+		placeholder="Select users…"
+		disabled={readOnly}
+		onChange={(v) => set('user_ids', v.map(Number))}
+		testId="wf-cfg-users"
+	/>
 {/snippet}
 
 {#snippet toolSelect(value: unknown, onPick: (name: string) => void)}
@@ -758,6 +777,35 @@
 				true,
 				'path'
 			)}
+			{@render choice('audience', 'Ask', [
+				['entity', 'The suggestion audience of the workflow'],
+				['triggerer', 'The user who triggered the run'],
+				['owner', 'The workflow owner'],
+				['users', 'Specific users']
+			])}
+			<p class="text-2xs text-muted-foreground">
+				{#if c.audience === 'triggerer'}
+					Whoever started the run, or whose action fired the event.
+				{/if}
+				Only active users who can see the entity are asked; when none of them can, the question goes
+				to the suggestion audience of the workflow.
+			</p>
+			{#if c.audience === 'users'}
+				{@render userPicker()}
+			{/if}
+			<label class="flex items-center justify-between gap-2 text-xs">
+				<span>Pop up the question to the users asked</span>
+				<Switch
+					checked={c.popup !== false}
+					disabled={readOnly}
+					onCheckedChange={(v: boolean) => set('popup', v)}
+					data-testid="wf-cfg-popup"
+				/>
+			</label>
+			<p class="text-2xs text-muted-foreground">
+				Opens the form in a dialog wherever they are in IRIS. Either way the question is listed on
+				the entity and in the suggestions inbox.
+			</p>
 			{@render num('timeout_minutes', 'Timeout (minutes)', 1)}
 		{:else if nodeType === 'find_related'}
 			{@render choice('source', 'Source', [
@@ -881,19 +929,7 @@
 				The node's output lists who was notified.
 			</p>
 			{#if c.audience === 'users'}
-				<MultiSelect
-					items={[
-						...users,
-						...list<number>(c.user_ids)
-							.filter((id) => !users.some((u) => u.value === String(id)))
-							.map((id) => ({ value: String(id), label: `#${id}` }))
-					]}
-					values={list<number>(c.user_ids).map(String)}
-					placeholder="Select users…"
-					disabled={readOnly}
-					onChange={(v) => set('user_ids', v.map(Number))}
-					testId="wf-cfg-users"
-				/>
+				{@render userPicker()}
 			{/if}
 			{@render text('title', 'Title (template)')}
 			{@render area('body', 'Body (template)', '', 4)}

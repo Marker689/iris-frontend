@@ -69,7 +69,8 @@ export interface AiSuggestion {
 	title: string;
 	body: string | null;
 	proposed_action: AiSuggestionProposedAction | null;
-	form_schema: { fields: AiSuggestionFormField[] } | null;
+	/** `popup`: an `info_request` its audience answers in a dialog, wherever they are. */
+	form_schema: { fields: AiSuggestionFormField[]; popup?: boolean } | null;
 	related_refs: AiSuggestionRef[] | null;
 	confidence: number | null;
 	severity: AiSuggestionSeverity | string | null;

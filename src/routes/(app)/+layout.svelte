@@ -8,6 +8,7 @@
 	import { dismissedBanners } from '$lib/stores/dismissed-banners.store.svelte';
 	import { CaseAddModal } from './[components]/CaseModals';
 	import TutorialOverlay from '$lib/components/tutorials/TutorialOverlay.svelte';
+	import AiQuestionPopup from '$lib/components/ai-suggestions/AiQuestionPopup.svelte';
 	import { APP_CTX, createAppContext, type AppContext } from '$lib/contexts/app.context.svelte';
 	import {
 		CASES_CTX,
@@ -57,6 +58,7 @@
 	setContext(CASE_TEMPLATES_CTX, caseTemplates);
 
 	const chatbotEnabled = $derived<boolean>(runtimeConfig.chatbot.enabled);
+	const aiWorkflowsEnabled = $derived<boolean>(runtimeConfig.aiWorkflowsEnabled);
 
 	const showCaseAdd = $derived<boolean>(cases.ui.showAddModal);
 
@@ -155,6 +157,14 @@
 -->
 {#if chatbotEnabled}
 	<ChatBotPanel />
+{/if}
+
+<!--
+  Questions from AI workflows (`ask_analyst` with `popup`) open here,
+  on whatever page the analyst is.
+-->
+{#if aiWorkflowsEnabled}
+	<AiQuestionPopup />
 {/if}
 
 <!-- Guided tutorials (Help → Tutorials, or `?tutorial=<id>`). -->

@@ -6,7 +6,10 @@
  * `ai_suggestion` event on the `/notifications` socket, which the
  * notifications store already holds open. A `created` event also pops
  * a toast linking to the entity (or to the suggestions inbox), whether
- * or not a panel is mounted.
+ * or not a panel is mounted — except for a question flagged `popup`,
+ * which is queued instead for `AiQuestionPopup` to open in a dialog.
+ * Questions put off with "Later" stay out of the queue for the tab's
+ * session.
  *
  * The pure helpers (`aiSuggestionsReduce`, `aiSuggestionsToast`, …) are
  * exported for the unit tests.
@@ -149,6 +152,55 @@ export function aiSuggestionsToast(
 	};
 }
 
+/** An open question its audience answers in a dialog. */
+export function aiSuggestionsIsPopup(s: AiSuggestion | null | undefined): boolean {
+	return (
+		!!s &&
+		aiSuggestionsIsSafeId(s.id) &&
+		s.kind === 'info_request' &&
+		s.status === 'open' &&
+		s.form_schema?.popup === true
+	);
+}
+
+/**
+ * The popup queue after `s` changed: queued (oldest first) when it is
+ * an open popup question not put off, dropped once answered, dismissed
+ * or expired. Returns the same array when nothing changed.
+ */
+export function aiSuggestionsPopupQueue(
+	queue: AiSuggestion[],
+	s: AiSuggestion,
+	deferred: ReadonlySet<number> = new Set()
+): AiSuggestion[] {
+	const idx = queue.findIndex((q) => q.id === s.id);
+	if (!aiSuggestionsIsPopup(s) || deferred.has(s.id)) {
+		return idx === -1 ? queue : queue.filter((q) => q.id !== s.id);
+	}
+	if (idx !== -1) return queue.map((q, i) => (i === idx ? { ...q, ...s } : q));
+	return [...queue, s].sort((a, b) => createdAtMs(a) - createdAtMs(b) || a.id - b.id);
+}
+
+const DEFERRED_KEY = 'iris.ai-questions.later';
+
+function readDeferred(): Set<number> {
+	try {
+		const raw = globalThis.sessionStorage?.getItem(DEFERRED_KEY);
+		const ids = raw ? JSON.parse(raw) : [];
+		return new Set(Array.isArray(ids) ? ids.filter(aiSuggestionsIsSafeId) : []);
+	} catch {
+		return new Set();
+	}
+}
+
+function writeDeferred(ids: Set<number>): void {
+	try {
+		globalThis.sessionStorage?.setItem(DEFERRED_KEY, JSON.stringify([...ids]));
+	} catch {
+		// Storage unavailable: "Later" only lasts until the next reload
+	}
+}
+
 export function aiSuggestionsOpenCount(list: AiSuggestion[] | undefined): number {
 	return (list ?? []).filter((s) => s.status === 'open').length;
 }
@@ -163,16 +215,31 @@ const state = $state<{
 	byEntity: AiSuggestionsByEntity;
 	loading: Record<string, boolean>;
 	errors: Record<string, string | null>;
-}>({ byEntity: {}, loading: {}, errors: {} });
+	popups: AiSuggestion[];
+}>({ byEntity: {}, loading: {}, errors: {}, popups: [] });
 
 let unsubscribe: (() => void) | null = null;
 // One fetch per entity at a time: a panel and a header chip of the same
 // entity both ask for it on mount.
 const inflight = new Map<string, Promise<void>>();
+let deferred: Set<number> | null = null;
+
+function deferredIds(): Set<number> {
+	deferred ??= readDeferred();
+	return deferred;
+}
+
+function syncPopup(s: AiSuggestion | null | undefined): void {
+	if (!s || s.id == null) return;
+	state.popups = aiSuggestionsPopupQueue(state.popups, s, deferredIds());
+}
 
 function handleEvent(payload: unknown): void {
 	const event = payload as AiSuggestionSocketEvent;
 	state.byEntity = aiSuggestionsReduce(state.byEntity, event);
+	syncPopup(event?.suggestion);
+	// A popup question opens its own dialog: no toast on top
+	if (event?.action === 'created' && aiSuggestionsIsPopup(event.suggestion)) return;
 	const t = aiSuggestionsToast(event);
 	if (t) toast(t);
 }
@@ -233,6 +300,26 @@ export const aiSuggestions = {
 	/** Merges a suggestion returned by accept / dismiss / answer. */
 	apply(suggestion: AiSuggestion): void {
 		state.byEntity = aiSuggestionsReduce(state.byEntity, { action: 'updated', suggestion });
+		syncPopup(suggestion);
+	},
+
+	/** Open questions waiting for the current user in a dialog, oldest first. */
+	get popups(): AiSuggestion[] {
+		return state.popups;
+	},
+
+	/** Queues the open popup questions addressed to the current user (asked while away). */
+	async loadPopups(): Promise<void> {
+		const res = await AiSuggestionsService.list({ status: 'open', mine: true });
+		if (!res.ok || !Array.isArray(res.data)) return;
+		for (const s of res.data) syncPopup(s);
+	},
+
+	/** "Later": out of the queue for this tab's session; still on the entity and in the inbox. */
+	deferPopup(id: number): void {
+		deferredIds().add(id);
+		writeDeferred(deferredIds());
+		state.popups = state.popups.filter((s) => s.id !== id);
 	},
 
 	/** Subscribes to the socket event. Idempotent. */
@@ -253,5 +340,7 @@ export const aiSuggestions = {
 		state.byEntity = {};
 		state.loading = {};
 		state.errors = {};
+		state.popups = [];
+		deferred = null;
 	}
 };

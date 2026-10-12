@@ -33,6 +33,8 @@ import {
 	aiSuggestionsRunHref,
 	aiSuggestionsToast,
 	aiSuggestionsInboxHref,
+	aiSuggestionsIsPopup,
+	aiSuggestionsPopupQueue,
 	aiSuggestionsUpsert
 } from '../ai-suggestions.store.svelte';
 import { toast } from '$lib/stores/toast.store';
@@ -260,5 +262,77 @@ describe('ai-suggestions store', () => {
 		await aiSuggestions.load('alert', 10);
 		aiSuggestions.apply(make(1, { status: 'accepted' }));
 		expect(aiSuggestions.list('alert', 10)[0].status).toBe('accepted');
+	});
+});
+
+const question = (id: number, over: Partial<AiSuggestion> = {}): AiSuggestion =>
+	make(id, {
+		kind: 'info_request',
+		form_schema: { fields: [{ name: 'verdict', type: 'text' }], popup: true },
+		...over
+	});
+
+describe('ai-suggestions popup questions', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		sessionStorage.clear();
+		aiSuggestions.reset();
+	});
+
+	it('only treats open popup questions as popups', () => {
+		expect(aiSuggestionsIsPopup(question(1))).toBe(true);
+		expect(aiSuggestionsIsPopup(question(1, { status: 'dry_run' }))).toBe(false);
+		expect(aiSuggestionsIsPopup(question(1, { form_schema: { fields: [] } }))).toBe(false);
+		expect(aiSuggestionsIsPopup(make(1, { form_schema: { fields: [], popup: true } }))).toBe(false);
+	});
+
+	it('queues oldest first and drops a question once resolved', () => {
+		let queue = aiSuggestionsPopupQueue([], question(2));
+		queue = aiSuggestionsPopupQueue(queue, question(1));
+		expect(queue.map((s) => s.id)).toEqual([1, 2]);
+		expect(aiSuggestionsPopupQueue(queue, question(3), new Set([3]))).toBe(queue);
+		expect(
+			aiSuggestionsPopupQueue(queue, question(1, { status: 'accepted' })).map((s) => s.id)
+		).toEqual([2]);
+	});
+
+	it('pops a pushed question instead of toasting it', () => {
+		aiSuggestions._handle({ action: 'created', suggestion: question(1) });
+		expect(aiSuggestions.popups.map((s) => s.id)).toEqual([1]);
+		expect(mockToast).not.toHaveBeenCalled();
+		aiSuggestions._handle({ action: 'updated', suggestion: question(1, { status: 'expired' }) });
+		expect(aiSuggestions.popups).toEqual([]);
+	});
+
+	it('still toasts a question without popup', () => {
+		aiSuggestions._handle({
+			action: 'created',
+			suggestion: question(1, { form_schema: { fields: [] } })
+		});
+		expect(aiSuggestions.popups).toEqual([]);
+		expect(mockToast).toHaveBeenCalledOnce();
+	});
+
+	it('loads the open questions addressed to the user', async () => {
+		mockList.mockResolvedValueOnce({ ok: true, status: 200, data: [question(1), make(2)] });
+		await aiSuggestions.loadPopups();
+		expect(mockList).toHaveBeenCalledWith({ status: 'open', mine: true });
+		expect(aiSuggestions.popups.map((s) => s.id)).toEqual([1]);
+	});
+
+	it('keeps a question put off out of the queue for the session', async () => {
+		aiSuggestions._handle({ action: 'created', suggestion: question(1) });
+		aiSuggestions.deferPopup(1);
+		expect(aiSuggestions.popups).toEqual([]);
+		mockList.mockResolvedValueOnce({ ok: true, status: 200, data: [question(1)] });
+		await aiSuggestions.loadPopups();
+		expect(aiSuggestions.popups).toEqual([]);
+		expect(JSON.parse(sessionStorage.getItem('iris.ai-questions.later') ?? '[]')).toEqual([1]);
+	});
+
+	it('drops an answered question', () => {
+		aiSuggestions._handle({ action: 'created', suggestion: question(1) });
+		aiSuggestions.apply(question(1, { status: 'accepted' }));
+		expect(aiSuggestions.popups).toEqual([]);
 	});
 });

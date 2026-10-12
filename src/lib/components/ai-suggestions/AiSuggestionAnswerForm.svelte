@@ -20,9 +20,10 @@
 		busy?: boolean;
 		onSubmit: (answer: Record<string, unknown>, note: string | null) => void | Promise<void>;
 		onCancel?: () => void;
+		cancelLabel?: string;
 	}
 
-	let { fields, busy = false, onSubmit, onCancel }: Props = $props();
+	let { fields, busy = false, onSubmit, onCancel, cancelLabel = 'Cancel' }: Props = $props();
 
 	// Seeded once from the schema; the fields don't change while open.
 	const initial = (() => aiSuggestionAnswerDefaults(fields))();
@@ -105,7 +106,7 @@
 	<div class="flex justify-end gap-1.5">
 		{#if onCancel}
 			<Button type="button" size="xs" variant="outline" onclick={onCancel} disabled={busy}>
-				Cancel
+				{cancelLabel}
 			</Button>
 		{/if}
 		<Button type="submit" size="xs" disabled={busy}>{busy ? 'Sending…' : 'Send answer'}</Button>
