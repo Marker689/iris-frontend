@@ -1522,7 +1522,7 @@
 
 			{#if activeTab === 'graph'}
 				<div class="graph-pane">
-					<AlertRelatedGraph alertId={f.alert_id} />
+					<AlertRelatedGraph alertId={f.alert_id} fill />
 				</div>
 			{:else if activeTab === 'flow'}
 				<!--
@@ -3368,9 +3368,14 @@
 		margin: 0;
 	}
 
+	/* Bounded flex column so the graph's canvas can take the full height
+	   left under its filter bar. */
 	.graph-pane {
 		flex: 1;
 		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		padding: 13px 15px;
 		overflow: hidden;
 		background: var(--s-sunken);
 	}

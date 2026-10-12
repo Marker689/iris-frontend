@@ -44,9 +44,12 @@
 	};
 
 	let {
-		alertId
+		alertId,
+		fill = false
 	}: {
 		alertId: number;
+		/** Stretch the canvas to the parent's height instead of a fixed 32rem. */
+		fill?: boolean;
 	} = $props();
 
 	const alerts = getContext<AlertsContext>(ALERTS_CTX);
@@ -272,68 +275,75 @@
 	};
 </script>
 
-<div class="mb-4 flex">
-	<AlertRelationshipsFilters bind:value={filters} />
-</div>
+<div class={fill ? 'flex h-full min-h-0 flex-col' : 'contents'}>
+	<div class="mb-4 flex">
+		<AlertRelationshipsFilters bind:value={filters} />
+	</div>
 
-<div class="relative h-[32rem] w-full rounded-md border bg-muted/20">
-	{#if graph.nodes.length}
-		{#key layoutKey}
-			<VisNetwork
-				{nodes}
-				{edges}
-				{options}
-				className="h-full w-full"
-				onClick={closeContextMenu}
-				onContextMenu={openContextMenu}
-				onReady={handleReady}
-			/>
-		{/key}
-	{/if}
+	<div
+		class={[
+			'relative w-full rounded-md border bg-muted/20',
+			fill ? 'min-h-[24rem] flex-1' : 'h-[32rem]'
+		]}
+	>
+		{#if graph.nodes.length}
+			{#key layoutKey}
+				<VisNetwork
+					{nodes}
+					{edges}
+					{options}
+					className="h-full w-full"
+					onClick={closeContextMenu}
+					onContextMenu={openContextMenu}
+					onReady={handleReady}
+				/>
+			{/key}
+		{/if}
 
-	{#if contextMenu.open && contextMenu.node}
-		<div
-			class="absolute z-20 rounded-2xl border bg-background px-2 shadow-xl"
-			style={`left:${contextMenu.x}px;top:${contextMenu.y}px;transform:translate(8px, 8px);`}
-		>
-			<!--
+		{#if contextMenu.open && contextMenu.node}
+			<div
+				class="absolute z-20 rounded-2xl border bg-background px-2 shadow-xl"
+				style={`left:${contextMenu.x}px;top:${contextMenu.y}px;transform:translate(8px, 8px);`}
+			>
+				<!--
 			  The icon says where the click lands: the eye for viewing a case or
 			  alert in this tab, the external-link glyph for the pivot, which
 			  opens a new tab (see `handleNodeAction`).
 			-->
-			{#if contextMenu.node.group === 'case' || contextMenu.node.group === 'alert'}
-				<Button variant="link" size="xs" onclick={() => handleNodeAction()}>
-					<EyeIcon class="size-4" />
-					View {contextMenu.node.group}
-					#{getId(contextMenu.node.id as string)}
-				</Button>
-			{:else}
-				<Button
-					size="xs"
-					variant="link"
-					title="Opens the filtered alert list in a new tab"
-					onclick={() => handleNodeAction()}
-				>
-					<ExternalLinkIcon class="size-4" />
-					Pivot on {contextMenu.node.group}
-					{contextMenu.node.label}
-					<span class="sr-only">(opens in a new tab)</span>
-				</Button>
-			{/if}
-		</div>
-	{/if}
+				{#if contextMenu.node.group === 'case' || contextMenu.node.group === 'alert'}
+					<Button variant="link" size="xs" onclick={() => handleNodeAction()}>
+						<EyeIcon class="size-4" />
+						View {contextMenu.node.group}
+						#{getId(contextMenu.node.id as string)}
+					</Button>
+				{:else}
+					<Button
+						size="xs"
+						variant="link"
+						title="Opens the filtered alert list in a new tab"
+						onclick={() => handleNodeAction()}
+					>
+						<ExternalLinkIcon class="size-4" />
+						Pivot on {contextMenu.node.group}
+						{contextMenu.node.label}
+						<span class="sr-only">(opens in a new tab)</span>
+					</Button>
+				{/if}
+			</div>
+		{/if}
 
-	{#if loading}
-		<div class="absolute inset-0 flex items-center justify-center text-sm opacity-70">
-			Loading relationships...
-		</div>
-	{:else if error}
-		<div class="absolute inset-0 flex items-center justify-center text-sm text-red-500">
-			{error}
-		</div>
-	{:else if !graph.nodes.length}
-		<div class="absolute inset-0 flex items-center justify-center text-sm opacity-70">
-			No related entities found.
-		</div>
-	{/if}
+		{#if loading}
+			<div class="absolute inset-0 flex items-center justify-center text-sm opacity-70">
+				Loading relationships...
+			</div>
+		{:else if error}
+			<div class="absolute inset-0 flex items-center justify-center text-sm text-red-500">
+				{error}
+			</div>
+		{:else if !graph.nodes.length}
+			<div class="absolute inset-0 flex items-center justify-center text-sm opacity-70">
+				No related entities found.
+			</div>
+		{/if}
+	</div>
 </div>
