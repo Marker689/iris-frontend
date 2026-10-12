@@ -18,6 +18,8 @@ export interface HookOption {
 	module_name: string;
 	/** Set on entries of native webhooks subscribed to the manual trigger. */
 	webhook_id?: number;
+	/** Set on entries of manual AI workflows shown in this menu. */
+	workflow_id?: number;
 }
 
 export interface InvokeHookBody {
@@ -28,6 +30,8 @@ export interface InvokeHookBody {
 	targets: number[];
 	/** Sends to this webhook instead of the modules. */
 	webhook_id?: number;
+	/** Starts this AI workflow, as the current user, instead of the modules. */
+	workflow_id?: number;
 }
 
 /** Same payload minus `type` — the alert endpoint only knows alerts. */

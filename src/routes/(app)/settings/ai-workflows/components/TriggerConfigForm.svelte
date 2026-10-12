@@ -70,6 +70,26 @@
 	);
 	const entityItems = ENTITY_TYPES.map((t) => ({ value: t, label: ENTITY_LABELS[t] }));
 
+	// Object menus a manual workflow can show in, and the entity it then runs on
+	const MENUS: Array<{ value: string; label: string; entity: AiEntityType }> = [
+		{ value: 'alert', label: 'Alert', entity: 'alert' },
+		{ value: 'case', label: 'Case', entity: 'case' },
+		{ value: 'asset', label: 'Asset', entity: 'case' },
+		{ value: 'ioc', label: 'IOC', entity: 'case' },
+		{ value: 'note', label: 'Note', entity: 'case' },
+		{ value: 'event', label: 'Timeline event', entity: 'case' },
+		{ value: 'evidence', label: 'Evidence', entity: 'case' },
+		{ value: 'task', label: 'Task', entity: 'case' }
+	];
+	const menuItems = MENUS.map(({ value, label }) => ({ value, label }));
+	const missingMenuEntities = $derived.by(() => {
+		if (form.trigger_type !== 'manual') return [];
+		const menus = asStrings(config.menus);
+		const accepted = asStrings(config.entity_types);
+		const needed = MENUS.filter((m) => menus.includes(m.value)).map((m) => m.entity);
+		return [...new Set(needed)].filter((e) => !accepted.includes(e));
+	});
+
 	const preview = $derived(
 		form.trigger_type === 'cron' ? cronPreview(String(config.cron ?? '')) : null
 	);
@@ -251,6 +271,43 @@
 				testId="wf-trigger-entity-types"
 			/>
 		</div>
+		<div class="flex flex-col gap-1">
+			<span class={LABEL_CLASS}>Show in object menus</span>
+			<MultiSelect
+				items={menuItems}
+				values={asStrings(config.menus)}
+				placeholder="Not in any menu"
+				disabled={readOnly}
+				onChange={(v) => (config.menus = v)}
+				testId="wf-trigger-menus"
+			/>
+			<span class="text-2xs text-muted-foreground">
+				Listed next to the module actions of these objects. A click runs the workflow as the analyst
+				who clicked: their access, their personal keys plus the shared ones, and their daily budget.
+				The object is the run's <code class="font-mono">trigger.payload</code>.
+			</span>
+			{#if missingMenuEntities.length > 0}
+				<span class="flex items-center gap-1 text-2xs text-destructive">
+					<TriangleAlertIcon class="size-3 shrink-0" />
+					These menus need the Run button to accept {missingMenuEntities
+						.map((e) => ENTITY_LABELS[e])
+						.join(', ')}.
+				</span>
+			{/if}
+		</div>
+		{#if asStrings(config.menus).length > 0}
+			<label class="flex flex-col gap-1">
+				<span class={LABEL_CLASS}>Menu label (optional, defaults to the workflow name)</span>
+				<Input
+					class="h-8 text-xs"
+					maxlength={64}
+					disabled={readOnly}
+					value={String(config.menu_label ?? '')}
+					oninput={(e) => (config.menu_label = (e.currentTarget as HTMLInputElement).value)}
+					data-testid="wf-trigger-menu-label"
+				/>
+			</label>
+		{/if}
 	{:else if form.trigger_type === 'webhook'}
 		<label class="flex items-center justify-between gap-2 text-xs">
 			<span>

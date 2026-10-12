@@ -32,7 +32,7 @@ export function defaultTriggerConfig(type: AiTriggerType): Record<string, unknow
 		case 'cron':
 			return { cron: '0 * * * *', target: 'none', max_targets: 50 };
 		case 'manual':
-			return { entity_types: [] };
+			return { entity_types: [], menus: [], menu_label: '' };
 		case 'webhook':
 			return { require_signature: false, entity_type: null, entity_id_path: '' };
 	}

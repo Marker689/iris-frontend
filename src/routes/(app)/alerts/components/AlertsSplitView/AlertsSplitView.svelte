@@ -1441,7 +1441,7 @@
 									>
 									{#if canTriggerHooks}
 										<!-- Actions contributed by modules. -->
-										<div class="menu-section" role="presentation">Modules</div>
+										<div class="menu-section" role="presentation">Actions</div>
 										{#each alertHooks.options as hookOption (hookOptionKey(hookOption))}
 											<button
 												type="button"

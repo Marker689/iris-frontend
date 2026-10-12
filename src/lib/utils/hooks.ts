@@ -18,7 +18,10 @@ type HookCallOutcome = { status: string; message: string };
  * user knows something was skipped; otherwise we report the queued
  * count.
  */
-const toOutcome = (response: RequestResponse<InvokeHookResult>): HookCallOutcome => {
+const toOutcome = (
+	response: RequestResponse<InvokeHookResult>,
+	hookOption: HookOption
+): HookCallOutcome => {
 	if (!response.ok || response.error) {
 		return {
 			status: 'error',
@@ -30,16 +33,21 @@ const toOutcome = (response: RequestResponse<InvokeHookResult>): HookCallOutcome
 	const queued = body?.queued ?? 0;
 	const logs = body?.logs ?? [];
 
+	const started =
+		hookOption.workflow_id !== undefined
+			? `Started ${queued} workflow run(s)`
+			: `Queued task with ${queued} object(s)`;
+
 	if (logs.length > 0) {
 		return {
 			status: 'error',
-			message: `Queued task with ${queued} object(s). ${logs.join('; ')}`
+			message: `${started}. ${logs.join('; ')}`
 		};
 	}
 
 	return {
 		status: 'success',
-		message: `Queued task with ${queued} object(s)`
+		message: started
 	};
 };
 
@@ -49,13 +57,15 @@ const toOutcome = (response: RequestResponse<InvokeHookResult>): HookCallOutcome
  * share a label.
  */
 export const hookOptionKey = (hookOption: HookOption): string =>
-	`${hookOption.module_name}|${hookOption.hook_name}|${hookOption.webhook_id ?? ''}|${hookOption.manual_hook_ui_name}`;
+	`${hookOption.module_name}|${hookOption.hook_name}|${hookOption.webhook_id ?? ''}|${hookOption.workflow_id ?? ''}|${hookOption.manual_hook_ui_name}`;
 
-/** Only webhook entries carry it; module entries leave it out. */
-const webhookTarget = (hookOption: HookOption) =>
-	hookOption.webhook_id !== undefined ? { webhook_id: hookOption.webhook_id } : {};
+/** Only webhook and workflow entries carry one; module entries leave both out. */
+const entryTarget = (hookOption: HookOption) => ({
+	...(hookOption.webhook_id !== undefined ? { webhook_id: hookOption.webhook_id } : {}),
+	...(hookOption.workflow_id !== undefined ? { workflow_id: hookOption.workflow_id } : {})
+});
 
-/** Fire a manual module hook (or webhook) against `targets` in `case_id`. */
+/** Fire a manual module hook (or webhook, or AI workflow) against `targets` in `case_id`. */
 export const callHook = async (
 	case_id: number,
 	hookType: HookObjectType,
@@ -69,8 +79,9 @@ export const callHook = async (
 			module_name: hookOption.module_name,
 			hook_ui_name: hookOption.manual_hook_ui_name,
 			targets,
-			...webhookTarget(hookOption)
-		})
+			...entryTarget(hookOption)
+		}),
+		hookOption
 	);
 
 /**
@@ -88,6 +99,7 @@ export const callAlertHook = async (
 			module_name: hookOption.module_name,
 			hook_ui_name: hookOption.manual_hook_ui_name,
 			targets,
-			...webhookTarget(hookOption)
-		})
+			...entryTarget(hookOption)
+		}),
+		hookOption
 	);

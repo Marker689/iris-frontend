@@ -87,6 +87,10 @@ export interface AiCronTriggerConfig {
 export interface AiManualTriggerConfig {
 	/** Entity types the Run button accepts; empty = no entity needed. */
 	entity_types: AiEntityType[];
+	/** Object menus listing the workflow; a click runs it as the clicking user. */
+	menus?: string[];
+	/** Menu entry label; the workflow name when empty. */
+	menu_label?: string;
 }
 
 export interface AiWebhookTriggerConfig {
