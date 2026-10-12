@@ -89,8 +89,16 @@
 		selected = allSelected ? new Set() : new Set(selectable.map((c) => c.case_id));
 	};
 
-	const caseName = (caseId: number) =>
-		cases.find((c) => c.case_id === caseId)?.case_name ?? `Case #${caseId}`;
+	// Cases are stored as "#42 - Title"; the id is already shown beside it.
+	const stripCaseIdPrefix = (name: string | null | undefined): string => {
+		const m = (name ?? '').match(/^#\d+\s*-\s*(.+)$/);
+		return m ? m[1] : (name ?? '');
+	};
+
+	const caseName = (caseId: number) => {
+		const name = cases.find((c) => c.case_id === caseId)?.case_name;
+		return name ? stripCaseIdPrefix(name) : `Case #${caseId}`;
+	};
 
 	const submit = async () => {
 		if (!task || selected.size === 0) return;
@@ -151,7 +159,7 @@
 
 		{#if results}
 			<ul
-				class="flex max-h-[50vh] flex-col gap-1 overflow-y-auto py-2"
+				class="flex max-h-[50vh] min-w-0 flex-col gap-1 overflow-y-auto py-2"
 				aria-label="Fan-out results"
 			>
 				{#each results as r (r.case_id)}
@@ -163,8 +171,10 @@
 						{:else}
 							<CircleAlert class="h-3.5 w-3.5 shrink-0 text-destructive" />
 						{/if}
-						<span class="font-mono text-xs text-muted-foreground">#{r.case_id}</span>
-						<span class="min-w-0 flex-1 truncate">{caseName(r.case_id)}</span>
+						<span class="shrink-0 font-mono text-xs text-muted-foreground">#{r.case_id}</span>
+						<span class="min-w-0 flex-1 truncate" title={caseName(r.case_id)}>
+							{caseName(r.case_id)}
+						</span>
 						{#if r.message}
 							<span class="hidden max-w-[40%] truncate text-2xs text-muted-foreground sm:inline">
 								{r.message}
@@ -184,7 +194,7 @@
 				<Button onclick={() => (open = false)}>Close</Button>
 			</DialogFooter>
 		{:else}
-			<div class="flex flex-col gap-3 py-2">
+			<div class="flex min-w-0 flex-col gap-3 py-2">
 				<div class="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
 					<label for="fan-out-assign-owner" class="min-w-0">
 						<span class="block text-sm font-medium">Assign to case owner</span>
@@ -236,10 +246,14 @@
 										onCheckedChange={(v) => toggle(c.case_id, v === true)}
 									/>
 									<label for={id} class="flex min-w-0 flex-1 items-center gap-2 text-sm">
-										<span class="font-mono text-xs text-muted-foreground">#{c.case_id}</span>
-										<span class="truncate">{c.case_name}</span>
+										<span class="shrink-0 font-mono text-xs text-muted-foreground">
+											#{c.case_id}
+										</span>
+										<span class="min-w-0 truncate" title={c.case_name}>
+											{stripCaseIdPrefix(c.case_name)}
+										</span>
 										{#if c.customer_name}
-											<span class="truncate text-xs text-muted-foreground">
+											<span class="min-w-0 shrink-[2] truncate text-xs text-muted-foreground">
 												· {c.customer_name}
 											</span>
 										{/if}
@@ -247,7 +261,7 @@
 									{#if isLinked}
 										<span class="shrink-0 text-2xs text-muted-foreground">Linked</span>
 									{:else if assignToOwner}
-										<span class="shrink-0 truncate text-2xs text-muted-foreground">
+										<span class="max-w-[30%] shrink-0 truncate text-2xs text-muted-foreground">
 											{c.owner_name || c.owner_login || 'No owner'}
 										</span>
 									{/if}
