@@ -10,7 +10,8 @@
   provided as the case datastore context below so the dialogs act on
   this case even when several trees are on screen. `withAddDialogs`
   mounts the add-file / add-folder dialogs; the case layout already
-  mounts its own.
+  mounts its own. `rootLabel` renames the root folder (the war room
+  shows the case there instead of a header above it).
 -->
 <script lang="ts">
 	import { setContext } from 'svelte';
@@ -41,6 +42,7 @@
 		filter?: string;
 		withAddDialogs?: boolean;
 		emptyMessage?: string;
+		rootLabel?: string;
 	};
 
 	let {
@@ -48,13 +50,25 @@
 		caseId,
 		filter = '',
 		withAddDialogs = false,
-		emptyMessage = 'No files yet.'
+		emptyMessage = 'No files yet.',
+		rootLabel
 	}: Props = $props();
 
 	// svelte-ignore state_referenced_locally
 	setContext<CaseDatastoreContext>(CASE_DATASTORE_CTX, datastore);
 
 	const selectedFileId = $derived<number | undefined>(datastore.ui.selectedFileId);
+
+	const displayTree = $derived.by(() => {
+		const data = datastore.tree.data;
+		if (!rootLabel) return data;
+		return Object.fromEntries(
+			Object.entries(data).map(([key, node]) => [
+				key,
+				node.type === 'directory' && node.is_root ? { ...node, name: rootLabel } : node
+			])
+		) as typeof data;
+	});
 
 	const openAddFile = (folderId?: number) => {
 		if (folderId !== undefined) datastore.ui.selectedFolderId = folderId;
@@ -242,7 +256,8 @@
 	<p class="px-2 text-xs text-muted-foreground">{emptyMessage}</p>
 {:else}
 	<DatastoreTreeNode
-		tree={datastore.tree.data}
+		tree={displayTree}
+		showRootBadge={!rootLabel}
 		{selectedFileId}
 		{dropTargetFolderId}
 		{filter}

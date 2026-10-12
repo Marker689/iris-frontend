@@ -45,6 +45,8 @@
 		depth?: number;
 		filter?: string;
 		dropTargetFolderId?: number | null;
+		/** Show the ROOT tag on the root folder. */
+		showRootBadge?: boolean;
 		onFolderAction: (action: FolderAction, folderId: number) => void;
 		onFileAction: (action: FileAction, fileId: number) => void;
 		onContextMenuFolder?: (folderId: number, isRoot: boolean, x: number, y: number) => void;
@@ -60,6 +62,7 @@
 		depth = 0,
 		filter = '',
 		dropTargetFolderId = null,
+		showRootBadge = true,
 		onFolderAction,
 		onFileAction,
 		onContextMenuFolder,
@@ -208,7 +211,7 @@
 							<FolderIcon size={14} class="shrink-0 text-amber-500" />
 						{/if}
 						<span class="truncate" title={node.name}>{node.name}</span>
-						{#if node.is_root}
+						{#if node.is_root && showRootBadge}
 							<span
 								class="ml-1 shrink-0 rounded bg-muted px-1 text-[10px] uppercase tracking-wide text-muted-foreground"
 							>

@@ -106,7 +106,12 @@ export const createCaseDatastoreContext = (getCaseId: () => number | null) => {
 
 		if (!res.ok || res.error || res.data === null || typeof res.data === 'string') {
 			tree.status = 'error';
-			tree.error = res.error?.message ?? 'Failed to load datastore tree';
+			tree.error =
+				res.status === 403
+					? 'You do not have access to this case'
+					: res.status === 404
+						? 'Case not found'
+						: (res.error?.message ?? 'Failed to load datastore tree');
 			return;
 		}
 
