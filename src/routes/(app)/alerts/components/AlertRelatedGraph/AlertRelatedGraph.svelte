@@ -84,8 +84,9 @@
 	// frozen network would never be laid out, and a theme change rebuilds
 	// every node (see `VisNetwork`), dropping their positions.
 	const layoutKey = $derived({ graph, isDark });
-	// The `layoutKey` whose layout has settled; see `options.physics`.
-	let frozenKey = $state<object | null>(null);
+	// The `layoutKey` whose layout has settled; see `options.physics`. Raw:
+	// a deep `$state` would proxy the key and never equal `layoutKey` again.
+	let frozenKey = $state.raw<object | null>(null);
 
 	const options = $derived({
 		autoResize: true,
@@ -103,8 +104,8 @@
 			zoomView: true,
 			hover: true
 		},
-		// Physics only computes the initial layout: `handleReady` freezes it
-		// once stabilization ends. Left running, forceAtlas2 never quite
+		// Physics only computes the initial layout, off screen: `handleReady`
+		// freezes it as soon as stabilization ends. Left running, forceAtlas2 never quite
 		// settles and the graph keeps drifting and spinning on its own, and
 		// dragging a node drags the whole graph along with it. Keyed on the
 		// layout rather than a plain flag so the next mount starts unfrozen,
@@ -219,7 +220,12 @@
 
 	const handleReady = (network: Network | null) => {
 		const key = layoutKey;
-		network?.once('stabilizationIterationsDone', () => (frozenKey = key));
+		network?.once('stabilizationIterationsDone', () => {
+			// Synchronously: vis starts the live simulation right after this
+			// event, so waiting for the options effect lets it spin a while.
+			network.setOptions({ physics: { enabled: false } });
+			frozenKey = key;
+		});
 	};
 
 	const closeContextMenu = () => (contextMenu = { open: false, x: 0, y: 0 });
