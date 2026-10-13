@@ -45,6 +45,7 @@
 	import MarkDownPreview from '$lib/components/common/MarkDown/MarkDownPreview.svelte';
 	import ChipHoverHost from '$lib/components/common/MarkDown/ChipHoverHost.svelte';
 	import CaseWorkspace from './components/CaseWorkspace.svelte';
+	import { editorLeaveReason, guardLeave } from '$lib/hooks/leave-guard';
 
 	const cases = getContext<CasesContext>(CASES_CTX);
 	const caseAssets = getContext<CaseAssetsContext>(CASE_ASSETS_CTX);
@@ -78,6 +79,13 @@
 	let savedAt = $state(0);
 
 	let dirty = $derived(caseDescription !== baseDescription);
+	// `dirty` also flips on a peer's edits: only ours warrant a prompt
+	let editedHere = $state(false);
+	let unsynced = $state(false);
+
+	guardLeave(() =>
+		canEdit ? editorLeaveReason({ unsynced, unsaved: editedHere && dirty }) : null
+	);
 
 	const refresh = async () => {
 		loading = true;
@@ -103,6 +111,7 @@
 		await cases.patch(case_id, { case_description: caseDescription });
 
 		baseDescription = caseDescription;
+		editedHere = false;
 		loadedTime = new Date();
 		saving = false;
 		savedAt = Date.now();
@@ -327,6 +336,8 @@
 		contributors = [];
 		caseDescription = '';
 		baseDescription = '';
+		editedHere = false;
+		unsynced = false;
 
 		void Promise.all([loadCounts(), loadMyTasks(), loadContributors()]);
 	});
@@ -650,6 +661,8 @@
 							caseId={case_id}
 							{savedAt}
 							onRemoteSave={handleRemoteSave}
+							onLocalEdit={() => (editedHere = true)}
+							onSyncStateChange={(v) => (unsynced = v)}
 							readOnly={!canEdit}
 						/>
 					{/key}

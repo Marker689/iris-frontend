@@ -22,9 +22,9 @@
  * open multiple providers over a single connection if we ever need it.
  *
  * Payloads (Option A — server-authoritative Y.Doc):
- *   * outbound sync:      { doc, update: base64 }
+ *   * outbound sync:      { doc, update: base64 }, acked with { ok }
  *   * outbound awareness: { doc, update: base64, client_id }
- *   * inbound  sync-init: { doc, y_state: base64, can_write, user }
+ *   * inbound  sync-init: { doc, y_state: base64, epoch, can_write, user }
  *   * inbound  sync:      { doc, update: base64, origin }
  *   * inbound  awareness: { doc, update: base64, origin }
  *
@@ -106,7 +106,27 @@ export interface SocketYjsProviderOptions {
 		name: string | null;
 		userId: number;
 	}) => void;
+	/**
+	 * Fired when some local edits switch between stored by the server
+	 * (`false`) and not yet (`true`): sent but unacked, or held back while
+	 * offline. Leaving the page in the `true` state loses them.
+	 */
+	onSyncStateChange?: (unsynced: boolean) => void;
+	/** Fired on every local change of the Y.Doc. */
+	onLocalEdit?: () => void;
+	/**
+	 * Fired once if the server's doc was replaced by an unrelated one (a
+	 * re-seed, see `ensure_snapshot`). Our copy can't be merged into it
+	 * anymore: the provider stops syncing, and only a reload recovers.
+	 */
+	onDocReplaced?: () => void;
 }
+
+type SyncAck = { ok?: boolean } | undefined;
+
+// Rejoins after a rejected sync, each twice as late as the last.
+const REJOIN_DELAY_MS = 1000;
+const MAX_REJOINS = 5;
 
 export class SocketYjsProvider {
 	readonly socket: Socket;
@@ -120,6 +140,20 @@ export class SocketYjsProvider {
 	// on every (re)join: updates emitted just before a disconnect may never
 	// have reached the server, and nothing else would ever tell us.
 	private editedLocally = false;
+	// Between a (re)connect and its `sync-init` the server rejects our
+	// syncs, so local edits are held back until the rejoin resends them.
+	private joined = false;
+	// Lineage of the doc we hold, set by the first `sync-init`.
+	private epoch: { value: unknown } | null = null;
+	private replaced = false;
+	// Unsynced bookkeeping. Acks are lost with the connection they were
+	// sent on, so a disconnect turns the unacked syncs into a resync.
+	private unacked = 0;
+	private needsResync = false;
+	private connection = 0;
+	private unsynced = false;
+	private rejoins = 0;
+	private rejoinTimer: ReturnType<typeof setTimeout> | null = null;
 	// Trusted `clientID → authenticated user` mapping, populated from
 	// server-side `awareness-identity` broadcasts. The label inside a
 	// remote peer's awareness payload is client-authored and therefore
@@ -132,15 +166,23 @@ export class SocketYjsProvider {
 	readonly identities = new Map<number, { name: string | null; userId: number }>();
 
 	// Bound handlers so we can `off` them cleanly on destroy.
-	private readonly onConnect = () => this.emitJoin();
+	private readonly onConnect = () => {
+		this.joined = false;
+		this.emitJoin();
+	};
 	private readonly onConnectError = (err: Error) => {
 		// Kept as a real error so operators can see why collab is offline
 		// (auth failure, namespace not registered, network drop) without
 		// enabling verbose logging.
 		console.error('[collab] connect_error for', this.docName, err?.message ?? err);
 	};
+	// Reconnecting is socket.io-client's job: the rejoin resyncs.
 	private readonly onDisconnect = (_reason: string) => {
-		/* no-op; reconnect logic is handled by socket.io-client */
+		this.joined = false;
+		this.connection++;
+		if (this.unacked > 0) this.needsResync = true;
+		this.unacked = 0;
+		this.reportSyncState();
 	};
 	private readonly onSyncInit = (data: any) => this.handleSyncInit(data);
 	private readonly onRemoteSync = (data: any) => this.handleRemoteSync(data);
@@ -151,6 +193,7 @@ export class SocketYjsProvider {
 	private readonly onYUpdate = (update: Uint8Array, origin: unknown) => {
 		if (origin === this) return; // ignore updates we applied from the network
 		this.editedLocally = true;
+		this.opts.onLocalEdit?.();
 		this.emitSync(update);
 	};
 	private readonly onAwarenessUpdate = (
@@ -208,11 +251,24 @@ export class SocketYjsProvider {
 	private handleSyncInit(data: {
 		doc: string;
 		y_state: Base64 | null;
+		epoch?: unknown;
 		can_write: boolean;
 		user: { id: number; name: string | null };
 	}) {
-		if (data.doc !== this.docName) return;
+		if (data.doc !== this.docName || this.replaced) return;
 
+		if (!this.epoch) {
+			this.epoch = { value: data.epoch };
+		} else if (this.epoch.value !== data.epoch) {
+			// Applying the new doc would show both contents, and resyncing
+			// would store ours next to the new one.
+			this.replaced = true;
+			this.cancelRejoin();
+			this.opts.onDocReplaced?.();
+			return;
+		}
+
+		this.joined = true;
 		if (data.y_state) {
 			try {
 				const serverState = fromBase64(data.y_state);
@@ -226,6 +282,7 @@ export class SocketYjsProvider {
 				console.warn('collab: sync-init apply failed', err);
 			}
 		}
+		this.reportSyncState();
 
 		this.opts.onSyncInit?.({
 			docName: data.doc,
@@ -247,6 +304,8 @@ export class SocketYjsProvider {
 	 */
 	private resyncToServer(serverState: Uint8Array) {
 		const serverVector = Y.encodeStateVectorFromUpdate(serverState);
+		// Whatever was held back or unacked is in the diff
+		this.needsResync = false;
 		if (!this.editedLocally && !this.isAheadOf(Y.decodeStateVector(serverVector))) return;
 		this.emitSync(Y.encodeStateAsUpdate(this.ydoc, serverVector));
 	}
@@ -259,7 +318,7 @@ export class SocketYjsProvider {
 	}
 
 	private handleRemoteSync(data: { doc: string; update: Base64; origin?: string }) {
-		if (data.doc !== this.docName || !data.update) return;
+		if (data.doc !== this.docName || !data.update || this.replaced) return;
 		try {
 			Y.applyUpdate(this.ydoc, fromBase64(data.update), this);
 		} catch (err) {
@@ -374,19 +433,63 @@ export class SocketYjsProvider {
 	}
 
 	private emitSync(update: Uint8Array) {
-		// Dropped while disconnected: `resyncToServer` sends it on the rejoin
-		if (this.destroyed || !this.socket.connected) return;
+		if (this.destroyed) return;
+		if (!this.socket.connected || !this.joined) {
+			// Held back: `resyncToServer` sends it on the rejoin
+			this.needsResync = true;
+			this.reportSyncState();
+			return;
+		}
+		const connection = this.connection;
+		this.unacked++;
 		// Only the opaque Yjs update travels — the server owns markdown
 		// rendering (see `iris_engine/collab/render.py`) and will produce
 		// its own markdown on flush from the merged authoritative Y.Doc.
-		this.socket.emit('sync', {
-			doc: this.docName,
-			update: toBase64(update)
-		});
+		this.socket.emit('sync', { doc: this.docName, update: toBase64(update) }, (ack: SyncAck) =>
+			this.handleSyncAck(connection, ack)
+		);
+		this.reportSyncState();
+	}
+
+	private handleSyncAck(connection: number, ack: SyncAck) {
+		if (this.destroyed || connection !== this.connection) return;
+		this.unacked = Math.max(0, this.unacked - 1);
+		// A backend predating acks answers nothing: only an explicit
+		// rejection counts
+		if (ack?.ok === false) {
+			// Later updates build on the rejected one: the server can't
+			// render them until it is resent, which the rejoin does
+			this.needsResync = true;
+			this.scheduleRejoin();
+		} else if (!this.needsResync) {
+			this.rejoins = 0;
+		}
+		this.reportSyncState();
+	}
+
+	private scheduleRejoin() {
+		if (this.rejoinTimer || this.rejoins >= MAX_REJOINS || this.replaced) return;
+		const delay = REJOIN_DELAY_MS * 2 ** this.rejoins++;
+		this.rejoinTimer = setTimeout(() => {
+			this.rejoinTimer = null;
+			if (this.socket.connected) this.emitJoin();
+		}, delay);
+	}
+
+	private cancelRejoin() {
+		if (this.rejoinTimer) clearTimeout(this.rejoinTimer);
+		this.rejoinTimer = null;
+	}
+
+	private reportSyncState() {
+		const unsynced = this.needsResync || this.unacked > 0;
+		if (unsynced === this.unsynced) return;
+		this.unsynced = unsynced;
+		this.opts.onSyncStateChange?.(unsynced);
 	}
 
 	private emitAwareness(update: Uint8Array) {
-		if (this.destroyed || !this.socket.connected) return;
+		if (this.destroyed || !this.socket.connected || !this.joined) return;
 		// `client_id` tells the server which Yjs clientID this awareness
 		// message belongs to. The server maps it to our authenticated
 		// identity and broadcasts an `awareness-identity` companion so
@@ -402,6 +505,7 @@ export class SocketYjsProvider {
 	destroy() {
 		if (this.destroyed) return;
 		this.destroyed = true;
+		this.cancelRejoin();
 		// Best-effort leave. If the socket is already dead the server's
 		// disconnect handler will do the cleanup instead.
 		if (this.socket.connected) {

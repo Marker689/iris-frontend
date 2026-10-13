@@ -26,6 +26,7 @@
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
 	import SitRepCadenceCard from './components/SitRepCadenceCard.svelte';
 	import PublishSitRepDialog from './components/PublishSitRepDialog.svelte';
+	import { editorLeaveReason, guardLeave } from '$lib/hooks/leave-guard';
 	import { describeDue, formatCadence } from './helpers/cadence';
 
 	const warRoomId = $derived(Number(page.params.war_room_id));
@@ -54,6 +55,18 @@
 	let editing = $state(false);
 	let editTitle = $state('');
 	let editBody = $state('');
+	// `editBody` also changes on a peer's edits: only ours warrant a prompt
+	let editedHere = $state(false);
+	let unsynced = $state(false);
+
+	guardLeave(() =>
+		editing
+			? editorLeaveReason({
+					unsynced,
+					unsaved: editedHere && editBody !== (detail?.body_md ?? '')
+				})
+			: null
+	);
 
 	const load = async () => {
 		loading = true;
@@ -165,6 +178,8 @@
 
 	const startEdit = () => {
 		if (!detail) return;
+		editedHere = false;
+		unsynced = false;
 		editing = true;
 	};
 
@@ -501,6 +516,8 @@
 							collabMode="sitrep"
 							sitrepId={detail.sitrep_id}
 							{warRoomId}
+							onLocalEdit={() => (editedHere = true)}
+							onSyncStateChange={(v) => (unsynced = v)}
 						/>
 					{/key}
 				{:else}

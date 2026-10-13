@@ -23,6 +23,7 @@
 	import { MarkDownEditor } from '$lib/components/common/MarkDown';
 	import { WAR_ROOM_CTX, type WarRoomContext } from '$lib/contexts/war-room.context.svelte';
 	import { WarRoomsService } from '$lib/services/war-rooms.service';
+	import { editorLeaveReason, guardLeave } from '$lib/hooks/leave-guard';
 
 	const ctx = getContext<WarRoomContext>(WAR_ROOM_CTX);
 	const warRoomId = $derived(ctx.idGetter());
@@ -40,6 +41,11 @@
 	let now = $state(new Date());
 
 	const dirty = $derived(description !== baseDescription);
+	// `dirty` also flips on a peer's edits: only ours warrant a prompt
+	let editedHere = $state(false);
+	let unsynced = $state(false);
+
+	guardLeave(() => editorLeaveReason({ unsynced, unsaved: editedHere && dirty }));
 
 	// Blank the editor state synchronously on room switch so the
 	// {#key warRoomId} remount below doesn't briefly seed the new
@@ -54,6 +60,8 @@
 		lastLoadedWarRoomId = id;
 		description = '';
 		baseDescription = '';
+		editedHere = false;
+		unsynced = false;
 	});
 
 	// Seed the editor from the war room the layout already loaded.
@@ -95,6 +103,7 @@
 		if (res.ok && res.data && typeof res.data !== 'string') {
 			ctx.setRoom(res.data);
 			baseDescription = description;
+			editedHere = false;
 			loadedTime = new Date();
 			savedAt = Date.now();
 		} else {
@@ -243,6 +252,8 @@
 						collabMode="war-room-summary"
 						{warRoomId}
 						{savedAt}
+						onLocalEdit={() => (editedHere = true)}
+						onSyncStateChange={(v) => (unsynced = v)}
 					/>
 				{/key}
 			</div>

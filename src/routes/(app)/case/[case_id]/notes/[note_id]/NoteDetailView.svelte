@@ -24,6 +24,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import NoteMirrorBanner from './note-mirror-banner.svelte';
+	import { editorLeaveReason, guardLeave } from '$lib/hooks/leave-guard';
 	import {
 		collectLockedFolderIds,
 		firstUnlockedFolder,
@@ -127,6 +128,13 @@
 	let typingTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	let dirty = $derived(draftContent !== baseContent);
+	// `dirty` also flips on a peer's edits: only ours warrant a prompt
+	let editedHere = $state(false);
+	let unsynced = $state(false);
+
+	guardLeave(() =>
+		note && canEdit ? editorLeaveReason({ unsynced, unsaved: editedHere && dirty }) : null
+	);
 
 	// Track which note we've initialized content for, so switching notes
 	// resets the draft/base without clobbering in-progress edits on the same note.
@@ -140,6 +148,8 @@
 		loadedForNoteId = id;
 		baseContent = '';
 		draftContent = '';
+		editedHere = false;
+		unsynced = false;
 		lastError = null;
 		typingUser = null;
 
@@ -166,6 +176,7 @@
 
 			if (result) {
 				baseContent = draftContent;
+				editedHere = false;
 				savedAt = Date.now();
 			} else {
 				lastError = 'Failed to save note';
@@ -215,6 +226,7 @@
 		const next = fresh.note_content ?? '';
 		baseContent = next;
 		draftContent = next;
+		editedHere = false;
 	};
 </script>
 
@@ -258,6 +270,8 @@
 					{savedAt}
 					onRemoteSave={handleRemoteSave}
 					onRemoteChange={handleRemoteChange}
+					onLocalEdit={() => (editedHere = true)}
+					onSyncStateChange={(v) => (unsynced = v)}
 					readOnly={!canEdit}
 				/>
 

@@ -101,7 +101,9 @@
 		onRemoteSave: _onRemoteSave,
 		onRemoteChange: _onRemoteChange,
 		initialMode = 'view',
-		readOnly = false
+		readOnly = false,
+		onSyncStateChange,
+		onLocalEdit
 	} = $props<{
 		value: string;
 		onChange: (v: string) => void;
@@ -117,6 +119,10 @@
 		onRemoteChange?: (user: string) => void;
 		initialMode?: 'view' | 'edit' | 'edit-preview';
 		readOnly?: boolean;
+		/** Collab only: whether some local edits aren't stored by the server yet. */
+		onSyncStateChange?: (unsynced: boolean) => void;
+		/** Collab only: fired on every edit made in this editor. */
+		onLocalEdit?: () => void;
 	}>();
 
 	type ViewMode = 'view' | 'edit' | 'edit-preview';
@@ -318,11 +324,14 @@
 	// answer. We never seed content from any client-side fallback path,
 	// so if the server reports read-only that's the whole story.
 	let readOnlyFromServer = $state(false);
+	// The server's doc was replaced by an unrelated one (see
+	// `SocketYjsProvider.onDocReplaced`): ours can't sync anymore.
+	let docReplaced = $state(false);
 	// Effective read-only combines the caller's opt-in (`readOnly` prop)
 	// with the server's verdict. A local user editing the DOM without
 	// write access can still generate Yjs updates, but the server drops
 	// them — this signal prevents that from happening client-side too.
-	const effectiveReadOnly = $derived(readOnly || readOnlyFromServer);
+	const effectiveReadOnly = $derived(readOnly || readOnlyFromServer || docReplaced);
 
 	// `onUpdate` fires on every ProseMirror doc change — including the
 	// very first mutation caused by applying the server's initial
@@ -370,7 +379,13 @@
 		// receives it verbatim regardless of transport. `extraHeaders`
 		// stays as a belt-and-braces for polling-only proxies.
 		socket = io(`${baseUrl}/collab`, {
-			auth: token ? { token } : {},
+			// Read on every (re)connect: the token in hand at mount has
+			// usually been rotated by the time the socket reconnects, and a
+			// rejected reconnect leaves the editor offline.
+			auth: (cb) => {
+				const current = auth.getAccessToken();
+				cb(current ? { token: current } : {});
+			},
 			extraHeaders: token ? { Authorization: `Bearer ${token}` } : {},
 			transports: ['websocket', 'polling'],
 			reconnectionAttempts: 5
@@ -430,6 +445,11 @@
 			},
 			onPermissionDenied: () => {
 				readOnlyFromServer = true;
+			},
+			onSyncStateChange: (unsynced) => onSyncStateChange?.(unsynced),
+			onLocalEdit: () => onLocalEdit?.(),
+			onDocReplaced: () => {
+				docReplaced = true;
 			}
 		});
 	};
@@ -1589,7 +1609,24 @@
 		the raw HSL variables and `isolation: isolate` on the shell so paint
 		order is unambiguous regardless of what the ProseMirror DOM sets.
 	-->
-	{#if readOnlyFromServer}
+	{#if docReplaced}
+		<div
+			class="mb-2 flex items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-200"
+			role="alert"
+		>
+			<span class="flex-1">
+				This document was replaced on the server while you were disconnected. Reload the page to
+				keep editing. Changes made since the disconnection can't be saved: copy them first.
+			</span>
+			<button
+				type="button"
+				class="rounded border border-amber-400 px-2 py-0.5 font-medium hover:bg-amber-100 dark:border-amber-500/60 dark:hover:bg-amber-900/40"
+				onclick={() => location.reload()}
+			>
+				Reload
+			</button>
+		</div>
+	{:else if readOnlyFromServer}
 		<!--
 			Server-side ACL banner. Rendered even when `readOnly` was
 			also passed by the caller, because "the caller set us to
