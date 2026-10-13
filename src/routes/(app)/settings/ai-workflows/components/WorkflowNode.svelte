@@ -33,7 +33,7 @@
 		type FlowNode,
 		type HandleSide
 	} from '$lib/utils/ai-workflow-graph';
-	import { WORKFLOW_EDITOR_CTX, nodeIcon, nodeTone } from '../helpers/ui';
+	import { TRIGGER_LABELS, WORKFLOW_EDITOR_CTX, nodeIcon, nodeTone } from '../helpers/ui';
 	import type { WorkflowEditorCtx } from '../helpers/editor';
 	import type { AiLiveNodeState } from '../helpers/live';
 
@@ -45,6 +45,12 @@
 	const ports = $derived(portsFor(type, editor?.catalogue?.node_types));
 	const typeLabel = $derived(labelFor(type, editor?.catalogue?.node_types));
 	const label = $derived(editor?.meta[id]?.label || typeLabel);
+	// The trigger node stands for every trigger of the workflow
+	const triggers = $derived(
+		type === 'trigger'
+			? (editor?.triggerTypes ?? []).map((t) => TRIGGER_LABELS[t] ?? t).join(' · ')
+			: ''
+	);
 	const errors = $derived(editor?.errors[id] ?? []);
 	const stats = $derived(editor?.stats[id]);
 	const failed = $derived(stats?.counts.failed ?? 0);
@@ -187,6 +193,15 @@
 		<div class="min-w-0 leading-tight">
 			<div class="truncate text-xs font-medium" title={label}>{label}</div>
 			<div class="truncate text-2xs text-muted-foreground">{typeLabel} · {id}</div>
+			{#if triggers}
+				<div
+					class="truncate text-2xs text-amber-700 dark:text-amber-300"
+					title={triggers}
+					data-testid="wf-node-triggers"
+				>
+					{triggers}
+				</div>
+			{/if}
 		</div>
 		{#if liveState}
 			<span

@@ -123,6 +123,7 @@
 		TEXTAREA_CLASS,
 		workflowErrorsFrom,
 		SUGGESTION_AUDIENCE_LABELS,
+		TRIGGER_LABELS,
 		WORKFLOW_EDITOR_CTX
 	} from '../helpers/ui';
 
@@ -213,6 +214,9 @@
 		},
 		get suggestionAudience() {
 			return form.suggestion_audience;
+		},
+		get triggerTypes() {
+			return form.trigger_types;
 		}
 	};
 	setContext(WORKFLOW_EDITOR_CTX, ctx);
@@ -239,6 +243,14 @@
 	const selectedType = $derived(
 		selectedId ? (nodes.find((n) => n.id === selectedId)?.data.nodeType ?? null) : null
 	);
+	function selectTrigger() {
+		const trigger = nodes.find((n) => n.data.nodeType === 'trigger');
+		if (!trigger) return;
+		nodes = nodes.map((n) => ({ ...n, selected: n.id === trigger.id }));
+		selectedId = trigger.id;
+		drawerTab = 'config';
+	}
+
 	const otherNodes = $derived(
 		nodes
 			.filter((n) => n.id !== selectedId && n.data.nodeType !== 'trigger')
@@ -970,24 +982,29 @@
 								></textarea>
 							</label>
 
-							<TriggerConfigForm
-								bind:form
-								{catalogue}
-								{readOnly}
-								workflowId={workflow?.id ?? null}
-								savedTriggerTypes={workflow ? aiWorkflowTriggers(workflow).map((t) => t.type) : []}
-								hasInboundToken={workflow?.has_inbound_token ?? false}
-								hasSigningSecret={workflow?.has_signing_secret ?? false}
-								inboundUrl={workflow?.inbound_url ?? null}
-								onTokenRotated={(withSecret) => {
-									if (!workflow) return;
-									workflow.has_inbound_token = true;
-									if (withSecret) workflow.has_signing_secret = true;
-								}}
-								onSigningSecretRotated={() => {
-									if (workflow) workflow.has_signing_secret = true;
-								}}
-							/>
+							<div class="flex flex-col gap-1" data-testid="wf-settings-triggers">
+								<span class={LABEL_CLASS}>Triggers</span>
+								<div class="flex flex-wrap gap-1">
+									{#each form.trigger_types as t (t)}
+										<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
+											{TRIGGER_LABELS[t] ?? t}
+										</span>
+									{/each}
+								</div>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									class="h-7 w-fit text-xs"
+									onclick={selectTrigger}
+									data-testid="wf-edit-triggers"
+								>
+									{readOnly ? 'Show the triggers' : 'Add or edit triggers'}
+								</Button>
+								<span class="text-2xs text-muted-foreground">
+									Or click the trigger node on the canvas.
+								</span>
+							</div>
 
 							<div class="flex flex-col gap-1">
 								<span class={LABEL_CLASS}
@@ -1222,6 +1239,30 @@
 											onDelete={deleteSelected}
 											onRename={(id) => renameNode(sid, id)}
 										/>
+										{#if selectedType === 'trigger'}
+											<div class="border-t p-3">
+												<TriggerConfigForm
+													bind:form
+													{catalogue}
+													{readOnly}
+													workflowId={workflow?.id ?? null}
+													savedTriggerTypes={workflow
+														? aiWorkflowTriggers(workflow).map((t) => t.type)
+														: []}
+													hasInboundToken={workflow?.has_inbound_token ?? false}
+													hasSigningSecret={workflow?.has_signing_secret ?? false}
+													inboundUrl={workflow?.inbound_url ?? null}
+													onTokenRotated={(withSecret) => {
+														if (!workflow) return;
+														workflow.has_inbound_token = true;
+														if (withSecret) workflow.has_signing_secret = true;
+													}}
+													onSigningSecretRotated={() => {
+														if (workflow) workflow.has_signing_secret = true;
+													}}
+												/>
+											</div>
+										{/if}
 									</div>
 								{/if}
 							{/key}

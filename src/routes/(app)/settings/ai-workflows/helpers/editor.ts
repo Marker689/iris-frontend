@@ -280,6 +280,8 @@ export interface WorkflowEditorCtx {
 	readonly workflowId: number | null;
 	/** The workflow's default suggestion audience, which nodes may override. */
 	readonly suggestionAudience: AiSuggestionAudience;
+	/** The workflow's triggers, shown on the trigger node. */
+	readonly triggerTypes: readonly AiTriggerType[];
 }
 
 /** Set by the node config form for the template fields it renders. */
