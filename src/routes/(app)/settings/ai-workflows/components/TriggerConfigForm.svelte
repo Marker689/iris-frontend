@@ -1,10 +1,11 @@
 <!--
-  The workflow's triggers (at most one per type) and their configs. One
-  config object per type is kept in the form so removing a trigger and
-  adding it back keeps what was typed.
+  The trigger of one trigger node: its type and that type's settings,
+  edited in place in the node's config (`{trigger_type, ...}`). A
+  workflow may hold several trigger nodes; webhook and workflow triggers
+  once each.
 -->
 <script lang="ts">
-	import { CopyIcon, PlusIcon, RefreshCwIcon, TriangleAlertIcon, XIcon } from 'lucide-svelte';
+	import { CopyIcon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Button } from '$lib/components/ui/button';
@@ -19,7 +20,7 @@
 		type AiWorkflowCatalogue
 	} from '$lib/services/ai-workflows.service';
 	import MultiSelect from './MultiSelect.svelte';
-	import { TRIGGERS, type WorkflowForm } from '../helpers/editor';
+	import { defaultTriggerConfig, SINGLE_TRIGGERS, TRIGGERS } from '../helpers/editor';
 	import {
 		describeApiError,
 		ENTITY_LABELS,
@@ -30,7 +31,10 @@
 	} from '../helpers/ui';
 
 	type Props = {
-		form: WorkflowForm;
+		/** The trigger node's config. */
+		config: Record<string, unknown>;
+		/** Trigger types of the workflow's other trigger nodes. */
+		otherTypes: AiTriggerType[];
 		catalogue: AiWorkflowCatalogue | null;
 		readOnly?: boolean;
 		/** Saved workflow id (null while creating). */
@@ -46,7 +50,8 @@
 	};
 
 	let {
-		form = $bindable(),
+		config = $bindable(),
+		otherTypes,
 		catalogue,
 		readOnly = false,
 		workflowId,
@@ -66,15 +71,19 @@
 		workflow: 'Runs when another workflow calls it with a Run workflow node.'
 	};
 
-	const available = $derived(TRIGGERS.filter((t) => !form.trigger_types.includes(t)));
+	const type = $derived(
+		TRIGGERS.includes(config.trigger_type as AiTriggerType)
+			? (config.trigger_type as AiTriggerType)
+			: null
+	);
+	/** Webhook and workflow triggers are once per workflow. */
+	const taken = (t: AiTriggerType) =>
+		t !== type && SINGLE_TRIGGERS.includes(t) && otherTypes.includes(t);
 
-	function addTrigger(type: AiTriggerType) {
-		if (!form.trigger_types.includes(type)) form.trigger_types = [...form.trigger_types, type];
-	}
-
-	function removeTrigger(type: AiTriggerType) {
-		if (form.trigger_types.length > 1)
-			form.trigger_types = form.trigger_types.filter((t) => t !== type);
+	function setType(next: AiTriggerType) {
+		if (next === type) return;
+		// Another type: its own defaults, nothing kept from the previous one
+		config = { trigger_type: next, ...defaultTriggerConfig(next) };
 	}
 
 	const hookItems = $derived(
@@ -99,19 +108,14 @@
 	];
 	const menuItems = MENUS.map(({ value, label }) => ({ value, label }));
 	const missingMenuEntities = $derived.by(() => {
-		if (!form.trigger_types.includes('manual')) return [];
-		const config = form.trigger_configs.manual;
+		if (type !== 'manual') return [];
 		const menus = asStrings(config.menus);
 		const accepted = asStrings(config.entity_types);
 		const needed = MENUS.filter((m) => menus.includes(m.value)).map((m) => m.entity);
 		return [...new Set(needed)].filter((e) => !accepted.includes(e));
 	});
 
-	const preview = $derived(
-		form.trigger_types.includes('cron')
-			? cronPreview(String(form.trigger_configs.cron.cron ?? ''))
-			: null
-	);
+	const preview = $derived(type === 'cron' ? cronPreview(String(config.cron ?? '')) : null);
 
 	const fmtUtc = (d: Date) =>
 		`${d.toISOString().slice(0, 16).replace('T', ' ')} UTC · ${d.toLocaleString()}`;
@@ -172,38 +176,34 @@
 </script>
 
 <div class="flex flex-col gap-3" data-testid="wf-trigger-form">
-	<div class="flex flex-col gap-1">
-		<span class={LABEL_CLASS}>Triggers</span>
-		<span class="text-2xs text-muted-foreground">
-			Any of them starts the workflow. The run records which one fired; use
-			<code class="font-mono">trigger.type</code> to tell them apart.
-		</span>
-	</div>
-
-	{#each form.trigger_types as type (type)}
-		{@const config = form.trigger_configs[type]}
-		<section
-			class="flex flex-col gap-3 rounded-md border p-2.5"
-			data-testid={`wf-trigger-card-${type}`}
+	<label class="flex flex-col gap-1">
+		<span class={LABEL_CLASS}>Starts the run</span>
+		<select
+			class={SELECT_CLASS}
+			disabled={readOnly}
+			value={type ?? ''}
+			onchange={(e) => setType((e.currentTarget as HTMLSelectElement).value as AiTriggerType)}
+			data-testid="wf-trigger-type"
 		>
-			<div class="flex items-start justify-between gap-2">
-				<div class="flex flex-col">
-					<span class="text-xs font-medium">{TRIGGER_LABELS[type] ?? type}</span>
-					<span class="text-2xs text-muted-foreground">{TRIGGER_HINTS[type]}</span>
-				</div>
-				{#if !readOnly && form.trigger_types.length > 1}
-					<button
-						type="button"
-						class="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-						aria-label={`Remove the ${TRIGGER_LABELS[type] ?? type} trigger`}
-						onclick={() => removeTrigger(type)}
-						data-testid={`wf-trigger-remove-${type}`}
-					>
-						<XIcon size={13} />
-					</button>
-				{/if}
-			</div>
+			{#if !type}
+				<option value="" disabled>Select what starts the run</option>
+			{/if}
+			{#each TRIGGERS as t (t)}
+				<option value={t} disabled={taken(t)}>
+					{TRIGGER_LABELS[t] ?? t}{taken(t) ? ' (already in this workflow)' : ''}
+				</option>
+			{/each}
+		</select>
+		{#if type}
+			<span class="text-2xs text-muted-foreground">
+				{TRIGGER_HINTS[type]} Add more trigger nodes from the palette for other ways to start it;
+				<code class="font-mono">trigger.node_id</code> says which one did.
+			</span>
+		{/if}
+	</label>
 
+	{#if type}
+		<section class="flex flex-col gap-3" data-testid={`wf-trigger-card-${type}`}>
 			{#if type === 'event'}
 				<div class="flex flex-col gap-1">
 					<span class={LABEL_CLASS}>Hooks</span>
@@ -531,23 +531,6 @@
 				</p>
 			{/if}
 		</section>
-	{/each}
-
-	{#if !readOnly && available.length > 0}
-		<div class="flex flex-wrap items-center gap-1" data-testid="wf-trigger-add">
-			<span class="text-2xs text-muted-foreground">Add a trigger:</span>
-			{#each available as t (t)}
-				<button
-					type="button"
-					class="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs hover:bg-muted"
-					onclick={() => addTrigger(t)}
-					data-testid={`wf-trigger-${t}`}
-				>
-					<PlusIcon size={11} />
-					{TRIGGER_LABELS[t] ?? t}
-				</button>
-			{/each}
-		</div>
 	{/if}
 </div>
 

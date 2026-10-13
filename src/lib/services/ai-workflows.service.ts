@@ -21,10 +21,16 @@ export type AiSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type AiToolClassification = 'read' | 'write';
 export type AiInboundKind = 'trigger' | 'callback';
 
-/** One trigger of a workflow; a workflow has at most one per type. */
+/**
+ * One trigger of a workflow: a trigger node of its graph, whose config is
+ * `{trigger_type, ...config}`. Types repeat, but for webhook and workflow
+ * (one each).
+ */
 export interface AiWorkflowTrigger {
 	type: AiTriggerType;
 	config: Record<string, unknown>;
+	/** The trigger node; absent on definitions older than typed trigger nodes. */
+	node_id?: string;
 }
 
 export type AiNodeType =
@@ -175,7 +181,8 @@ export interface AiWorkflowBody {
 	name: string;
 	description: string | null;
 	is_active: boolean;
-	triggers: AiWorkflowTrigger[];
+	/** Older definitions only: the triggers now live on the trigger nodes of the graph. */
+	triggers?: AiWorkflowTrigger[];
 	customer_scope: number[];
 	graph: AiWorkflowGraph;
 	write_tool_allowlist: string[];
@@ -257,7 +264,6 @@ export interface AiValidationError {
 
 export interface AiValidateBody {
 	graph: AiWorkflowGraph;
-	triggers: AiWorkflowTrigger[];
 	write_tool_allowlist: string[];
 }
 
@@ -453,6 +459,8 @@ export interface AiRunRequest {
 	entity_id?: number | null;
 	dry_run: boolean;
 	payload?: Record<string, unknown> | null;
+	/** The trigger node to start at; the first manual one when left out. */
+	trigger_node_id?: string | null;
 }
 
 export interface AiInboundToken {

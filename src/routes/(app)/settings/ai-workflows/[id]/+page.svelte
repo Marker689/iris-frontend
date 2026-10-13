@@ -3,7 +3,8 @@
 
   Header: name, active, JSON view, validate / save / versions / runs /
   run / export / publish to the library. Left panel: the workflow
-  settings (trigger, scope, audience, budgets, write allowlist, owner).
+  settings (scope, audience, budgets, write allowlist, owner); the
+  triggers are trigger nodes of the canvas, each configured on its own.
   Centre: the xyflow canvas with its palette and saved blocks; each node
   shows how many events it processed.
   Right drawer: the selected node's config, and its events (browse them
@@ -52,10 +53,8 @@
 		AI_RUN_WATCH,
 		AiWorkflowsService,
 		aiListData,
-		aiWorkflowTriggers,
 		type AiBlock,
 		type AiBlockDefinition,
-		type AiEntityType,
 		type AiImportResult,
 		type AiNodeStats,
 		type AiRunDetail,
@@ -101,9 +100,11 @@
 	import PanelResizer from '../components/PanelResizer.svelte';
 	import {
 		bodyFromForm,
-		formTriggers,
 		emptyWorkflowForm,
 		formFromWorkflow,
+		graphFromWorkflow,
+		graphTriggers,
+		triggerOfNode,
 		workflowFromJson,
 		workflowJson,
 		type WorkflowEditorCtx,
@@ -123,7 +124,6 @@
 		TEXTAREA_CLASS,
 		workflowErrorsFrom,
 		SUGGESTION_AUDIENCE_LABELS,
-		TRIGGER_LABELS,
 		WORKFLOW_EDITOR_CTX
 	} from '../helpers/ui';
 
@@ -214,9 +214,6 @@
 		},
 		get suggestionAudience() {
 			return form.suggestion_audience;
-		},
-		get triggerTypes() {
-			return form.trigger_types;
 		}
 	};
 	setContext(WORKFLOW_EDITOR_CTX, ctx);
@@ -243,13 +240,14 @@
 	const selectedType = $derived(
 		selectedId ? (nodes.find((n) => n.id === selectedId)?.data.nodeType ?? null) : null
 	);
-	function selectTrigger() {
-		const trigger = nodes.find((n) => n.data.nodeType === 'trigger');
-		if (!trigger) return;
-		nodes = nodes.map((n) => ({ ...n, selected: n.id === trigger.id }));
-		selectedId = trigger.id;
-		drawerTab = 'config';
-	}
+	const triggerIds = $derived(nodes.filter((n) => n.data.nodeType === 'trigger').map((n) => n.id));
+	/** Trigger types of the trigger nodes other than the selected one. */
+	const otherTriggerTypes = $derived(
+		triggerIds
+			.filter((id) => id !== selectedId)
+			.map((id) => triggerOfNode(meta[id]?.config)?.type)
+			.filter((t) => t !== undefined)
+	);
 
 	const otherNodes = $derived(
 		nodes
@@ -300,7 +298,7 @@
 		if (wf) {
 			workflow = wf.data as AiWorkflow;
 			form = formFromWorkflow(workflow);
-			loadGraph(workflow.graph);
+			loadGraph(graphFromWorkflow(workflow));
 		} else {
 			workflow = null;
 			form = emptyWorkflowForm();
@@ -407,7 +405,8 @@
 
 	function deleteSelected() {
 		const id = selectedId;
-		if (!id || selectedType === 'trigger') return;
+		// A workflow keeps at least one trigger
+		if (!id || (selectedType === 'trigger' && triggerIds.length < 2)) return;
 		nodes = nodes.filter((n) => n.id !== id);
 		edges = edges.filter((e) => e.source !== id && e.target !== id);
 		delete meta[id];
@@ -599,8 +598,7 @@
 	async function validate(): Promise<boolean> {
 		validating = true;
 		const res = await AiWorkflowsService.validate({
-			graph: currentGraph(),
-			triggers: formTriggers(form),
+			graph: bodyFromForm(form, currentGraph(), { includeOwner: false }).graph,
 			write_tool_allowlist: [...form.write_tool_allowlist]
 		});
 		validating = false;
@@ -787,14 +785,8 @@
 		});
 	}
 
-	const manualEntityTypes = $derived.by(() => {
-		const manual = workflow
-			? aiWorkflowTriggers(workflow).find((t) => t.type === 'manual')
-			: undefined;
-		return (
-			Array.isArray(manual?.config.entity_types) ? manual.config.entity_types : []
-		) as AiEntityType[];
-	});
+	/** The saved workflow's triggers: a run starts at one of them. */
+	const savedTriggers = $derived(workflow ? graphTriggers(graphFromWorkflow(workflow)) : []);
 </script>
 
 <svelte:head>
@@ -981,30 +973,6 @@
 									bind:value={form.description}
 								></textarea>
 							</label>
-
-							<div class="flex flex-col gap-1" data-testid="wf-settings-triggers">
-								<span class={LABEL_CLASS}>Triggers</span>
-								<div class="flex flex-wrap gap-1">
-									{#each form.trigger_types as t (t)}
-										<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
-											{TRIGGER_LABELS[t] ?? t}
-										</span>
-									{/each}
-								</div>
-								<Button
-									type="button"
-									size="sm"
-									variant="outline"
-									class="h-7 w-fit text-xs"
-									onclick={selectTrigger}
-									data-testid="wf-edit-triggers"
-								>
-									{readOnly ? 'Show the triggers' : 'Add or edit triggers'}
-								</Button>
-								<span class="text-2xs text-muted-foreground">
-									Or click the trigger node on the canvas.
-								</span>
-							</div>
 
 							<div class="flex flex-col gap-1">
 								<span class={LABEL_CLASS}
@@ -1238,31 +1206,28 @@
 											onClose={() => (selectedId = null)}
 											onDelete={deleteSelected}
 											onRename={(id) => renameNode(sid, id)}
-										/>
-										{#if selectedType === 'trigger'}
-											<div class="border-t p-3">
-												<TriggerConfigForm
-													bind:form
-													{catalogue}
-													{readOnly}
-													workflowId={workflow?.id ?? null}
-													savedTriggerTypes={workflow
-														? aiWorkflowTriggers(workflow).map((t) => t.type)
-														: []}
-													hasInboundToken={workflow?.has_inbound_token ?? false}
-													hasSigningSecret={workflow?.has_signing_secret ?? false}
-													inboundUrl={workflow?.inbound_url ?? null}
-													onTokenRotated={(withSecret) => {
-														if (!workflow) return;
-														workflow.has_inbound_token = true;
-														if (withSecret) workflow.has_signing_secret = true;
-													}}
-													onSigningSecretRotated={() => {
-														if (workflow) workflow.has_signing_secret = true;
-													}}
-												/>
-											</div>
-										{/if}
+											deletable={selectedType !== 'trigger' || triggerIds.length > 1}
+										>
+											<TriggerConfigForm
+												bind:config={meta[sid].config}
+												otherTypes={otherTriggerTypes}
+												{catalogue}
+												{readOnly}
+												workflowId={workflow?.id ?? null}
+												savedTriggerTypes={savedTriggers.map((t) => t.type)}
+												hasInboundToken={workflow?.has_inbound_token ?? false}
+												hasSigningSecret={workflow?.has_signing_secret ?? false}
+												inboundUrl={workflow?.inbound_url ?? null}
+												onTokenRotated={(withSecret) => {
+													if (!workflow) return;
+													workflow.has_inbound_token = true;
+													if (withSecret) workflow.has_signing_secret = true;
+												}}
+												onSigningSecretRotated={() => {
+													if (workflow) workflow.has_signing_secret = true;
+												}}
+											/>
+										</NodeConfigForm>
 									</div>
 								{/if}
 							{/key}
@@ -1363,7 +1328,7 @@
 		bind:open={runOpen}
 		workflowId={workflow.id}
 		workflowName={workflow.name}
-		entityTypes={manualEntityTypes}
+		triggers={savedTriggers}
 		{dirty}
 		onStarted={onRunStarted}
 	/>

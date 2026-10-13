@@ -214,7 +214,7 @@
 					<section class="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto">
 						<div class="flex flex-wrap items-center gap-1.5">
 							<h2 class="mr-1 text-sm font-semibold">{selected.name}</h2>
-							{#each aiWorkflowTriggers(selected) as trigger (trigger.type)}
+							{#each aiWorkflowTriggers(selected) as trigger, i (i)}
 								{@const detail = triggerDetail(trigger.type, trigger.config)}
 								<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
 									{TRIGGER_LABELS[trigger.type] ?? trigger.type}

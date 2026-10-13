@@ -33,7 +33,6 @@
 		AiWorkflowsService,
 		aiListData,
 		aiWorkflowTriggers,
-		type AiEntityType,
 		type AiImportResult,
 		type AiRunSummary,
 		type AiWorkflow,
@@ -185,13 +184,6 @@
 		runOpen = true;
 	}
 
-	const manualEntityTypes = (w: AiWorkflowSummary): AiEntityType[] => {
-		const manual = aiWorkflowTriggers(w).find((t) => t.type === 'manual');
-		return Array.isArray(manual?.config.entity_types)
-			? (manual.config.entity_types as AiEntityType[])
-			: [];
-	};
-
 	const COUNT_ORDER = [
 		'succeeded',
 		'failed',
@@ -342,7 +334,7 @@
 									</td>
 									<td class="max-w-0 px-3 py-2">
 										<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-											{#each aiWorkflowTriggers(workflow) as trigger (trigger.type)}
+											{#each aiWorkflowTriggers(workflow) as trigger, i (i)}
 												{@const detail = triggerDetail(trigger.type, trigger.config)}
 												<span class="flex min-w-0 items-center">
 													<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
@@ -486,7 +478,7 @@
 		bind:open={runOpen}
 		workflowId={runTarget.id}
 		workflowName={runTarget.name}
-		entityTypes={manualEntityTypes(runTarget)}
+		triggers={aiWorkflowTriggers(runTarget)}
 		onStarted={onRunStarted}
 	/>
 {/if}

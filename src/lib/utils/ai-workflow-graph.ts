@@ -166,7 +166,7 @@ export const DEFAULT_PORTS: Record<string, string[]> = {
 
 /** Config defaults when the catalogue is not loaded (spec table). */
 export const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
-	trigger: {},
+	trigger: { trigger_type: 'manual' },
 	ai_agent: {
 		prompt: '',
 		tools: [],
@@ -268,9 +268,7 @@ export function graphToFlow(graph: AiWorkflowGraph | null | undefined): {
 			id: n.id,
 			type: FLOW_NODE_TYPE,
 			position: { x: n.position?.x ?? 0, y: n.position?.y ?? 0 },
-			data: { nodeType: n.type },
-			// The trigger is the entry point: never deletable from the canvas.
-			deletable: n.type !== 'trigger'
+			data: { nodeType: n.type }
 		};
 	});
 	const edges: FlowEdge[] = (graph?.edges ?? []).map((e) => toFlowEdge(e, meta));
@@ -393,19 +391,80 @@ export function createFlowNode(
 			id,
 			type: FLOW_NODE_TYPE,
 			position: { x: Math.round(position.x), y: Math.round(position.y) },
-			data: { nodeType: type },
-			deletable: type !== 'trigger'
+			data: { nodeType: type }
 		},
 		meta: { label: labelFor(type, catalogue), config: defaultConfigFor(type, catalogue) }
 	};
 }
 
-/** A fresh workflow: just the trigger. */
+/** A fresh workflow: just a manual trigger. */
 export function emptyGraph(): AiWorkflowGraph {
 	return {
-		nodes: [{ id: 'n1', type: 'trigger', label: 'Trigger', position: { x: 0, y: 0 }, config: {} }],
+		nodes: [
+			{
+				id: 'n1',
+				type: 'trigger',
+				label: 'Trigger',
+				position: { x: 0, y: 0 },
+				config: { trigger_type: 'manual' }
+			}
+		],
 		edges: []
 	};
+}
+
+/**
+ * The graph of a definition saved before trigger nodes carried their
+ * trigger (`config.trigger_type`): its single trigger node takes the
+ * first of `triggers`, each other one becoming a trigger node below it
+ * with the same outgoing links. Any other graph is returned as is.
+ * Mirrors `ai_workflows_graph_upgrade_triggers` of the backend.
+ */
+export function upgradeTriggerNodes(
+	graph: AiWorkflowGraph,
+	triggers: { type: string; config?: Record<string, unknown> | null }[]
+): AiWorkflowGraph {
+	const triggerNodes = graph.nodes.filter((n) => n.type === 'trigger');
+	if (
+		triggerNodes.length !== 1 ||
+		typeof triggerNodes[0].config?.trigger_type === 'string' ||
+		!triggers.length
+	)
+		return graph;
+	const original = triggerNodes[0];
+	const outgoing = graph.edges.filter((e) => e.source === original.id);
+	const taken = new Set([...graph.nodes.map((n) => n.id), ...graph.edges.map((e) => e.id)]);
+	const freeId = (prefix: string) => {
+		let index = 1;
+		while (taken.has(`${prefix}${index}`)) index += 1;
+		taken.add(`${prefix}${index}`);
+		return `${prefix}${index}`;
+	};
+	const withTrigger = (node: AiGraphNode, trigger: (typeof triggers)[number]): AiGraphNode => ({
+		...node,
+		config: { trigger_type: trigger.type, ...deepClone(trigger.config ?? {}) }
+	});
+	const nodes = graph.nodes.map((n) => (n === original ? withTrigger(n, triggers[0]) : n));
+	const edges = [...graph.edges];
+	triggers.slice(1).forEach((trigger, index) => {
+		const id = freeId('n');
+		const position = original.position ?? { x: 0, y: 0 };
+		nodes.push(
+			withTrigger(
+				{
+					...original,
+					id,
+					label: '',
+					position: { ...position, y: (position.y ?? 0) + 120 * (index + 1) }
+				},
+				trigger
+			)
+		);
+		for (const edge of outgoing) {
+			edges.push({ ...edge, id: freeId('e'), source: id });
+		}
+	});
+	return { nodes, edges };
 }
 
 /**

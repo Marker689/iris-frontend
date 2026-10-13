@@ -21,7 +21,8 @@ import {
 	portsFor,
 	reattachEdges,
 	readHandles,
-	renameFlowNode
+	renameFlowNode,
+	upgradeTriggerNodes
 } from '../ai-workflow-graph';
 
 const graph: AiWorkflowGraph = {
@@ -60,10 +61,10 @@ describe('graphToFlow / flowToGraph', () => {
 		expect(nodes[0]).toMatchObject({
 			id: 'n1',
 			type: FLOW_NODE_TYPE,
-			data: { nodeType: 'trigger' },
-			deletable: false
+			data: { nodeType: 'trigger' }
 		});
-		expect(nodes[1].deletable).toBe(true);
+		// Any trigger can go, the canvas keeps the last one
+		expect(nodes[0].deletable).toBeUndefined();
 		expect(edges[1]).toMatchObject({ source: 'n2', target: 'n3', sourceHandle: 'false' });
 		expect(edges[1].label).toBe('false');
 		expect(edges[0].label).toBeUndefined();
@@ -164,10 +165,45 @@ describe('ids and creation', () => {
 		expect(meta).toEqual({ label: 'Delay', config: { minutes: 5 } });
 	});
 
-	it('starts a new workflow with a trigger', () => {
+	it('starts a new workflow with a manual trigger', () => {
 		const g = emptyGraph();
 		expect(g.nodes).toHaveLength(1);
-		expect(g.nodes[0].type).toBe('trigger');
+		expect(g.nodes[0]).toMatchObject({ type: 'trigger', config: { trigger_type: 'manual' } });
+	});
+
+	it('creates trigger nodes as manual triggers', () => {
+		expect(createFlowNode('trigger', { x: 0, y: 0 }, []).meta.config).toEqual({
+			trigger_type: 'manual'
+		});
+	});
+});
+
+describe('upgradeTriggerNodes', () => {
+	it('puts the triggers of an older definition on trigger nodes', () => {
+		const upgraded = upgradeTriggerNodes(graph, [
+			{ type: 'event', config: { hooks: ['on_postload_alert_create'] } },
+			{ type: 'cron', config: { cron: '0 * * * *' } }
+		]);
+		expect(upgraded.nodes[0]).toMatchObject({
+			id: 'n1',
+			label: 'New alert',
+			config: { trigger_type: 'event', hooks: ['on_postload_alert_create'] }
+		});
+		expect(upgraded.nodes[3]).toMatchObject({
+			id: 'n4',
+			type: 'trigger',
+			position: { x: 0, y: 120 },
+			config: { trigger_type: 'cron', cron: '0 * * * *' }
+		});
+		// The new trigger leads where the first one does
+		expect(upgraded.edges[2]).toEqual({ id: 'e3', source: 'n4', target: 'n2', source_port: 'out' });
+		expect(graph.nodes[0].config).toEqual({});
+	});
+
+	it('leaves typed or triggerless graphs alone', () => {
+		expect(upgradeTriggerNodes(graph, [])).toBe(graph);
+		const typed = upgradeTriggerNodes(graph, [{ type: 'manual' }]);
+		expect(upgradeTriggerNodes(typed, [{ type: 'cron' }])).toBe(typed);
 	});
 });
 

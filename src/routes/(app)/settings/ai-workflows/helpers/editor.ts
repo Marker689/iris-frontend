@@ -9,20 +9,17 @@ import type {
 	AiWorkflowTrigger
 } from '$lib/services/ai-workflows.service';
 import { aiWorkflowTriggers } from '$lib/services/ai-workflows.service';
-import type { NodeMetaMap } from '$lib/utils/ai-workflow-graph';
+import { upgradeTriggerNodes, type NodeMetaMap } from '$lib/utils/ai-workflow-graph';
 import type { AiLiveNodeState } from './live';
 
 /**
- * Editor top-bar state. `trigger_types` are the workflow's triggers, in
- * order (at most one per type); one config is kept per type so removing a
- * trigger and adding it back keeps what was typed.
+ * Editor top-bar state. The triggers are not here: each trigger node of
+ * the graph carries its own (`config.trigger_type` and that type's keys).
  */
 export interface WorkflowForm {
 	name: string;
 	description: string;
 	is_active: boolean;
-	trigger_types: AiTriggerType[];
-	trigger_configs: Record<AiTriggerType, Record<string, unknown>>;
 	customer_scope: number[];
 	write_tool_allowlist: string[];
 	max_runs_per_hour: number;
@@ -48,11 +45,29 @@ export function defaultTriggerConfig(type: AiTriggerType): Record<string, unknow
 
 export const TRIGGERS: AiTriggerType[] = ['event', 'cron', 'manual', 'webhook', 'workflow'];
 
-function allDefaults(): Record<AiTriggerType, Record<string, unknown>> {
-	return Object.fromEntries(TRIGGERS.map((t) => [t, defaultTriggerConfig(t)])) as Record<
-		AiTriggerType,
-		Record<string, unknown>
-	>;
+/** Trigger types a workflow holds once at most. */
+export const SINGLE_TRIGGERS: AiTriggerType[] = ['webhook', 'workflow'];
+
+/** The trigger of a trigger node's config, or null when it has no valid type. */
+export function triggerOfNode(
+	config: Record<string, unknown> | null | undefined
+): { type: AiTriggerType; config: Record<string, unknown> } | null {
+	const type = config?.trigger_type as AiTriggerType | undefined;
+	if (!config || !type || !TRIGGERS.includes(type)) return null;
+	const rest = { ...config };
+	delete rest.trigger_type;
+	return { type, config: rest };
+}
+
+/** The trigger nodes of `graph`, in order, as the backend lists them. */
+export function graphTriggers(graph: AiWorkflowGraph): AiWorkflowTrigger[] {
+	const triggers: AiWorkflowTrigger[] = [];
+	for (const node of graph.nodes) {
+		if (node.type !== 'trigger') continue;
+		const trigger = triggerOfNode(node.config);
+		if (trigger) triggers.push({ ...trigger, node_id: node.id });
+	}
+	return triggers;
 }
 
 export function emptyWorkflowForm(): WorkflowForm {
@@ -60,8 +75,6 @@ export function emptyWorkflowForm(): WorkflowForm {
 		name: '',
 		description: '',
 		is_active: false,
-		trigger_types: ['manual'],
-		trigger_configs: allDefaults(),
 		customer_scope: [],
 		write_tool_allowlist: [],
 		max_runs_per_hour: 60,
@@ -72,17 +85,10 @@ export function emptyWorkflowForm(): WorkflowForm {
 }
 
 export function formFromWorkflow(w: AiWorkflow): WorkflowForm {
-	const configs = allDefaults();
-	const triggers = aiWorkflowTriggers(w);
-	for (const t of triggers) {
-		configs[t.type] = { ...configs[t.type], ...JSON.parse(JSON.stringify(t.config ?? {})) };
-	}
 	return {
 		name: w.name,
 		description: w.description ?? '',
 		is_active: w.is_active,
-		trigger_types: triggers.map((t) => t.type),
-		trigger_configs: configs,
 		customer_scope: [...(w.customer_scope ?? [])],
 		write_tool_allowlist: [...(w.write_tool_allowlist ?? [])],
 		max_runs_per_hour: w.max_runs_per_hour,
@@ -90,6 +96,11 @@ export function formFromWorkflow(w: AiWorkflow): WorkflowForm {
 		suggestion_audience: w.suggestion_audience,
 		owner_id: w.owner_id ?? null
 	};
+}
+
+/** The graph of a saved workflow, its triggers on the trigger nodes even when it predates them. */
+export function graphFromWorkflow(w: AiWorkflow): AiWorkflowGraph {
+	return upgradeTriggerNodes(w.graph, aiWorkflowTriggers(w));
 }
 
 /** Strips empty optional strings so the backend sees `null`, not `''`. */
@@ -106,20 +117,23 @@ export function cleanTriggerConfig(
 	return out;
 }
 
-/** The form's triggers as the backend takes them. */
-export function formTriggers(form: WorkflowForm): AiWorkflowTrigger[] {
-	return form.trigger_types.map((type) => ({
-		type,
-		config: cleanTriggerConfig(type, form.trigger_configs[type] ?? {})
-	}));
-}
-
-/** The form's config of a trigger type, or null when the workflow has no such trigger. */
-export function formTriggerConfig(
-	form: WorkflowForm,
-	type: AiTriggerType
-): Record<string, unknown> | null {
-	return form.trigger_types.includes(type) ? (form.trigger_configs[type] ?? {}) : null;
+/** `graph` with the configs of its trigger nodes as the backend takes them. */
+export function cleanGraphTriggers(graph: AiWorkflowGraph): AiWorkflowGraph {
+	return {
+		...graph,
+		nodes: graph.nodes.map((node) => {
+			const trigger = node.type === 'trigger' ? triggerOfNode(node.config) : null;
+			return trigger
+				? {
+						...node,
+						config: {
+							trigger_type: trigger.type,
+							...cleanTriggerConfig(trigger.type, trigger.config)
+						}
+					}
+				: node;
+		})
+	};
 }
 
 export function bodyFromForm(
@@ -131,9 +145,8 @@ export function bodyFromForm(
 		name: form.name.trim(),
 		description: form.description.trim() || null,
 		is_active: form.is_active,
-		triggers: formTriggers(form),
 		customer_scope: [...form.customer_scope],
-		graph,
+		graph: cleanGraphTriggers(graph),
 		write_tool_allowlist: [...form.write_tool_allowlist],
 		max_runs_per_hour: Number(form.max_runs_per_hour),
 		token_budget_per_run: Number(form.token_budget_per_run),
@@ -193,41 +206,37 @@ export function workflowFromJson(
 		if (typeof doc.is_active !== 'boolean') return { error: '"is_active" must be true or false' };
 		form.is_active = doc.is_active;
 	}
+	// Older documents carry their triggers beside the graph: they go on its trigger nodes
+	const legacy: AiWorkflowTrigger[] = [];
 	if (has('triggers')) {
 		const triggers = doc.triggers;
 		if (!Array.isArray(triggers) || triggers.length === 0)
 			return { error: '"triggers" must be a non-empty list of {type, config} objects' };
-		const types: AiTriggerType[] = [];
 		for (const t of triggers) {
 			if (!isObject(t)) return { error: 'Every trigger must be a {type, config} object' };
 			if (!TRIGGERS.includes(t.type as AiTriggerType))
 				return { error: `A trigger "type" must be one of ${TRIGGERS.join(', ')}` };
 			const type = t.type as AiTriggerType;
-			if (types.includes(type)) return { error: `Only one "${type}" trigger is allowed` };
 			if (t.config !== undefined && t.config !== null && !isObject(t.config))
 				return { error: `The "${type}" trigger config must be an object` };
-			types.push(type);
-			form.trigger_configs[type] = {
-				...defaultTriggerConfig(type),
-				...((t.config as Record<string, unknown> | null) ?? {})
-			};
+			legacy.push({
+				type,
+				config: { ...defaultTriggerConfig(type), ...((t.config as Record<string, unknown>) ?? {}) }
+			});
 		}
-		form.trigger_types = types;
-	} else if (has('trigger_type') || has('trigger_config')) {
-		// Older single-trigger documents: replace the first trigger, keep the others
-		const type = has('trigger_type')
-			? (doc.trigger_type as AiTriggerType)
-			: (form.trigger_types[0] ?? 'manual');
+	} else if (has('trigger_type')) {
+		const type = doc.trigger_type as AiTriggerType;
 		if (!TRIGGERS.includes(type))
 			return { error: `"trigger_type" must be one of ${TRIGGERS.join(', ')}` };
 		if (has('trigger_config') && !isObject(doc.trigger_config))
 			return { error: '"trigger_config" must be an object' };
-		if (has('trigger_config'))
-			form.trigger_configs[type] = {
+		legacy.push({
+			type,
+			config: {
 				...defaultTriggerConfig(type),
-				...(doc.trigger_config as Record<string, unknown>)
-			};
-		form.trigger_types = [type, ...form.trigger_types.slice(1).filter((t) => t !== type)];
+				...((doc.trigger_config as Record<string, unknown> | undefined) ?? {})
+			}
+		});
 	}
 	if (has('customer_scope')) {
 		const scope = doc.customer_scope;
@@ -262,7 +271,7 @@ export function workflowFromJson(
 	)
 		return { error: 'Every node needs a string "id" and "type"' };
 	if (!graph.edges.every((e) => isObject(e))) return { error: 'Every edge must be an object' };
-	return { form, graph: graph as unknown as AiWorkflowGraph };
+	return { form, graph: upgradeTriggerNodes(graph as unknown as AiWorkflowGraph, legacy) };
 }
 
 /** Shared with the canvas node components through Svelte context. */
@@ -280,8 +289,6 @@ export interface WorkflowEditorCtx {
 	readonly workflowId: number | null;
 	/** The workflow's default suggestion audience, which nodes may override. */
 	readonly suggestionAudience: AiSuggestionAudience;
-	/** The workflow's triggers, shown on the trigger node. */
-	readonly triggerTypes: readonly AiTriggerType[];
 }
 
 /** Set by the node config form for the template fields it renders. */

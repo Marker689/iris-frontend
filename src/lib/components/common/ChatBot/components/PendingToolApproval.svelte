@@ -72,6 +72,10 @@
 				return `Create a note folder${a.name ? ` named "${a.name}"` : ''} on case #${
 					a.case_identifier
 				}${a.parent_id ? ` under folder #${a.parent_id}` : ''}.`;
+			case 'iris_case_datastore_files_create':
+				return `Write the file${a.filename ? ` "${a.filename}"` : ''} into the datastore of case #${
+					a.case_identifier
+				}${a.folder ? `, folder "${a.folder}"` : ''}.`;
 			case 'iris_case_tasks_create':
 				return `Create a task on case #${a.case_identifier}.`;
 			case 'iris_case_tasks_update':

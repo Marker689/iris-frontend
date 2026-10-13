@@ -1,9 +1,11 @@
 <!--
-  Manual run: optional entity (type + id), optional JSON payload and a
+  Manual run: the trigger node it starts at (when the workflow has
+  several), optional entity (type + id), optional JSON payload and a
   dry-run switch. The run acts as the current user; on success the
   caller usually navigates to the run inspector.
 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { PlayIcon } from 'lucide-svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -13,7 +15,8 @@
 	import {
 		AiWorkflowsService,
 		type AiEntityType,
-		type AiRunSummary
+		type AiRunSummary,
+		type AiWorkflowTrigger
 	} from '$lib/services/ai-workflows.service';
 	import JsonField from './JsonField.svelte';
 	import {
@@ -21,15 +24,17 @@
 		ENTITY_LABELS,
 		ENTITY_TYPES,
 		LABEL_CLASS,
-		SELECT_CLASS
+		SELECT_CLASS,
+		TRIGGER_LABELS,
+		triggerDetail
 	} from '../helpers/ui';
 
 	type Props = {
 		open: boolean;
 		workflowId: number;
 		workflowName: string;
-		/** Manual trigger `entity_types`; empty = any (or none). */
-		entityTypes?: AiEntityType[];
+		/** The workflow's triggers; a manual one's `entity_types` limit the entity (empty = any or none). */
+		triggers?: AiWorkflowTrigger[];
 		/** The workflow has unsaved changes: the run uses the saved version. */
 		dirty?: boolean;
 		onStarted?: (run: AiRunSummary) => void;
@@ -39,12 +44,30 @@
 		open = $bindable(),
 		workflowId,
 		workflowName,
-		entityTypes = [],
+		triggers = [],
 		dirty = false,
 		onStarted
 	}: Props = $props();
 
+	// Only trigger nodes can be picked (older workflows have none: the backend picks)
+	const startable = $derived(triggers.filter((t) => t.node_id));
+	const defaultTrigger = () =>
+		(startable.find((t) => t.type === 'manual') ?? startable[0])?.node_id ?? '';
+	let triggerId = $state('');
+	const trigger = $derived(
+		startable.find((t) => t.node_id === triggerId) ??
+			(startable.length ? undefined : triggers.find((t) => t.type === 'manual'))
+	);
+	const entityTypes = $derived(
+		trigger?.type === 'manual' && Array.isArray(trigger.config.entity_types)
+			? (trigger.config.entity_types as AiEntityType[])
+			: []
+	);
 	const types = $derived(entityTypes.length ? entityTypes : ENTITY_TYPES);
+	const triggerLabel = (t: AiWorkflowTrigger) =>
+		[TRIGGER_LABELS[t.type] ?? t.type, triggerDetail(t.type, t.config), t.node_id]
+			.filter(Boolean)
+			.join(' · ');
 
 	let entityType = $state<AiEntityType | ''>('');
 	let entityId = $state('');
@@ -52,12 +75,19 @@
 	let payload = $state<unknown>(null);
 	let running = $state(false);
 
+	function resetEntity() {
+		entityType = entityTypes.length ? entityTypes[0] : '';
+		entityId = '';
+	}
+
 	$effect(() => {
 		if (open) {
-			entityType = entityTypes.length ? entityTypes[0] : '';
-			entityId = '';
-			dryRun = true;
-			payload = null;
+			untrack(() => {
+				triggerId = defaultTrigger();
+				resetEntity();
+				dryRun = true;
+				payload = null;
+			});
 		}
 	});
 
@@ -71,7 +101,8 @@
 			entity_type: entityType || null,
 			entity_id: entityType ? Number(entityId) : null,
 			dry_run: dryRun,
-			payload: (payload as Record<string, unknown> | null) ?? null
+			payload: (payload as Record<string, unknown> | null) ?? null,
+			...(trigger?.node_id ? { trigger_node_id: trigger.node_id } : {})
 		});
 		running = false;
 		if (!res.ok) {
@@ -108,6 +139,24 @@
 				<p class="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-2xs">
 					You have unsaved changes: the run uses the last saved version.
 				</p>
+			{/if}
+			{#if startable.length > 1}
+				<label class="flex flex-col gap-1">
+					<span class={LABEL_CLASS}>Start at</span>
+					<select
+						class={SELECT_CLASS}
+						value={triggerId}
+						onchange={(e) => {
+							triggerId = (e.currentTarget as HTMLSelectElement).value;
+							resetEntity();
+						}}
+						data-testid="wf-run-trigger"
+					>
+						{#each startable as t (t.node_id)}
+							<option value={t.node_id}>{triggerLabel(t)}</option>
+						{/each}
+					</select>
+				</label>
 			{/if}
 			<div class="grid grid-cols-[160px_minmax(0,1fr)] gap-2">
 				<label class="flex flex-col gap-1">

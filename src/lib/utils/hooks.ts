@@ -57,12 +57,15 @@ const toOutcome = (
  * share a label.
  */
 export const hookOptionKey = (hookOption: HookOption): string =>
-	`${hookOption.module_name}|${hookOption.hook_name}|${hookOption.webhook_id ?? ''}|${hookOption.workflow_id ?? ''}|${hookOption.manual_hook_ui_name}`;
+	`${hookOption.module_name}|${hookOption.hook_name}|${hookOption.webhook_id ?? ''}|${hookOption.workflow_id ?? ''}|${hookOption.workflow_trigger_id ?? ''}|${hookOption.manual_hook_ui_name}`;
 
-/** Only webhook and workflow entries carry one; module entries leave both out. */
+/** Only webhook and workflow entries carry one; module entries leave them out. */
 const entryTarget = (hookOption: HookOption) => ({
 	...(hookOption.webhook_id !== undefined ? { webhook_id: hookOption.webhook_id } : {}),
-	...(hookOption.workflow_id !== undefined ? { workflow_id: hookOption.workflow_id } : {})
+	...(hookOption.workflow_id !== undefined ? { workflow_id: hookOption.workflow_id } : {}),
+	...(hookOption.workflow_trigger_id !== undefined
+		? { workflow_trigger_id: hookOption.workflow_trigger_id }
+		: {})
 });
 
 /** Fire a manual module hook (or webhook, or AI workflow) against `targets` in `case_id`. */

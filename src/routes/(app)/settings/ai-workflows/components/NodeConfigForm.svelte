@@ -4,7 +4,7 @@
   saved graph see every keystroke.
 -->
 <script lang="ts">
-	import { getContext, onMount, setContext } from 'svelte';
+	import { getContext, onMount, setContext, type Snippet } from 'svelte';
 	import { CircleAlertIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
@@ -55,6 +55,10 @@
 		onDelete: () => void;
 		/** Gives the node another id (its edges and references follow). */
 		onRename?: (id: string) => void;
+		/** False hides the delete button (the last trigger of the workflow). */
+		deletable?: boolean;
+		/** Trigger nodes: the trigger's own form. */
+		children?: Snippet;
 	};
 
 	let {
@@ -68,7 +72,9 @@
 		readOnly = false,
 		onClose,
 		onDelete,
-		onRename
+		onRename,
+		deletable = true,
+		children
 	}: Props = $props();
 
 	const c = $derived(node.config);
@@ -448,7 +454,7 @@
 			<p class="truncate text-xs font-semibold">{labelFor(nodeType, catalogue?.node_types)}</p>
 			<p class="font-mono text-2xs text-muted-foreground">{nodeId}</p>
 		</div>
-		{#if !readOnly && nodeType !== 'trigger'}
+		{#if !readOnly && deletable}
 			<button
 				type="button"
 				class="text-muted-foreground hover:text-destructive"
@@ -484,6 +490,10 @@
 					<li class="flex gap-1"><CircleAlertIcon size={11} class="mt-0.5 shrink-0" />{err}</li>
 				{/each}
 			</ul>
+		{/if}
+
+		{#if nodeType === 'trigger'}
+			{@render children?.()}
 		{/if}
 
 		<label class="flex flex-col gap-1">
@@ -522,10 +532,7 @@
 		</label>
 
 		{#if nodeType === 'trigger'}
-			<p class="text-2xs text-muted-foreground">
-				Its output is the trigger payload. Any of the triggers below starts the workflow;
-				<code>trigger.type</code> says which one fired.
-			</p>
+			<!-- Its trigger form is at the top -->
 		{:else if nodeType === 'ai_agent'}
 			{#if catalogue && !catalogue.llm?.enabled}
 				<p

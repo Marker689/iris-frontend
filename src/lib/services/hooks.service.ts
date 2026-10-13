@@ -20,6 +20,8 @@ export interface HookOption {
 	webhook_id?: number;
 	/** Set on entries of manual AI workflows shown in this menu. */
 	workflow_id?: number;
+	/** With `workflow_id`: the manual trigger node the entry starts at. */
+	workflow_trigger_id?: string;
 }
 
 export interface InvokeHookBody {
@@ -32,6 +34,8 @@ export interface InvokeHookBody {
 	webhook_id?: number;
 	/** Starts this AI workflow, as the current user, instead of the modules. */
 	workflow_id?: number;
+	/** The workflow's trigger node to start at. */
+	workflow_trigger_id?: string;
 }
 
 /** Same payload minus `type` — the alert endpoint only knows alerts. */

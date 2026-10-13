@@ -59,11 +59,31 @@ describe('hooks utils', () => {
 		});
 	});
 
+	it('passes the workflow and its trigger node through for workflow entries', async () => {
+		const workflowOption: HookOption = {
+			hook_name: 'on_manual_trigger_ioc',
+			manual_hook_ui_name: 'Deep dive',
+			module_name: 'IRIS workflows',
+			workflow_id: 7,
+			workflow_trigger_id: 'deep'
+		};
+		const outcome = await callHook(3, 'ioc', [9], workflowOption);
+		expect(mockInvoke.mock.calls[0][1]).toMatchObject({
+			workflow_id: 7,
+			workflow_trigger_id: 'deep'
+		});
+		expect(outcome).toEqual({ status: 'success', message: 'Started 1 workflow run(s)' });
+	});
+
 	it('keys entries apart even when labels collide', () => {
 		const other = { ...webhookOption, webhook_id: 5 };
 		expect(hookOptionKey(webhookOption)).not.toBe(hookOptionKey(other));
 		expect(hookOptionKey({ ...moduleOption, manual_hook_ui_name: 'Send to SOAR' })).not.toBe(
 			hookOptionKey(webhookOption)
+		);
+		const workflow = { ...moduleOption, workflow_id: 7, workflow_trigger_id: 'a' };
+		expect(hookOptionKey(workflow)).not.toBe(
+			hookOptionKey({ ...workflow, workflow_trigger_id: 'b' })
 		);
 	});
 });

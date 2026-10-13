@@ -108,7 +108,7 @@
 
 	let wrapper = $state<HTMLDivElement | null>(null);
 
-	/** Palette entries: the catalogue when loaded, else the built-in list. Never the trigger. */
+	/** Palette entries: the catalogue when loaded, else the built-in list. */
 	const palette = $derived.by(() => {
 		const types = catalogue?.node_types?.length
 			? catalogue.node_types.map((t) => ({
@@ -125,7 +125,6 @@
 				}));
 		const groups = new Map<string, typeof types>();
 		for (const t of types) {
-			if (t.type === 'trigger') continue;
 			const list = groups.get(t.category) ?? [];
 			list.push(t);
 			groups.set(t.category, list);
@@ -263,8 +262,22 @@
 		edges: FlowEdge[];
 	}) {
 		if (readOnly) return false;
-		const keptNodes = deletingNodes.filter((n) => n.data.nodeType !== 'trigger');
-		return { nodes: keptNodes, edges: deletingEdges };
+		// A workflow keeps at least one trigger: the first one stays when they all go.
+		const triggers = nodes.filter((n) => n.data.nodeType === 'trigger');
+		const deleting = new Set(deletingNodes.map((n) => n.id));
+		if (!triggers.every((n) => deleting.has(n.id))) return true;
+		const kept = triggers[0].id;
+		deleting.delete(kept);
+		return {
+			nodes: deletingNodes.filter((n) => n.id !== kept),
+			// Its links go only when selected or when their other end goes
+			edges: deletingEdges.filter(
+				(e) =>
+					e.selected ||
+					(e.source !== kept && e.target !== kept) ||
+					deleting.has(e.source === kept ? e.target : e.source)
+			)
+		};
 	}
 </script>
 
