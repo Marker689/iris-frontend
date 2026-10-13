@@ -11,6 +11,7 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import NoteDetailView from './NoteDetailView.svelte';
+	import { confirmLeave } from '$lib/hooks/leave-guard';
 
 	let {
 		caseId,
@@ -21,9 +22,19 @@
 		noteId: number;
 		open?: boolean;
 	} = $props();
+
+	let leaveReason = $state<string | null>(null);
+
+	// Closing (Escape, outside click, close button) unmounts the editor:
+	// ask first, as leaving the page would
+	const setOpen = (value: boolean) => {
+		if (!value && !confirmLeave(leaveReason, 'Close this note anyway?')) return;
+		if (!value) leaveReason = null;
+		open = value;
+	};
 </script>
 
-<Dialog.Root bind:open>
+<Dialog.Root bind:open={() => open, setOpen}>
 	<Dialog.Content
 		class="flex h-[80vh] max-h-[90vh] max-w-[1100px] flex-col gap-0 overflow-hidden p-0"
 	>
@@ -33,7 +44,12 @@
 
 		<div class="min-h-0 flex-1 overflow-hidden">
 			{#if open}
-				<NoteDetailView {caseId} {noteId} onAfterDelete={() => (open = false)} />
+				<NoteDetailView
+					{caseId}
+					{noteId}
+					onAfterDelete={() => (open = false)}
+					onLeaveReasonChange={(reason) => (leaveReason = reason)}
+				/>
 			{/if}
 		</div>
 	</Dialog.Content>

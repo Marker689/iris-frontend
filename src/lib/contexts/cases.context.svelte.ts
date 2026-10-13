@@ -280,6 +280,8 @@ export const createCasesContext = (getId: (c: Case) => number, app: AppContext) 
 		body: UpdateCaseBody,
 		options: ApiOptions = {}
 	): Promise<Case | null> => {
+		mutation.error = null;
+
 		const prev = byId[id];
 
 		if (prev) byId[id] = { ...prev, ...(body as Partial<Case>) };
@@ -291,6 +293,10 @@ export const createCasesContext = (getId: (c: Case) => number, app: AppContext) 
 			byId[getId(c)] = c;
 			return c;
 		}
+
+		// Still returns the case as the server has it, so callers that only
+		// need a case keep working: the failure is told by `mutation.error`
+		mutation.error = res.error?.message ?? 'The case could not be updated';
 
 		await refresh(options);
 		return await get(id, options);

@@ -67,8 +67,14 @@
 	const closingNote = $derived(currentCase?.closing_note?.trim() ?? '');
 	const isClosed = $derived(currentCase?.state?.state_name === 'Closed');
 
-	let caseDescription = $state('');
+	// The saved summary, as the server has it
 	let baseDescription = $state('');
+	// The editor's content once it has reported any. Kept apart from the
+	// baseline: the case is replaced on every case update (state, severity,
+	// a failed save's rollback...) and the collaborative editor ignores
+	// `value`, so overwriting this would report unsaved edits as saved.
+	let editorDescription = $state<string | null>(null);
+	const caseDescription = $derived(editorDescription ?? baseDescription);
 
 	let loadedTime = $state(new Date());
 	let now = $state(new Date());
@@ -105,20 +111,30 @@
 	const save = async () => {
 		if (!currentCase) return;
 
+		const content = caseDescription;
 		saving = true;
 		lastError = null;
 
-		await cases.patch(case_id, { case_description: caseDescription });
-
-		baseDescription = caseDescription;
-		editedHere = false;
-		loadedTime = new Date();
+		await cases.patch(case_id, { case_description: content });
 		saving = false;
+
+		if (cases.mutation.error !== null) {
+			lastError = `The summary was not saved: ${cases.mutation.error}. Your changes are still in the editor, try saving again.`;
+			return;
+		}
+
+		baseDescription = content;
+		// Edits made while saving are not part of this save
+		if (editorDescription === content) {
+			editorDescription = null;
+			editedHere = false;
+		}
+		loadedTime = new Date();
 		savedAt = Date.now();
 	};
 
 	const handleRemoteSave = (content: string) => {
-		caseDescription = content;
+		editorDescription = content;
 		baseDescription = content;
 		loadedTime = new Date();
 	};
@@ -334,10 +350,11 @@
 		countsLoaded = false;
 		myTasks = [];
 		contributors = [];
-		caseDescription = '';
+		editorDescription = null;
 		baseDescription = '';
 		editedHere = false;
 		unsynced = false;
+		lastError = null;
 
 		void Promise.all([loadCounts(), loadMyTasks(), loadContributors()]);
 	});
@@ -350,7 +367,6 @@
 		if (!currentCase) return;
 
 		baseDescription = currentCase.case_description ?? '';
-		caseDescription = baseDescription;
 
 		loadedTime = new Date();
 	});
@@ -656,7 +672,7 @@
 					{#key case_id}
 						<MarkDownEditor
 							value={caseDescription}
-							onChange={(v) => (caseDescription = v)}
+							onChange={(v) => (editorDescription = v)}
 							onSave={() => save()}
 							caseId={case_id}
 							{savedAt}

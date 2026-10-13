@@ -36,11 +36,14 @@
 	let {
 		caseId,
 		noteId,
-		onAfterDelete
+		onAfterDelete,
+		onLeaveReasonChange
 	}: {
 		caseId: number;
 		noteId: number;
 		onAfterDelete?: () => void;
+		// For hosts that can close the view without a navigation (dialog)
+		onLeaveReasonChange?: (reason: string | null) => void;
 	} = $props();
 
 	onMount(() => {
@@ -132,9 +135,11 @@
 	let editedHere = $state(false);
 	let unsynced = $state(false);
 
-	guardLeave(() =>
+	const leaveReason = $derived(
 		note && canEdit ? editorLeaveReason({ unsynced, unsaved: editedHere && dirty }) : null
 	);
+	guardLeave(() => leaveReason);
+	$effect(() => onLeaveReasonChange?.(leaveReason));
 
 	// Track which note we've initialized content for, so switching notes
 	// resets the draft/base without clobbering in-progress edits on the same note.

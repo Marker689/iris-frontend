@@ -18,8 +18,16 @@ export function guardLeave(reason: () => string | null) {
 			return;
 		}
 		if (navigation.to?.url.pathname === navigation.from?.url.pathname) return;
-		if (!confirm(`${message}\n\nLeave this page anyway?`)) navigation.cancel();
+		if (!confirmLeave(message)) navigation.cancel();
 	});
+}
+
+/**
+ * Whether the user agrees to leave despite `reason`. True when there is
+ * no reason to ask.
+ */
+export function confirmLeave(reason: string | null, question = 'Leave this page anyway?') {
+	return !reason || confirm(`${reason}\n\n${question}`);
 }
 
 /**
