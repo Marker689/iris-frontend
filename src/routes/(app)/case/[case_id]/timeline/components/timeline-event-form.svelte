@@ -4,7 +4,7 @@
 	import type { EventCategory } from '$lib/services/event-categories.service';
 	import type { Asset } from '$lib/types/resources/asset';
 	import type { Ioc } from '$lib/types/resources/ioc';
-	import { PlusIcon, RotateCwIcon } from 'lucide-svelte';
+	import { PlusIcon, RotateCwIcon, WandSparklesIcon } from 'lucide-svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Button } from '$lib/components/ui/button';
@@ -68,6 +68,10 @@
 		onAddAsset?: () => void;
 		onRefreshIocs?: () => void | Promise<void>;
 		onAddIoc?: () => void;
+		// Optional "magic" date converter: parses a pasted free-form date
+		// and fills date/time/TZ. Resolves to an error message, or null on
+		// success. The wand button only renders when provided.
+		onConvertDate?: (value: string) => Promise<string | null>;
 		onUpdateField: (field: keyof TimelineEventFormData, value: FieldValue) => void;
 	};
 
@@ -82,8 +86,36 @@
 		onAddAsset,
 		onRefreshIocs,
 		onAddIoc,
+		onConvertDate,
 		onUpdateField
 	}: Props = $props();
+
+	let showDateConverter = $state(false);
+	let dateConverterValue = $state('');
+	let dateConverterError = $state('');
+	let isConvertingDate = $state(false);
+
+	const toggleDateConverter = () => {
+		showDateConverter = !showDateConverter;
+		dateConverterError = '';
+	};
+
+	const convertDate = async () => {
+		const value = dateConverterValue.trim();
+		if (!onConvertDate || !value || isConvertingDate) return;
+
+		isConvertingDate = true;
+		try {
+			const error = await onConvertDate(value);
+			dateConverterError = error ?? '';
+			if (!error) {
+				showDateConverter = false;
+				dateConverterValue = '';
+			}
+		} finally {
+			isConvertingDate = false;
+		}
+	};
 
 	const timelineOptions = $derived<SelectOption[]>(
 		timelines.map((t) => ({
@@ -192,8 +224,54 @@
 							/>
 						</div>
 					</div>
+
+					{#if onConvertDate}
+						<Button
+							variant={showDateConverter ? 'secondary' : 'ghost'}
+							size="icon"
+							class="mt-6 h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
+							onclick={toggleDateConverter}
+							title="Auto-parse a date in any format"
+							aria-label="Auto-parse a date in any format"
+							aria-expanded={showDateConverter}
+						>
+							<WandSparklesIcon class="h-4 w-4" />
+						</Button>
+					{/if}
 				</div>
 			</div>
+
+			{#if onConvertDate && showDateConverter}
+				<div class="rounded-lg bg-card/40 p-4 md:col-span-2">
+					<p class="text-sm font-medium text-muted-foreground">Auto-parse date</p>
+
+					<div class="mt-1 flex items-center gap-2">
+						<Input
+							bind:value={dateConverterValue}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') {
+									e.preventDefault();
+									void convertDate();
+								}
+							}}
+							placeholder="Paste a date in any format (ISO 8601, syslog, epoch, ...) and press Enter"
+							class="flex-1"
+							autofocus
+						/>
+						<Button
+							variant="outline"
+							disabled={isConvertingDate || !dateConverterValue.trim()}
+							onclick={convertDate}
+						>
+							{isConvertingDate ? 'Parsing...' : 'Apply'}
+						</Button>
+					</div>
+
+					{#if dateConverterError}
+						<p class="mt-1 text-xs text-destructive">{dateConverterError}</p>
+					{/if}
+				</div>
+			{/if}
 
 			<div class="rounded-lg bg-card/40 p-4">
 				<div class="flex items-start gap-3">

@@ -218,4 +218,26 @@ describe('CaseTimelineService', () => {
 		expect(ApiService.delete).toHaveBeenCalledWith('/api/v2/cases/73/events/11', options);
 		expect(res).toBe(mockResponse);
 	});
+
+	it('convertDate() should call ApiService.post with /api/v2/cases/{caseId}/events/convert-date', async () => {
+		const options: ApiOptions = { skipTokenRefresh: true };
+
+		const mockResponse = {
+			ok: true,
+			status: 200,
+			data: { date: '2023-11-14', time: '22:13:20.000', tz: '+00:00' }
+		};
+
+		(ApiService.post as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockResponse);
+
+		const res = await CaseTimelineService.convertDate(73, '1700000000', options);
+
+		expect(ApiService.post).toHaveBeenCalledTimes(1);
+		expect(ApiService.post).toHaveBeenCalledWith(
+			'/api/v2/cases/73/events/convert-date',
+			{ date_value: '1700000000' },
+			options
+		);
+		expect(res).toBe(mockResponse);
+	});
 });

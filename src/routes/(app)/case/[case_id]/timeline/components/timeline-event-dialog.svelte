@@ -10,7 +10,7 @@
 		CASE_TIMELINE_CTX,
 		type CaseTimelineContext
 	} from '$lib/contexts/case-timeline.context.svelte';
-	import type { CaseTimelineEvent } from '$lib/services/case-timeline.service';
+	import { CaseTimelineService, type CaseTimelineEvent } from '$lib/services/case-timeline.service';
 	import type { CaseTimeline } from '$lib/services/case-timelines.service';
 	import TimelineEventForm, { type TimelineEventFormData } from './timeline-event-form.svelte';
 
@@ -173,6 +173,28 @@
 		};
 	};
 
+	// Backs the form's "magic" date converter: the backend brute-forces
+	// the usual log/ISO/epoch formats and we spread the result over the
+	// date, time and TZ inputs. Returns an error message on failure so
+	// the form can show it inline.
+	const convertDate = async (value: string): Promise<string | null> => {
+		const caseId = timeline.currentCaseId();
+		if (caseId === null) return 'No case selected';
+
+		const res = await CaseTimelineService.convertDate(caseId, value, { fetch });
+		if (!res.ok || !res.data || typeof res.data === 'string') {
+			return res.error?.message ?? 'Unable to find a matching pattern for the date';
+		}
+
+		form = {
+			...form,
+			event_date: res.data.date,
+			event_time: res.data.time,
+			event_tz: res.data.tz
+		};
+		return null;
+	};
+
 	const toEventDate = () => `${form.event_date}T${form.event_time}`;
 
 	const save = async () => {
@@ -268,6 +290,7 @@
 				{onAddAsset}
 				{onRefreshIocs}
 				{onAddIoc}
+				onConvertDate={convertDate}
 				onUpdateField={updateField}
 			/>
 		</div>

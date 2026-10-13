@@ -136,6 +136,12 @@ export interface UpdateCaseTimelineEventBody {
 	timeline_ids?: number[];
 }
 
+export interface CaseTimelineConvertedDate {
+	date: string;
+	time: string;
+	tz: string;
+}
+
 export class CaseTimelineService {
 	static async listEvents(
 		caseId: number,
@@ -209,6 +215,23 @@ export class CaseTimelineService {
 		return ApiService.put<CaseTimelineEvent>(
 			`/api/v2/cases/${caseId}/events/${eventId}`,
 			body,
+			options
+		);
+	}
+
+	/**
+	 * Server-side best-effort parse of a free-form date (ISO, syslog,
+	 * RFC 2822, epoch seconds/ms, ...) into the event form's date, time
+	 * and timezone fields.
+	 */
+	static async convertDate(
+		caseId: number,
+		dateValue: string,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<CaseTimelineConvertedDate>> {
+		return ApiService.post<CaseTimelineConvertedDate>(
+			`/api/v2/cases/${caseId}/events/convert-date`,
+			{ date_value: dateValue },
 			options
 		);
 	}
