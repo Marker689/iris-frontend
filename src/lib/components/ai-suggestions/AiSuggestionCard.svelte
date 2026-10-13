@@ -3,7 +3,8 @@
   a one-line preview, the entity and the Accept / Dismiss / Answer
   controls (a dry-run one can only be cleared). In the inbox
   (`showEntity`) the workflow, entity, age and controls are fixed-width
-  columns, so the rows line up. Clicking the row unfolds the rest: the full rationale, the
+  columns, so the rows line up, and the unfolded body takes the card's
+  full width. Clicking the row unfolds the rest: the full rationale, the
   related objects, what it would run, the run trace ("Why?") and how it
   was resolved.
 
@@ -306,7 +307,11 @@
 
 	{#if expanded}
 		<div
-			class={cn('flex flex-col gap-2 border-t px-3 py-2', showEntity && 'px-9 py-3')}
+			class={cn(
+				'flex flex-col gap-2 border-t px-3 py-2',
+				// Inbox: indent the details under the title (past the chevron and kind icon)
+				showEntity && 'gap-3 py-3 pl-[3.125rem] pr-4'
+			)}
 			data-testid="ai-suggestion-details"
 		>
 			<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs text-muted-foreground">
@@ -352,7 +357,8 @@
 			{/if}
 
 			{#if suggestion.body}
-				<div class={cn('overflow-y-auto', showEntity ? 'max-h-[28rem] max-w-4xl' : 'max-h-64')}>
+				<!-- The inbox page scrolls on its own: no nested scroll box there -->
+				<div class={cn(!showEntity && 'max-h-64 overflow-y-auto')}>
 					<MarkDownPreview
 						markdown={suggestion.body}
 						untrusted

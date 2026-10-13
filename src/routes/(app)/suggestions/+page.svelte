@@ -50,6 +50,10 @@
 	import { notifications } from '$lib/stores/notifications.store';
 
 	const SELECT_CLASS = 'h-7 rounded-md border bg-background px-2 text-xs';
+	// Header, filters and list share one centred column, so the row
+	// columns (workflow, entity, age, actions) stay close to the title
+	// on wide screens instead of drifting to the far edge.
+	const COLUMN_CLASS = 'mx-auto w-full max-w-6xl';
 	const STATUS_LABELS: Record<string, string> = {
 		...AI_SUGGESTION_STATUS_LABELS,
 		...AI_SUGGESTION_INBOX_STATUS_LABELS,
@@ -204,26 +208,28 @@
 </svelte:head>
 
 <div class="flex h-full w-full flex-col overflow-hidden">
-	<header class="flex items-center justify-between gap-3 border-b px-5 py-3">
-		<div class="flex min-w-0 items-center gap-3">
-			<span
-				class="flex size-8 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400"
-			>
-				<LightbulbIcon size={16} />
-			</span>
-			<div class="min-w-0 leading-tight">
-				<h1 class="text-sm font-semibold">Suggestions</h1>
-				<p class="truncate text-xs text-muted-foreground">
-					What the workflows propose, ask or flagged, across alerts, cases and war rooms.
-				</p>
+	<header class="border-b px-5 py-3">
+		<div class={cn(COLUMN_CLASS, 'flex items-center justify-between gap-3')}>
+			<div class="flex min-w-0 items-center gap-3">
+				<span
+					class="flex size-8 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400"
+				>
+					<LightbulbIcon size={16} />
+				</span>
+				<div class="min-w-0 leading-tight">
+					<h1 class="text-sm font-semibold">Suggestions</h1>
+					<p class="truncate text-xs text-muted-foreground">
+						What the workflows propose, ask or flagged, across alerts, cases and war rooms.
+					</p>
+				</div>
 			</div>
+			{#if enabled}
+				<Button variant="outline" size="sm" class="h-7" onclick={load} disabled={loading}>
+					<RefreshCwIcon size={12} class={`mr-1 ${loading ? 'animate-spin' : ''}`} />
+					Refresh
+				</Button>
+			{/if}
 		</div>
-		{#if enabled}
-			<Button variant="outline" size="sm" class="h-7" onclick={load} disabled={loading}>
-				<RefreshCwIcon size={12} class={`mr-1 ${loading ? 'animate-spin' : ''}`} />
-				Refresh
-			</Button>
-		{/if}
 	</header>
 
 	{#if !enabled}
@@ -235,167 +241,171 @@
 			<p class="text-sm">Workflows are disabled on this instance.</p>
 		</div>
 	{:else}
-		<div
-			class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-muted/20 px-5 py-2"
-			data-testid="ai-suggestions-inbox-filters"
-		>
+		<div class="border-b bg-muted/20 px-5 py-2">
 			<div
-				class="flex items-center rounded-md border bg-background p-0.5"
-				role="tablist"
-				aria-label="Status"
+				class={cn(COLUMN_CLASS, 'flex flex-wrap items-center gap-x-3 gap-y-2')}
+				data-testid="ai-suggestions-inbox-filters"
 			>
-				{#each AI_SUGGESTION_INBOX_STATUSES as s (s)}
-					<button
-						type="button"
-						role="tab"
-						aria-selected={filters.status === s}
-						class={cn(
-							'rounded px-2.5 py-1 text-xs transition-colors',
-							filters.status === s
-								? 'bg-primary text-primary-foreground shadow-sm'
-								: 'text-muted-foreground hover:bg-muted hover:text-foreground'
-						)}
-						onclick={() => setStatus(s)}
-						data-testid={`ai-suggestions-status-${s}`}
-					>
-						{STATUS_LABELS[s] ?? s}
-					</button>
-				{/each}
-			</div>
-
-			<select
-				class={cn(SELECT_CLASS, 'w-48')}
-				aria-label="Workflow"
-				value={filters.workflowId === null ? '' : String(filters.workflowId)}
-				onchange={(e) => {
-					const v = (e.currentTarget as HTMLSelectElement).value;
-					filters.workflowId = v ? Number(v) : null;
-					load();
-				}}
-			>
-				<option value="">All workflows</option>
-				{#each workflows as w (w.id)}
-					<option value={String(w.id)}>{w.name}</option>
-				{/each}
-			</select>
-			<select
-				class={cn(SELECT_CLASS, 'w-36')}
-				aria-label="About"
-				bind:value={filters.entityType}
-				onchange={load}
-			>
-				<option value="">About anything</option>
-				{#each ENTITY_TYPES as t (t)}
-					<option value={t}>{AI_SUGGESTION_ENTITY_LABELS[t]}</option>
-				{/each}
-				<option value="none">No specific entity</option>
-			</select>
-			<select
-				class={cn(SELECT_CLASS, 'w-32')}
-				aria-label="Severity"
-				bind:value={filters.severity}
-				onchange={load}
-			>
-				<option value="">Any severity</option>
-				{#each AI_SUGGESTION_SEVERITIES as s (s)}
-					<option value={s} class="capitalize">{s}</option>
-				{/each}
-			</select>
-			{#if isAdmin}
-				<label class="flex items-center gap-1.5 text-xs">
-					<input type="checkbox" bind:checked={filters.mine} onchange={load} />
-					Addressed to me
-				</label>
-			{/if}
-			{#if filtered}
-				<Button
-					variant="ghost"
-					size="sm"
-					class="h-7 px-2 text-xs"
-					onclick={resetFilters}
-					data-testid="ai-suggestions-reset"
+				<div
+					class="flex items-center rounded-md border bg-background p-0.5"
+					role="tablist"
+					aria-label="Status"
 				>
-					<XIcon size={12} class="mr-1" />
-					Reset
-				</Button>
-			{/if}
+					{#each AI_SUGGESTION_INBOX_STATUSES as s (s)}
+						<button
+							type="button"
+							role="tab"
+							aria-selected={filters.status === s}
+							class={cn(
+								'rounded px-2.5 py-1 text-xs transition-colors',
+								filters.status === s
+									? 'bg-primary text-primary-foreground shadow-sm'
+									: 'text-muted-foreground hover:bg-muted hover:text-foreground'
+							)}
+							onclick={() => setStatus(s)}
+							data-testid={`ai-suggestions-status-${s}`}
+						>
+							{STATUS_LABELS[s] ?? s}
+						</button>
+					{/each}
+				</div>
 
-			<span class="ml-auto text-2xs tabular-nums text-muted-foreground">
-				{items.length} shown{openCount ? ` · ${openCount} open` : ''}{dryRunCount
-					? ` · ${dryRunCount} from dry runs`
-					: ''}
-			</span>
+				<select
+					class={cn(SELECT_CLASS, 'w-48')}
+					aria-label="Workflow"
+					value={filters.workflowId === null ? '' : String(filters.workflowId)}
+					onchange={(e) => {
+						const v = (e.currentTarget as HTMLSelectElement).value;
+						filters.workflowId = v ? Number(v) : null;
+						load();
+					}}
+				>
+					<option value="">All workflows</option>
+					{#each workflows as w (w.id)}
+						<option value={String(w.id)}>{w.name}</option>
+					{/each}
+				</select>
+				<select
+					class={cn(SELECT_CLASS, 'w-36')}
+					aria-label="About"
+					bind:value={filters.entityType}
+					onchange={load}
+				>
+					<option value="">About anything</option>
+					{#each ENTITY_TYPES as t (t)}
+						<option value={t}>{AI_SUGGESTION_ENTITY_LABELS[t]}</option>
+					{/each}
+					<option value="none">No specific entity</option>
+				</select>
+				<select
+					class={cn(SELECT_CLASS, 'w-32')}
+					aria-label="Severity"
+					bind:value={filters.severity}
+					onchange={load}
+				>
+					<option value="">Any severity</option>
+					{#each AI_SUGGESTION_SEVERITIES as s (s)}
+						<option value={s} class="capitalize">{s}</option>
+					{/each}
+				</select>
+				{#if isAdmin}
+					<label class="flex items-center gap-1.5 text-xs">
+						<input type="checkbox" bind:checked={filters.mine} onchange={load} />
+						Addressed to me
+					</label>
+				{/if}
+				{#if filtered}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="h-7 px-2 text-xs"
+						onclick={resetFilters}
+						data-testid="ai-suggestions-reset"
+					>
+						<XIcon size={12} class="mr-1" />
+						Reset
+					</Button>
+				{/if}
+
+				<span class="ml-auto text-2xs tabular-nums text-muted-foreground">
+					{items.length} shown{openCount ? ` · ${openCount} open` : ''}{dryRunCount
+						? ` · ${dryRunCount} from dry runs`
+						: ''}
+				</span>
+			</div>
 		</div>
 
 		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-			{#if loadError}
-				<ApiError error={loadError} onRetry={load} />
-			{:else if items.length === 0}
-				<div
-					class="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground"
-					data-testid="ai-suggestions-inbox-empty"
-				>
-					{#if loading}
-						<RefreshCwIcon size={24} class="animate-spin opacity-40" />
-						<p class="text-sm">Loading…</p>
-					{:else if filters.status === 'review' && !filtered}
-						<CheckCheckIcon size={32} class="opacity-40" />
-						<p class="text-sm font-medium text-foreground">All caught up</p>
-						<p class="text-xs">Nothing left to review. New suggestions appear here live.</p>
-					{:else}
-						<LightbulbIcon size={32} class="opacity-40" />
-						<p class="text-sm">No suggestions match these filters.</p>
-						{#if filtered}
-							<Button variant="outline" size="sm" class="mt-1 h-7" onclick={resetFilters}>
-								Reset the filters
-							</Button>
-						{/if}
-					{/if}
-				</div>
-			{:else}
-				<div class="flex flex-col gap-5" data-testid="ai-suggestions-inbox-list">
-					{#each sections as section (section.key)}
-						<section
-							class="flex flex-col gap-1"
-							data-testid={`ai-suggestions-section-${section.key}`}
-						>
-							{#if sections.length > 1 || section.key !== 'open'}
-								<div class="mb-1 flex items-baseline gap-2 px-1">
-									<h2 class="text-xs font-semibold">{section.title}</h2>
-									<span class="text-2xs tabular-nums text-muted-foreground"
-										>{section.items.length}</span
-									>
-									{#if section.hint}
-										<span class="hidden truncate text-2xs text-muted-foreground sm:inline"
-											>· {section.hint}</span
-										>
-									{/if}
-									{#if section.key === 'dry_run'}
-										<Button
-											variant="ghost"
-											size="sm"
-											class="ml-auto h-6 px-2 text-2xs"
-											onclick={() => (clearOpen = true)}
-											disabled={clearing}
-											data-testid="ai-suggestions-clear-dry-runs"
-										>
-											Clear all
-										</Button>
-									{/if}
-								</div>
+			<div class={COLUMN_CLASS}>
+				{#if loadError}
+					<ApiError error={loadError} onRetry={load} />
+				{:else if items.length === 0}
+					<div
+						class="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground"
+						data-testid="ai-suggestions-inbox-empty"
+					>
+						{#if loading}
+							<RefreshCwIcon size={24} class="animate-spin opacity-40" />
+							<p class="text-sm">Loading…</p>
+						{:else if filters.status === 'review' && !filtered}
+							<CheckCheckIcon size={32} class="opacity-40" />
+							<p class="text-sm font-medium text-foreground">All caught up</p>
+							<p class="text-xs">Nothing left to review. New suggestions appear here live.</p>
+						{:else}
+							<LightbulbIcon size={32} class="opacity-40" />
+							<p class="text-sm">No suggestions match these filters.</p>
+							{#if filtered}
+								<Button variant="outline" size="sm" class="mt-1 h-7" onclick={resetFilters}>
+									Reset the filters
+								</Button>
 							{/if}
-							{#each section.items as s (s.id)}
-								<AiSuggestionCard
-									suggestion={s}
-									{onChanged}
-									showEntity
-									highlight={s.id === focusId}
-								/>
-							{/each}
-						</section>
-					{/each}
-				</div>
-			{/if}
+						{/if}
+					</div>
+				{:else}
+					<div class="flex flex-col gap-5" data-testid="ai-suggestions-inbox-list">
+						{#each sections as section (section.key)}
+							<section
+								class="flex flex-col gap-1"
+								data-testid={`ai-suggestions-section-${section.key}`}
+							>
+								{#if sections.length > 1 || section.key !== 'open'}
+									<div class="mb-1 flex items-baseline gap-2 px-1">
+										<h2 class="text-xs font-semibold">{section.title}</h2>
+										<span class="text-2xs tabular-nums text-muted-foreground"
+											>{section.items.length}</span
+										>
+										{#if section.hint}
+											<span class="hidden truncate text-2xs text-muted-foreground sm:inline"
+												>· {section.hint}</span
+											>
+										{/if}
+										{#if section.key === 'dry_run'}
+											<Button
+												variant="ghost"
+												size="sm"
+												class="ml-auto h-6 px-2 text-2xs"
+												onclick={() => (clearOpen = true)}
+												disabled={clearing}
+												data-testid="ai-suggestions-clear-dry-runs"
+											>
+												Clear all
+											</Button>
+										{/if}
+									</div>
+								{/if}
+								{#each section.items as s (s.id)}
+									<AiSuggestionCard
+										suggestion={s}
+										{onChanged}
+										showEntity
+										highlight={s.id === focusId}
+									/>
+								{/each}
+							</section>
+						{/each}
+					</div>
+				{/if}
+			</div>
 		</div>
 	{/if}
 </div>
