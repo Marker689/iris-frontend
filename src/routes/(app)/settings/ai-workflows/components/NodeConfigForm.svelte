@@ -25,6 +25,7 @@
 		nodeIcon,
 		nodeTone,
 		SELECT_CLASS,
+		SUGGESTION_AUDIENCE_LABELS,
 		TEMPLATE_FIELD_CTX,
 		TEXTAREA_CLASS,
 		WORKFLOW_EDITOR_CTX
@@ -120,7 +121,7 @@
 
 	let users = $state<MultiSelectItem[]>([]);
 	onMount(async () => {
-		if (nodeType !== 'notify' && nodeType !== 'ask_analyst') return;
+		if (nodeType !== 'notify' && nodeType !== 'ask_analyst' && nodeType !== 'suggest') return;
 		const res = await UsersService.listMentionable('');
 		if (res.ok && res.data && typeof res.data === 'object') {
 			users = (res.data.data ?? []).map((u) => ({
@@ -182,6 +183,11 @@
 			list<Field>(c.fields).map((f, i) => (i === index ? { ...f, ...patch } : f))
 		);
 	}
+
+	// What the default audience of a suggest / ask node resolves to
+	const workflowAudience = $derived(
+		editor ? SUGGESTION_AUDIENCE_LABELS[editor.suggestionAudience] : null
+	);
 
 	// ---- suggest proposed_action ----
 	const proposed = $derived(
@@ -852,6 +858,30 @@
 				)}
 				{@render text('confidence', 'Confidence (0-1 or template)', '0.8', true)}
 			</div>
+			{@render choice('audience', 'Addressed to', [
+				['entity', 'The suggestion audience of the workflow'],
+				['triggerer', 'The user who triggered the run'],
+				['owner', 'The workflow owner'],
+				['users', 'Specific users']
+			])}
+			<p class="text-2xs text-muted-foreground" data-testid="wf-cfg-suggest-audience-help">
+				{#if (c.audience ?? 'entity') === 'entity'}
+					{workflowAudience
+						? `Currently: ${workflowAudience.charAt(0).toLowerCase()}${workflowAudience.slice(1)}. Set it in the workflow settings.`
+						: 'Set in the workflow settings.'}
+				{:else}
+					{#if c.audience === 'triggerer'}
+						Whoever started the run, or whose action fired the event.
+					{/if}
+					Only active users who can see the entity receive it; when none of them can, it goes to the
+					suggestion audience of the workflow.
+				{/if}
+				They are notified and find it in their suggestions inbox; administrators see every suggestion.
+				A dry run only goes to whoever started it.
+			</p>
+			{#if c.audience === 'users'}
+				{@render userPicker()}
+			{/if}
 			<label class="flex items-center justify-between gap-2 text-xs">
 				<span>Propose an action the analyst can accept</span>
 				<Switch

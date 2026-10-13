@@ -234,6 +234,8 @@ export interface WorkflowEditorCtx {
 	readonly nodeTypes: Record<string, string>;
 	/** Null until the workflow is saved (no runs to learn paths from). */
 	readonly workflowId: number | null;
+	/** The workflow's default suggestion audience, which nodes may override. */
+	readonly suggestionAudience: AiSuggestionAudience;
 }
 
 /** Set by the node config form for the template fields it renders. */

@@ -121,6 +121,7 @@
 		SELECT_CLASS,
 		TEXTAREA_CLASS,
 		workflowErrorsFrom,
+		SUGGESTION_AUDIENCE_LABELS,
 		WORKFLOW_EDITOR_CTX
 	} from '../helpers/ui';
 
@@ -208,6 +209,9 @@
 		},
 		get workflowId() {
 			return workflow?.id ?? null;
+		},
+		get suggestionAudience() {
+			return form.suggestion_audience;
 		}
 	};
 	setContext(WORKFLOW_EDITOR_CTX, ctx);
@@ -1011,9 +1015,14 @@
 									disabled={readOnly}
 									bind:value={form.suggestion_audience}
 								>
-									<option value="entity">Everyone with access to the entity</option>
-									<option value="owner">Only the workflow owner</option>
+									{#each Object.entries(SUGGESTION_AUDIENCE_LABELS) as [value, text] (value)}
+										<option {value}>{text}</option>
+									{/each}
 								</select>
+								<span class="text-2xs text-muted-foreground">
+									The default: a Suggest or Ask an analyst node can address other users.
+									Administrators see every suggestion.
+								</span>
 							</label>
 
 							<div class="grid grid-cols-2 gap-2">

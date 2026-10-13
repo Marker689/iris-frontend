@@ -22,6 +22,7 @@ import type {
 	AiExecutionMode,
 	AiRunStatus,
 	AiStepStatus,
+	AiSuggestionAudience,
 	AiTriggerType,
 	AiUserRef,
 	AiValidationError,
@@ -276,6 +277,15 @@ export function workflowErrorsFrom(data: unknown): AiValidationError[] {
 		(e): e is AiValidationError => !!e && typeof e === 'object' && 'message' in e
 	);
 }
+
+/**
+ * Who the workflow's suggestions are addressed to (`suggestion_audience`).
+ * Administrators see every suggestion whatever the audience.
+ */
+export const SUGGESTION_AUDIENCE_LABELS: Record<AiSuggestionAudience, string> = {
+	entity: 'The owner of the entity (a war room: its members) and the workflow owner',
+	owner: 'Only the workflow owner'
+};
 
 export const WORKFLOW_EDITOR_CTX = Symbol('ai-workflow-editor');
 export const TEMPLATE_FIELD_CTX = Symbol('ai-workflow-template-field');
