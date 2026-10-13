@@ -26,6 +26,11 @@
 	import type { TemplateFieldCtx, WorkflowEditorCtx } from '../helpers/editor';
 	import type { TemplateMode } from '../helpers/template-complete';
 	import {
+		toolArguments,
+		toolArgumentsSkeleton,
+		type ToolArgument
+	} from '../helpers/tool-arguments';
+	import {
 		CLASSIFICATION_TONES,
 		LABEL_CLASS,
 		nodeIcon,
@@ -93,6 +98,8 @@
 			}))
 	);
 	const toolInfo = (name: unknown) => tools.find((t) => t.name === name);
+	// Bumped to reload the arguments field after "Add the required arguments"
+	let argumentsRevision = $state(0);
 
 	const RULE_OPERATORS = [
 		'eq',
@@ -364,9 +371,36 @@
 	</select>
 {/snippet}
 
-{#snippet toolHelp(name: unknown)}
+{#snippet argumentList(args: ToolArgument[])}
+	<ul class="flex flex-col gap-1">
+		{#each args as arg (arg.name)}
+			<li data-testid="wf-tool-arg">
+				<span class="font-mono font-medium">{arg.name}</span>
+				{#if arg.type}<span class="text-muted-foreground"> {arg.type}</span>{/if}
+				{#if arg.required}<span class="text-destructive"> required</span>{/if}
+				{#if arg.values}
+					<span class="text-muted-foreground">
+						— one of {arg.values.map((v) => JSON.stringify(v)).join(', ')}
+					</span>
+				{/if}
+				{#if arg.description}<span class="text-muted-foreground"> — {arg.description}</span>{/if}
+				{#if arg.pinned}<span class="block text-sky-700 dark:text-sky-400">{arg.pinned}</span>{/if}
+				{#if arg.fields.length}
+					<div class="mt-1 border-l pl-2">{@render argumentList(arg.fields)}</div>
+				{/if}
+			</li>
+		{/each}
+	</ul>
+{/snippet}
+
+{#snippet toolHelp(
+	name: unknown,
+	current: unknown,
+	onFill: (args: Record<string, unknown>) => void
+)}
 	{@const info = toolInfo(name)}
 	{#if info}
+		{@const args = toolArguments(info.input_schema, info.classification)}
 		<div class="rounded-md border bg-muted/20 p-2 text-2xs">
 			<p class="flex items-center gap-1">
 				<span class={`rounded px-1 ${CLASSIFICATION_TONES[info.classification] ?? 'bg-muted'}`}>
@@ -374,15 +408,32 @@
 				</span>
 				<span class="text-muted-foreground">{info.description}</span>
 			</p>
-			{#if info.input_schema && Object.keys(info.input_schema).length}
-				<details class="mt-1">
-					<summary class="cursor-pointer text-muted-foreground">Input schema</summary>
-					<pre class="mt-1 max-h-48 overflow-auto whitespace-pre-wrap font-mono">{JSON.stringify(
-							info.input_schema,
-							null,
-							2
-						)}</pre>
+			{#if args.length}
+				<details class="mt-1" open>
+					<summary class="cursor-pointer text-muted-foreground">Arguments</summary>
+					<div class="mt-1 max-h-64 overflow-auto" data-testid="wf-tool-args">
+						{@render argumentList(args)}
+					</div>
+					<p class="mt-1 text-muted-foreground">
+						Ids come from <span class="font-mono">iris_taxonomies_list</span> (types, statuses,
+						TLPs) or from the trigger / earlier nodes, e.g.
+						<span class="font-mono">{'{{ trigger.entity_id }}'}</span>.
+					</p>
+					{#if !readOnly}
+						<Button
+							variant="outline"
+							size="sm"
+							class="mt-1 h-6 px-2 text-2xs"
+							onclick={() =>
+								onFill(toolArgumentsSkeleton(current, info.input_schema, info.classification))}
+							data-testid="wf-tool-args-fill"
+						>
+							Add the required arguments
+						</Button>
+					{/if}
 				</details>
+			{:else}
+				<p class="mt-1 text-muted-foreground">No arguments.</p>
 			{/if}
 		</div>
 	{/if}
@@ -472,7 +523,8 @@
 
 		{#if nodeType === 'trigger'}
 			<p class="text-2xs text-muted-foreground">
-				The trigger is configured in the top bar. Its output is the trigger payload.
+				Its output is the trigger payload. Any of the triggers below starts the workflow;
+				<code>trigger.type</code> says which one fired.
 			</p>
 		{:else if nodeType === 'ai_agent'}
 			{#if catalogue && !catalogue.llm?.enabled}
@@ -915,10 +967,13 @@
 				{@render toolSelect(proposed.tool, (name) =>
 					set('proposed_action', { ...proposed, tool: name })
 				)}
-				{@render toolHelp(proposed.tool)}
+				{@render toolHelp(proposed.tool, proposed.arguments, (args) => {
+					set('proposed_action', { ...(c.proposed_action as object), arguments: args });
+					argumentsRevision += 1;
+				})}
 				<div class="flex flex-col gap-1">
 					<span class={LABEL_CLASS}>Arguments (JSON, string values are templates)</span>
-					{#key nodeId}
+					{#key `${nodeId}:${argumentsRevision}`}
 						<JsonField
 							value={proposed.arguments ?? {}}
 							emptyValue={{}}
@@ -939,7 +994,10 @@
 				<span class={LABEL_CLASS}>Tool</span>
 				{@render toolSelect(c.tool, (name) => set('tool', name))}
 			</div>
-			{@render toolHelp(c.tool)}
+			{@render toolHelp(c.tool, c.arguments, (args) => {
+				set('arguments', args);
+				argumentsRevision += 1;
+			})}
 			{#if actionNeedsAllowlist}
 				<p
 					class="flex items-start gap-1 rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-2xs"
@@ -951,7 +1009,7 @@
 			{/if}
 			<div class="flex flex-col gap-1">
 				<span class={LABEL_CLASS}>Arguments (JSON, string values are templates)</span>
-				{#key nodeId}
+				{#key `${nodeId}:${argumentsRevision}`}
 					<JsonField
 						value={c.arguments ?? {}}
 						emptyValue={{}}
@@ -965,6 +1023,7 @@
 		{:else if nodeType === 'notify'}
 			{@render choice('audience', 'Notify', [
 				['entity', 'People on the entity'],
+				['triggerer', 'The user who triggered the run'],
 				['owner', 'The workflow owner'],
 				['users', 'Specific users']
 			])}
@@ -973,6 +1032,8 @@
 					The owner of the alert, cluster or case (a war room: its members) and the user who
 					triggered the run or whose action fired the event. When none of them can see the entity,
 					the workflow owner is notified instead.
+				{:else if c.audience === 'triggerer'}
+					Whoever started the run, or whose action fired the event, if they can see the entity.
 				{:else}
 					Only active users who can see the entity are notified.
 				{/if}
