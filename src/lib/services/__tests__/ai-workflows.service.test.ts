@@ -10,7 +10,12 @@ vi.mock('../api.service', () => ({
 	}
 }));
 
-import { AiWorkflowsService, aiListData, type AiWorkflowBody } from '../ai-workflows.service';
+import {
+	AiWorkflowsService,
+	aiListData,
+	aiWorkflowTriggers,
+	type AiWorkflowBody
+} from '../ai-workflows.service';
 import { ApiService } from '../api.service';
 
 const mockGet = ApiService.get as unknown as ReturnType<typeof vi.fn>;
@@ -23,8 +28,7 @@ const body: AiWorkflowBody = {
 	name: 'Triage',
 	description: null,
 	is_active: false,
-	trigger_type: 'manual',
-	trigger_config: { entity_types: ['alert'] },
+	triggers: [{ type: 'manual', config: { entity_types: ['alert'] } }],
 	customer_scope: [],
 	graph: { nodes: [], edges: [] },
 	write_tool_allowlist: [],
@@ -85,8 +89,7 @@ describe('AiWorkflowsService', () => {
 		expect(mockGet).toHaveBeenCalledWith('/ai-workflows/catalogue', {});
 		const v = {
 			graph: body.graph,
-			trigger_type: body.trigger_type,
-			trigger_config: body.trigger_config,
+			triggers: body.triggers,
 			write_tool_allowlist: []
 		};
 		await AiWorkflowsService.validate(v);
@@ -163,5 +166,26 @@ describe('aiListData', () => {
 		expect(aiListData({ data: [3], total: 1 })).toEqual([3]);
 		expect(aiListData(null)).toEqual([]);
 		expect(aiListData('nope')).toEqual([]);
+	});
+});
+
+describe('aiWorkflowTriggers', () => {
+	it('returns the triggers', () => {
+		const triggers = [
+			{ type: 'manual' as const, config: {} },
+			{ type: 'workflow' as const, config: {} }
+		];
+		expect(aiWorkflowTriggers({ triggers, trigger_type: 'manual', trigger_config: {} })).toBe(
+			triggers
+		);
+	});
+
+	it('falls back to the single trigger of older workflows', () => {
+		expect(
+			aiWorkflowTriggers({ trigger_type: 'cron', trigger_config: { cron: '* * * * *' } })
+		).toEqual([{ type: 'cron', config: { cron: '* * * * *' } }]);
+		expect(
+			aiWorkflowTriggers({ triggers: [], trigger_type: 'manual', trigger_config: null })
+		).toEqual([{ type: 'manual', config: {} }]);
 	});
 });

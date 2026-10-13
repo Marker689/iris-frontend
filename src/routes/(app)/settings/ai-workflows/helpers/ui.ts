@@ -11,6 +11,7 @@ import {
 	OctagonXIcon,
 	PlayIcon,
 	SearchIcon,
+	SquareArrowOutUpRightIcon,
 	TimerIcon,
 	VariableIcon,
 	ZapIcon
@@ -41,6 +42,7 @@ export const NODE_ICONS: Record<string, typeof Icon> = {
 	action: PlayIcon,
 	notify: BellIcon,
 	delay: TimerIcon,
+	run_workflow: SquareArrowOutUpRightIcon,
 	set_variables: VariableIcon,
 	python: BracesIcon,
 	stop: OctagonXIcon
@@ -57,6 +59,7 @@ export const NODE_TONES: Record<string, string> = {
 	ask_analyst: 'bg-pink-500/15 text-pink-700 dark:text-pink-300',
 	suggest: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
 	action: 'bg-red-500/15 text-red-700 dark:text-red-300',
+	run_workflow: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300',
 	python: 'bg-orange-500/15 text-orange-700 dark:text-orange-300',
 	stop: 'bg-muted text-muted-foreground'
 };
@@ -67,7 +70,8 @@ export const TRIGGER_LABELS: Record<AiTriggerType, string> = {
 	event: 'Event',
 	cron: 'Schedule',
 	manual: 'Manual',
-	webhook: 'Inbound webhook'
+	webhook: 'Inbound webhook',
+	workflow: 'Called by a workflow'
 };
 
 /** What fires a workflow, in a few words: its hook, or its schedule. */

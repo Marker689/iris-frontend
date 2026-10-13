@@ -10,7 +10,13 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Button } from '$lib/components/ui/button';
 	import { UsersService } from '$lib/services/users.service';
-	import type { AiWorkflowCatalogue } from '$lib/services/ai-workflows.service';
+	import {
+		AiWorkflowsService,
+		aiListData,
+		aiWorkflowTriggers,
+		type AiWorkflowCatalogue,
+		type AiWorkflowSummary
+	} from '$lib/services/ai-workflows.service';
 	import { labelFor, nodeIdError, type NodeMeta } from '$lib/utils/ai-workflow-graph';
 	import MultiSelect, { type MultiSelectItem } from './MultiSelect.svelte';
 	import JsonField from './JsonField.svelte';
@@ -131,6 +137,20 @@
 			}));
 		}
 	});
+
+	// ---- run_workflow: the workflows that may be called (they have a "workflow" trigger) ----
+	let callable = $state<AiWorkflowSummary[] | null>(null);
+	onMount(async () => {
+		if (nodeType !== 'run_workflow') return;
+		const res = await AiWorkflowsService.list();
+		callable = res.ok
+			? aiListData<AiWorkflowSummary>(res.data).filter(
+					(w) =>
+						w.id !== editor?.workflowId && aiWorkflowTriggers(w).some((t) => t.type === 'workflow')
+				)
+			: [];
+	});
+	const calledWorkflow = $derived(callable?.find((w) => w.id === Number(c.workflow_id)));
 
 	function set(key: string, value: unknown) {
 		node.config[key] = value;
@@ -965,6 +985,69 @@
 			{@render area('body', 'Body (template)', '', 4)}
 		{:else if nodeType === 'delay'}
 			{@render num('minutes', 'Minutes', 1)}
+		{:else if nodeType === 'run_workflow'}
+			<label class="flex flex-col gap-1">
+				<span class={LABEL_CLASS}>Workflow to call</span>
+				<select
+					class={SELECT_CLASS}
+					disabled={readOnly}
+					value={c.workflow_id ? String(c.workflow_id) : ''}
+					onchange={(e) => {
+						const v = (e.currentTarget as HTMLSelectElement).value;
+						set('workflow_id', v ? Number(v) : null);
+					}}
+					data-testid="wf-cfg-workflow-id"
+				>
+					<option value="">{callable === null ? 'Loading…' : 'Pick a workflow…'}</option>
+					{#each callable ?? [] as w (w.id)}
+						<option value={String(w.id)}>
+							{w.name}{w.is_active ? '' : ' (inactive)'}
+						</option>
+					{/each}
+					{#if c.workflow_id && callable && !calledWorkflow}
+						<option value={String(c.workflow_id)}>#{c.workflow_id} (not callable)</option>
+					{/if}
+				</select>
+				<span class="text-2xs text-muted-foreground">
+					Only workflows with a "Called by a workflow" trigger are listed. The called run acts as
+					this run's user, on the same entity.
+				</span>
+				{#if calledWorkflow && !calledWorkflow.is_active}
+					<span class="flex items-center gap-1 text-2xs text-destructive">
+						<TriangleAlertIcon class="size-3 shrink-0" />
+						This workflow is inactive: the call fails until it is activated.
+					</span>
+				{/if}
+			</label>
+			<div class="flex flex-col gap-1">
+				<span class={LABEL_CLASS}
+					>Inputs (available to it as <code>trigger.payload.inputs.NAME</code>)</span
+				>
+				<PairsEditor
+					rows={c.inputs}
+					{readOnly}
+					addLabel="Add input"
+					onChange={(v) => set('inputs', v)}
+					testId="wf-cfg-run-inputs"
+				/>
+			</div>
+			{@render choice('mode', 'Mode', [
+				['wait', 'Wait for it to finish'],
+				['async', 'Start it and go on']
+			])}
+			<p class="text-2xs text-muted-foreground">
+				{#if (c.mode ?? 'wait') === 'wait'}
+					The output is the called run's result: <code>status</code>, <code>vars</code>,
+					<code>output</code>. A failed run goes to the error port when it is connected, else fails
+					this run.
+				{:else}
+					The output is the started run's <code>run_uuid</code> and <code>status</code>; its result
+					is not awaited.
+				{/if}
+			</p>
+			{#if (c.mode ?? 'wait') === 'wait'}
+				{@render num('timeout_minutes', 'Timeout (minutes)', 1)}
+			{/if}
 		{:else if nodeType === 'set_variables'}
 			<div class="flex flex-col gap-1">
 				<span class={LABEL_CLASS}>Variables (available as <code>vars.NAME</code>)</span>

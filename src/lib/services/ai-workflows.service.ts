@@ -3,7 +3,7 @@ import type { ApiOptions, RequestResponse } from './api.service';
 
 // ---- Enumerations (mirror `app/models/ai_workflows.py`) ------------------
 
-export type AiTriggerType = 'event' | 'cron' | 'manual' | 'webhook';
+export type AiTriggerType = 'event' | 'cron' | 'manual' | 'webhook' | 'workflow';
 export type AiEntityType = 'alert' | 'alert_cluster' | 'case' | 'war_room';
 export type AiRunStatus = 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled' | 'skipped';
 export type AiStepStatus = 'running' | 'succeeded' | 'failed' | 'waiting' | 'resumed';
@@ -13,13 +13,19 @@ export type AiExecutionMode =
 	| 'suggested'
 	| 'accepted_by_user'
 	| 'denied';
-export type AiWaitKind = 'callback' | 'user_input' | 'delay';
+export type AiWaitKind = 'callback' | 'user_input' | 'delay' | 'workflow';
 export type AiWaitStatus = 'pending' | 'resolved' | 'expired' | 'cancelled';
 export type AiSuggestionAudience = 'entity' | 'owner';
 export type AiSuggestionStatus = 'open' | 'accepted' | 'dismissed' | 'expired' | 'dry_run';
 export type AiSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type AiToolClassification = 'read' | 'write';
 export type AiInboundKind = 'trigger' | 'callback';
+
+/** One trigger of a workflow; a workflow has at most one per type. */
+export interface AiWorkflowTrigger {
+	type: AiTriggerType;
+	config: Record<string, unknown>;
+}
 
 export type AiNodeType =
 	| 'trigger'
@@ -33,9 +39,20 @@ export type AiNodeType =
 	| 'action'
 	| 'notify'
 	| 'delay'
+	| 'run_workflow'
 	| 'set_variables'
 	| 'python'
 	| 'stop';
+
+/** The triggers of a workflow or library entry; older ones only carry the single trigger. */
+export function aiWorkflowTriggers(w: {
+	triggers?: AiWorkflowTrigger[] | null;
+	trigger_type: AiTriggerType;
+	trigger_config?: Record<string, unknown> | null;
+}): AiWorkflowTrigger[] {
+	if (Array.isArray(w.triggers) && w.triggers.length > 0) return w.triggers;
+	return [{ type: w.trigger_type, config: w.trigger_config ?? {} }];
+}
 
 // ---- Graph -----------------------------------------------------------------
 
@@ -120,6 +137,8 @@ export interface AiWorkflowSummary {
 	name: string;
 	description: string | null;
 	is_active: boolean;
+	/** Every trigger; `trigger_type` / `trigger_config` mirror the first one. */
+	triggers?: AiWorkflowTrigger[];
 	trigger_type: AiTriggerType;
 	trigger_config: Record<string, unknown>;
 	owner_id: number;
@@ -156,8 +175,7 @@ export interface AiWorkflowBody {
 	name: string;
 	description: string | null;
 	is_active: boolean;
-	trigger_type: AiTriggerType;
-	trigger_config: Record<string, unknown>;
+	triggers: AiWorkflowTrigger[];
 	customer_scope: number[];
 	graph: AiWorkflowGraph;
 	write_tool_allowlist: string[];
@@ -239,8 +257,7 @@ export interface AiValidationError {
 
 export interface AiValidateBody {
 	graph: AiWorkflowGraph;
-	trigger_type: AiTriggerType;
-	trigger_config: Record<string, unknown>;
+	triggers: AiWorkflowTrigger[];
 	write_tool_allowlist: string[];
 }
 
@@ -527,6 +544,7 @@ export interface AiLibraryEntry {
 	name: string;
 	description: string;
 	category: string;
+	triggers?: AiWorkflowTrigger[];
 	trigger_type: AiTriggerType;
 	trigger_config: Record<string, unknown>;
 	uses_ai: boolean;

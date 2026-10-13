@@ -5,17 +5,23 @@ import type {
 	AiWorkflow,
 	AiWorkflowBody,
 	AiWorkflowCatalogue,
-	AiWorkflowGraph
+	AiWorkflowGraph,
+	AiWorkflowTrigger
 } from '$lib/services/ai-workflows.service';
+import { aiWorkflowTriggers } from '$lib/services/ai-workflows.service';
 import type { NodeMetaMap } from '$lib/utils/ai-workflow-graph';
 import type { AiLiveNodeState } from './live';
 
-/** Editor top-bar state. One config is kept per trigger type so switching back keeps it. */
+/**
+ * Editor top-bar state. `trigger_types` are the workflow's triggers, in
+ * order (at most one per type); one config is kept per type so removing a
+ * trigger and adding it back keeps what was typed.
+ */
 export interface WorkflowForm {
 	name: string;
 	description: string;
 	is_active: boolean;
-	trigger_type: AiTriggerType;
+	trigger_types: AiTriggerType[];
 	trigger_configs: Record<AiTriggerType, Record<string, unknown>>;
 	customer_scope: number[];
 	write_tool_allowlist: string[];
@@ -35,10 +41,12 @@ export function defaultTriggerConfig(type: AiTriggerType): Record<string, unknow
 			return { entity_types: [], menus: [], menu_label: '' };
 		case 'webhook':
 			return { require_signature: false, entity_type: null, entity_id_path: '' };
+		case 'workflow':
+			return {};
 	}
 }
 
-const TRIGGERS: AiTriggerType[] = ['event', 'cron', 'manual', 'webhook'];
+export const TRIGGERS: AiTriggerType[] = ['event', 'cron', 'manual', 'webhook', 'workflow'];
 
 function allDefaults(): Record<AiTriggerType, Record<string, unknown>> {
 	return Object.fromEntries(TRIGGERS.map((t) => [t, defaultTriggerConfig(t)])) as Record<
@@ -52,7 +60,7 @@ export function emptyWorkflowForm(): WorkflowForm {
 		name: '',
 		description: '',
 		is_active: false,
-		trigger_type: 'manual',
+		trigger_types: ['manual'],
 		trigger_configs: allDefaults(),
 		customer_scope: [],
 		write_tool_allowlist: [],
@@ -65,15 +73,15 @@ export function emptyWorkflowForm(): WorkflowForm {
 
 export function formFromWorkflow(w: AiWorkflow): WorkflowForm {
 	const configs = allDefaults();
-	configs[w.trigger_type] = {
-		...configs[w.trigger_type],
-		...JSON.parse(JSON.stringify(w.trigger_config ?? {}))
-	};
+	const triggers = aiWorkflowTriggers(w);
+	for (const t of triggers) {
+		configs[t.type] = { ...configs[t.type], ...JSON.parse(JSON.stringify(t.config ?? {})) };
+	}
 	return {
 		name: w.name,
 		description: w.description ?? '',
 		is_active: w.is_active,
-		trigger_type: w.trigger_type,
+		trigger_types: triggers.map((t) => t.type),
 		trigger_configs: configs,
 		customer_scope: [...(w.customer_scope ?? [])],
 		write_tool_allowlist: [...(w.write_tool_allowlist ?? [])],
@@ -98,6 +106,22 @@ export function cleanTriggerConfig(
 	return out;
 }
 
+/** The form's triggers as the backend takes them. */
+export function formTriggers(form: WorkflowForm): AiWorkflowTrigger[] {
+	return form.trigger_types.map((type) => ({
+		type,
+		config: cleanTriggerConfig(type, form.trigger_configs[type] ?? {})
+	}));
+}
+
+/** The form's config of a trigger type, or null when the workflow has no such trigger. */
+export function formTriggerConfig(
+	form: WorkflowForm,
+	type: AiTriggerType
+): Record<string, unknown> | null {
+	return form.trigger_types.includes(type) ? (form.trigger_configs[type] ?? {}) : null;
+}
+
 export function bodyFromForm(
 	form: WorkflowForm,
 	graph: AiWorkflowGraph,
@@ -107,11 +131,7 @@ export function bodyFromForm(
 		name: form.name.trim(),
 		description: form.description.trim() || null,
 		is_active: form.is_active,
-		trigger_type: form.trigger_type,
-		trigger_config: cleanTriggerConfig(
-			form.trigger_type,
-			form.trigger_configs[form.trigger_type] ?? {}
-		),
+		triggers: formTriggers(form),
 		customer_scope: [...form.customer_scope],
 		graph,
 		write_tool_allowlist: [...form.write_tool_allowlist],
@@ -173,17 +193,41 @@ export function workflowFromJson(
 		if (typeof doc.is_active !== 'boolean') return { error: '"is_active" must be true or false' };
 		form.is_active = doc.is_active;
 	}
-	if (has('trigger_type')) {
-		if (!TRIGGERS.includes(doc.trigger_type as AiTriggerType))
+	if (has('triggers')) {
+		const triggers = doc.triggers;
+		if (!Array.isArray(triggers) || triggers.length === 0)
+			return { error: '"triggers" must be a non-empty list of {type, config} objects' };
+		const types: AiTriggerType[] = [];
+		for (const t of triggers) {
+			if (!isObject(t)) return { error: 'Every trigger must be a {type, config} object' };
+			if (!TRIGGERS.includes(t.type as AiTriggerType))
+				return { error: `A trigger "type" must be one of ${TRIGGERS.join(', ')}` };
+			const type = t.type as AiTriggerType;
+			if (types.includes(type)) return { error: `Only one "${type}" trigger is allowed` };
+			if (t.config !== undefined && t.config !== null && !isObject(t.config))
+				return { error: `The "${type}" trigger config must be an object` };
+			types.push(type);
+			form.trigger_configs[type] = {
+				...defaultTriggerConfig(type),
+				...((t.config as Record<string, unknown> | null) ?? {})
+			};
+		}
+		form.trigger_types = types;
+	} else if (has('trigger_type') || has('trigger_config')) {
+		// Older single-trigger documents: replace the first trigger, keep the others
+		const type = has('trigger_type')
+			? (doc.trigger_type as AiTriggerType)
+			: (form.trigger_types[0] ?? 'manual');
+		if (!TRIGGERS.includes(type))
 			return { error: `"trigger_type" must be one of ${TRIGGERS.join(', ')}` };
-		form.trigger_type = doc.trigger_type as AiTriggerType;
-	}
-	if (has('trigger_config')) {
-		if (!isObject(doc.trigger_config)) return { error: '"trigger_config" must be an object' };
-		form.trigger_configs[form.trigger_type] = {
-			...defaultTriggerConfig(form.trigger_type),
-			...doc.trigger_config
-		};
+		if (has('trigger_config') && !isObject(doc.trigger_config))
+			return { error: '"trigger_config" must be an object' };
+		if (has('trigger_config'))
+			form.trigger_configs[type] = {
+				...defaultTriggerConfig(type),
+				...(doc.trigger_config as Record<string, unknown>)
+			};
+		form.trigger_types = [type, ...form.trigger_types.slice(1).filter((t) => t !== type)];
 	}
 	if (has('customer_scope')) {
 		const scope = doc.customer_scope;

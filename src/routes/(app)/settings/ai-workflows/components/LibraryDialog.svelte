@@ -28,6 +28,7 @@
 	import { formatDateTime } from '$lib/utils/time-formatter';
 	import {
 		AiWorkflowsService,
+		aiWorkflowTriggers,
 		type AiImportResult,
 		type AiLibraryEntry,
 		type AiWorkflow
@@ -213,14 +214,15 @@
 					<section class="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto">
 						<div class="flex flex-wrap items-center gap-1.5">
 							<h2 class="mr-1 text-sm font-semibold">{selected.name}</h2>
-							<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
-								{TRIGGER_LABELS[selected.trigger_type] ?? selected.trigger_type}
-							</span>
-							{#if triggerDetail(selected.trigger_type, selected.trigger_config)}
-								<span class="font-mono text-2xs text-muted-foreground">
-									{triggerDetail(selected.trigger_type, selected.trigger_config)}
+							{#each aiWorkflowTriggers(selected) as trigger (trigger.type)}
+								{@const detail = triggerDetail(trigger.type, trigger.config)}
+								<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
+									{TRIGGER_LABELS[trigger.type] ?? trigger.type}
 								</span>
-							{/if}
+								{#if detail}
+									<span class="font-mono text-2xs text-muted-foreground">{detail}</span>
+								{/if}
+							{/each}
 							{#if selected.uses_ai}
 								<span
 									class="flex items-center gap-1 rounded bg-violet-500/15 px-1.5 py-0.5 text-2xs text-violet-700 dark:text-violet-300"

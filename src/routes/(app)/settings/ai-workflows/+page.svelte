@@ -32,6 +32,7 @@
 	import {
 		AiWorkflowsService,
 		aiListData,
+		aiWorkflowTriggers,
 		type AiEntityType,
 		type AiImportResult,
 		type AiRunSummary,
@@ -184,10 +185,12 @@
 		runOpen = true;
 	}
 
-	const manualEntityTypes = (w: AiWorkflowSummary): AiEntityType[] =>
-		w.trigger_type === 'manual' && Array.isArray(w.trigger_config?.entity_types)
-			? (w.trigger_config.entity_types as AiEntityType[])
+	const manualEntityTypes = (w: AiWorkflowSummary): AiEntityType[] => {
+		const manual = aiWorkflowTriggers(w).find((t) => t.type === 'manual');
+		return Array.isArray(manual?.config.entity_types)
+			? (manual.config.entity_types as AiEntityType[])
 			: [];
+	};
 
 	const COUNT_ORDER = [
 		'succeeded',
@@ -315,7 +318,6 @@
 						<tbody>
 							{#each workflows as workflow (workflow.id)}
 								{@const counts = workflow.run_counts_24h ?? {}}
-								{@const detail = triggerDetail(workflow.trigger_type, workflow.trigger_config)}
 								<tr class="border-t hover:bg-muted/20" data-testid={`wf-row-${workflow.id}`}>
 									<td class="px-3 py-2">
 										<Switch
@@ -339,17 +341,24 @@
 										{/if}
 									</td>
 									<td class="max-w-0 px-3 py-2">
-										<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
-											{TRIGGER_LABELS[workflow.trigger_type] ?? workflow.trigger_type}
-										</span>
-										{#if detail}
-											<span
-												class="ml-1 truncate font-mono text-2xs text-muted-foreground"
-												title={detail}
-											>
-												{detail}
-											</span>
-										{/if}
+										<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+											{#each aiWorkflowTriggers(workflow) as trigger (trigger.type)}
+												{@const detail = triggerDetail(trigger.type, trigger.config)}
+												<span class="flex min-w-0 items-center">
+													<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
+														{TRIGGER_LABELS[trigger.type] ?? trigger.type}
+													</span>
+													{#if detail}
+														<span
+															class="ml-1 truncate font-mono text-2xs text-muted-foreground"
+															title={detail}
+														>
+															{detail}
+														</span>
+													{/if}
+												</span>
+											{/each}
+										</div>
 										{#if workflow.last_fired_at}
 											<div class="text-2xs text-muted-foreground">
 												Last fired {formatDateTime(workflow.last_fired_at)}

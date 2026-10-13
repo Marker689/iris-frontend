@@ -52,6 +52,7 @@
 		AI_RUN_WATCH,
 		AiWorkflowsService,
 		aiListData,
+		aiWorkflowTriggers,
 		type AiBlock,
 		type AiBlockDefinition,
 		type AiEntityType,
@@ -100,7 +101,7 @@
 	import PanelResizer from '../components/PanelResizer.svelte';
 	import {
 		bodyFromForm,
-		cleanTriggerConfig,
+		formTriggers,
 		emptyWorkflowForm,
 		formFromWorkflow,
 		workflowFromJson,
@@ -587,11 +588,7 @@
 		validating = true;
 		const res = await AiWorkflowsService.validate({
 			graph: currentGraph(),
-			trigger_type: form.trigger_type,
-			trigger_config: cleanTriggerConfig(
-				form.trigger_type,
-				form.trigger_configs[form.trigger_type] ?? {}
-			),
+			triggers: formTriggers(form),
 			write_tool_allowlist: [...form.write_tool_allowlist]
 		});
 		validating = false;
@@ -778,11 +775,14 @@
 		});
 	}
 
-	const manualEntityTypes = $derived(
-		(workflow?.trigger_type === 'manual' && Array.isArray(workflow.trigger_config?.entity_types)
-			? workflow.trigger_config.entity_types
-			: []) as AiEntityType[]
-	);
+	const manualEntityTypes = $derived.by(() => {
+		const manual = workflow
+			? aiWorkflowTriggers(workflow).find((t) => t.type === 'manual')
+			: undefined;
+		return (
+			Array.isArray(manual?.config.entity_types) ? manual.config.entity_types : []
+		) as AiEntityType[];
+	});
 </script>
 
 <svelte:head>
@@ -975,7 +975,7 @@
 								{catalogue}
 								{readOnly}
 								workflowId={workflow?.id ?? null}
-								savedTriggerType={workflow?.trigger_type ?? null}
+								savedTriggerTypes={workflow ? aiWorkflowTriggers(workflow).map((t) => t.type) : []}
 								hasInboundToken={workflow?.has_inbound_token ?? false}
 								hasSigningSecret={workflow?.has_signing_secret ?? false}
 								inboundUrl={workflow?.inbound_url ?? null}
