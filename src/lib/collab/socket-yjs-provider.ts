@@ -11,7 +11,8 @@
  * algebra client-side. Our job is:
  *
  *   1. `emit('join', ...)` on connect (or reconnect).
- *   2. Apply the server's `sync-init` reply to the local `Y.Doc`.
+ *   2. Apply the server's `sync-init` reply to the local `Y.Doc`, then
+ *      send back whatever the server is missing (see `resyncToServer`).
  *   3. On every local `Y.Doc` update, `emit('sync', ...)`.
  *   4. On inbound `sync`, apply the update to the local `Y.Doc`.
  *   5. Same round-trip for awareness (cursors + user identity).
@@ -115,6 +116,10 @@ export class SocketYjsProvider {
 
 	private opts: SocketYjsProviderOptions;
 	private destroyed = false;
+	// Set by the first local edit. An editor that typed resends its state
+	// on every (re)join: updates emitted just before a disconnect may never
+	// have reached the server, and nothing else would ever tell us.
+	private editedLocally = false;
 	// Trusted `clientID → authenticated user` mapping, populated from
 	// server-side `awareness-identity` broadcasts. The label inside a
 	// remote peer's awareness payload is client-authored and therefore
@@ -145,6 +150,7 @@ export class SocketYjsProvider {
 	private readonly onResolutionError = (data: any) => this.opts.onResolutionError?.(data);
 	private readonly onYUpdate = (update: Uint8Array, origin: unknown) => {
 		if (origin === this) return; // ignore updates we applied from the network
+		this.editedLocally = true;
 		this.emitSync(update);
 	};
 	private readonly onAwarenessUpdate = (
@@ -209,7 +215,9 @@ export class SocketYjsProvider {
 
 		if (data.y_state) {
 			try {
-				Y.applyUpdate(this.ydoc, fromBase64(data.y_state), this);
+				const serverState = fromBase64(data.y_state);
+				Y.applyUpdate(this.ydoc, serverState, this);
+				if (data.can_write) this.resyncToServer(serverState);
 			} catch (err) {
 				// Malformed snapshot — bail out; the editor stays empty
 				// until a remote peer sends the next sync, which will
@@ -224,6 +232,30 @@ export class SocketYjsProvider {
 			canWrite: !!data.can_write,
 			user: data.user
 		});
+	}
+
+	/**
+	 * Send the server the part of our Y.Doc its `serverState` lacks — Yjs's
+	 * "sync step 2", which a plain join does not do. Edits typed while the
+	 * socket was down are dropped by `emitSync`, and the ones in flight when
+	 * it died may be lost too: both reach the server here, on the rejoin.
+	 * This also restores a server state that lost updates our doc holds.
+	 *
+	 * The diff always carries the whole delete set, so it is sent only when
+	 * there may be something to restore: we edited, or we hold updates the
+	 * server has not got. A mere visitor's join writes nothing.
+	 */
+	private resyncToServer(serverState: Uint8Array) {
+		const serverVector = Y.encodeStateVectorFromUpdate(serverState);
+		if (!this.editedLocally && !this.isAheadOf(Y.decodeStateVector(serverVector))) return;
+		this.emitSync(Y.encodeStateAsUpdate(this.ydoc, serverVector));
+	}
+
+	private isAheadOf(serverVector: Map<number, number>) {
+		for (const [client, clock] of Y.decodeStateVector(Y.encodeStateVector(this.ydoc))) {
+			if (clock > (serverVector.get(client) ?? 0)) return true;
+		}
+		return false;
 	}
 
 	private handleRemoteSync(data: { doc: string; update: Base64; origin?: string }) {
@@ -342,6 +374,7 @@ export class SocketYjsProvider {
 	}
 
 	private emitSync(update: Uint8Array) {
+		// Dropped while disconnected: `resyncToServer` sends it on the rejoin
 		if (this.destroyed || !this.socket.connected) return;
 		// Only the opaque Yjs update travels — the server owns markdown
 		// rendering (see `iris_engine/collab/render.py`) and will produce
