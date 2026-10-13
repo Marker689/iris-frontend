@@ -9,6 +9,10 @@
 
   The list is split into what needs a decision, what dry runs produced
   (clearable one by one or all at once) and what is resolved.
+
+  Filtering happens server side and the list comes a page at a time
+  (keyset cursor, so live inserts never shift or repeat rows); the next
+  page loads as the bottom of the list scrolls into view.
 -->
 <script lang="ts">
 	import { getContext, onDestroy, onMount, tick, untrack } from 'svelte';
@@ -36,7 +40,6 @@
 	} from '$lib/components/ai-suggestions/ai-suggestion-inbox';
 	import {
 		AiSuggestionsService,
-		aiSuggestionsUnwrapList,
 		type AiSuggestion,
 		type AiSuggestionEntityType,
 		type AiSuggestionSocketEvent
@@ -60,6 +63,7 @@
 		dry_run: 'Dry runs'
 	};
 	const ENTITY_TYPES = Object.keys(AI_SUGGESTION_ENTITY_LABELS) as AiSuggestionEntityType[];
+	const PAGE_SIZE = 50;
 
 	const userCtx = getContext<UserCtx>(USER_CTX);
 	const isAdmin = $derived(!!userCtx?.can('server_administrator'));
@@ -70,6 +74,9 @@
 	let knownWorkflows = $state<Array<{ id: number; name: string }>>([]);
 	let loading = $state(false);
 	let loadError = $state<string | null>(null);
+	let nextCursor = $state<string | null>(null);
+	let loadingMore = $state(false);
+	let moreError = $state<string | null>(null);
 
 	const focusId = $derived.by(() => {
 		const raw = page.url.searchParams.get('id');
@@ -90,25 +97,36 @@
 		}
 	}
 
+	function pageFilters(cursor: string | null) {
+		return {
+			status: aiSuggestionInboxStatusParam(filters.status),
+			workflow_id: filters.workflowId,
+			entity_type: filters.entityType || null,
+			severity: filters.severity || null,
+			mine: filters.mine,
+			limit: PAGE_SIZE,
+			cursor
+		};
+	}
+
+	// Bumped by every first-page load: a page answering after the
+	// filters changed is dropped.
 	let seq = 0;
 	async function load() {
 		const mine = ++seq;
 		loading = true;
 		loadError = null;
-		const res = await AiSuggestionsService.list({
-			status: aiSuggestionInboxStatusParam(filters.status),
-			workflow_id: filters.workflowId,
-			entity_type: filters.entityType || null,
-			severity: filters.severity || null,
-			mine: filters.mine
-		});
+		moreError = null;
+		loadingMore = false;
+		const res = await AiSuggestionsService.page(pageFilters(null));
 		if (mine !== seq) return;
 		loading = false;
-		if (!res.ok) {
+		if (!res.ok || !res.data || typeof res.data === 'string') {
 			loadError = res.error?.message ?? 'Could not load the suggestions';
 			return;
 		}
-		let list = aiSuggestionsUnwrapList(res.data);
+		let list = res.data.items;
+		nextCursor = res.data.next_cursor;
 		const id = focusId;
 		if (id !== null && !list.some((s) => s.id === id)) {
 			const one = await AiSuggestionsService.get(id);
@@ -122,6 +140,37 @@
 				.querySelector(`[data-suggestion-id="${id}"]`)
 				?.scrollIntoView({ block: 'center', behavior: 'smooth' });
 		}
+	}
+
+	async function loadMore() {
+		const cursor = nextCursor;
+		if (!cursor || loading || loadingMore) return;
+		const mine = seq;
+		loadingMore = true;
+		moreError = null;
+		const res = await AiSuggestionsService.page(pageFilters(cursor));
+		if (mine !== seq) return;
+		loadingMore = false;
+		if (!res.ok || !res.data || typeof res.data === 'string') {
+			moreError = res.error?.message ?? 'Could not load more suggestions';
+			return;
+		}
+		// The focused one, or one that arrived live, may already be there
+		const known = new Set(items.map((s) => s.id));
+		items = [...items, ...res.data.items.filter((s) => !known.has(s.id))];
+		nextCursor = res.data.next_cursor;
+	}
+
+	/** Loads the next page when the end of the list scrolls into view. */
+	function loadsMoreWhenVisible(node: HTMLElement) {
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries.some((e) => e.isIntersecting) && !moreError) loadMore();
+			},
+			{ rootMargin: '200px' }
+		);
+		observer.observe(node);
+		return { destroy: () => observer.disconnect() };
 	}
 
 	function onChanged(updated: AiSuggestion | null) {
@@ -328,9 +377,9 @@
 				{/if}
 
 				<span class="ml-auto text-2xs tabular-nums text-muted-foreground">
-					{items.length} shown{openCount ? ` · ${openCount} open` : ''}{dryRunCount
-						? ` · ${dryRunCount} from dry runs`
-						: ''}
+					{items.length}{nextCursor ? '+' : ''} shown{openCount
+						? ` · ${openCount} open`
+						: ''}{dryRunCount ? ` · ${dryRunCount} from dry runs` : ''}
 				</span>
 			</div>
 		</div>
@@ -403,6 +452,35 @@
 								{/each}
 							</section>
 						{/each}
+						{#if nextCursor}
+							<div
+								class="flex flex-col items-center gap-1 py-2"
+								use:loadsMoreWhenVisible
+								data-testid="ai-suggestions-load-more"
+							>
+								{#if moreError}
+									<p class="text-xs text-destructive">{moreError}</p>
+								{/if}
+								<Button
+									variant="outline"
+									size="sm"
+									class="h-7 text-xs"
+									onclick={loadMore}
+									disabled={loadingMore}
+								>
+									{#if loadingMore}
+										<RefreshCwIcon size={12} class="mr-1 animate-spin" />
+										Loading…
+									{:else}
+										Load more
+									{/if}
+								</Button>
+							</div>
+						{:else if items.length > PAGE_SIZE}
+							<p class="py-2 text-center text-2xs text-muted-foreground">
+								That is everything matching these filters.
+							</p>
+						{/if}
 					</div>
 				{/if}
 			</div>

@@ -101,8 +101,17 @@ export interface AiSuggestionFilters {
 	severity?: string | null;
 	/** Only those addressed to the current user (what non-admins get anyway). */
 	mine?: boolean;
-	/** 200 by default, 500 at most. */
+	/** Page size: 200 by default, 500 at most. */
 	limit?: number | null;
+	/** `next_cursor` of the previous page. */
+	cursor?: string | null;
+}
+
+/** A page of the list, newest first. */
+export interface AiSuggestionPage {
+	items: AiSuggestion[];
+	/** What to pass as `cursor` for the next page; null on the last one. */
+	next_cursor: string | null;
 }
 
 /** Socket payload of the `ai_suggestion` event on `/notifications`. */
@@ -114,8 +123,8 @@ export interface AiSuggestionSocketEvent {
 const BASE = '/ai-suggestions';
 
 /**
- * The list route may answer with a plain array or, if it ends up
- * paginated, `{data: [...]}`. Both are flattened to an array.
+ * The list route answers a page, `{data: [...], next_cursor}` (a plain
+ * array from an older backend). Both are flattened to an array.
  */
 export function aiSuggestionsUnwrapList(data: unknown): AiSuggestion[] {
 	if (Array.isArray(data)) return data as AiSuggestion[];
@@ -125,25 +134,58 @@ export function aiSuggestionsUnwrapList(data: unknown): AiSuggestion[] {
 	return [];
 }
 
+function nextCursorOf(data: unknown): string | null {
+	if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+	const cursor = (data as { next_cursor?: unknown }).next_cursor;
+	return typeof cursor === 'string' && cursor !== '' ? cursor : null;
+}
+
+function listParams(filters: AiSuggestionFilters): Record<string, unknown> {
+	const params: Record<string, unknown> = {};
+	if (filters.entity_type) params.entity_type = filters.entity_type;
+	if (filters.entity_id != null) params.entity_id = filters.entity_id;
+	if (filters.status) params.status = filters.status;
+	if (filters.run_uuid) params.run_uuid = filters.run_uuid;
+	if (filters.workflow_id != null) params.workflow_id = filters.workflow_id;
+	if (filters.severity) params.severity = filters.severity;
+	if (filters.mine) params.mine = 'true';
+	if (filters.limit != null) params.limit = filters.limit;
+	if (filters.cursor) params.cursor = filters.cursor;
+	return params;
+}
+
 export class AiSuggestionsService {
+	/** The first page only (or the one `filters.cursor` points at). */
 	static async list(
 		filters: AiSuggestionFilters = {},
 		options: ApiOptions = {}
 	): Promise<RequestResponse<AiSuggestion[]>> {
-		const params: Record<string, unknown> = {};
-		if (filters.entity_type) params.entity_type = filters.entity_type;
-		if (filters.entity_id != null) params.entity_id = filters.entity_id;
-		if (filters.status) params.status = filters.status;
-		if (filters.run_uuid) params.run_uuid = filters.run_uuid;
-		if (filters.workflow_id != null) params.workflow_id = filters.workflow_id;
-		if (filters.severity) params.severity = filters.severity;
-		if (filters.mine) params.mine = 'true';
-		if (filters.limit != null) params.limit = filters.limit;
-		const res = await ApiService.get<unknown>(ApiService.withQuery(BASE, params), options);
+		const res = await ApiService.get<unknown>(
+			ApiService.withQuery(BASE, listParams(filters)),
+			options
+		);
 		if (!res.ok || res.data == null || typeof res.data === 'string') {
 			return res as RequestResponse<AiSuggestion[]>;
 		}
 		return { ...res, data: aiSuggestionsUnwrapList(res.data) };
+	}
+
+	/** One page, with the cursor of the next. */
+	static async page(
+		filters: AiSuggestionFilters = {},
+		options: ApiOptions = {}
+	): Promise<RequestResponse<AiSuggestionPage>> {
+		const res = await ApiService.get<unknown>(
+			ApiService.withQuery(BASE, listParams(filters)),
+			options
+		);
+		if (!res.ok || res.data == null || typeof res.data === 'string') {
+			return res as RequestResponse<AiSuggestionPage>;
+		}
+		return {
+			...res,
+			data: { items: aiSuggestionsUnwrapList(res.data), next_cursor: nextCursorOf(res.data) }
+		};
 	}
 
 	/** Open suggestion counts per entity id: `{"<id>": n}`. */

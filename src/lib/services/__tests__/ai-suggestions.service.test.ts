@@ -52,6 +52,34 @@ describe('AiSuggestionsService', () => {
 		expect(res.data).toEqual([{ id: 1 }]);
 	});
 
+	it('pages with a cursor', async () => {
+		mockGet.mockResolvedValueOnce({
+			ok: true,
+			status: 200,
+			data: { data: [{ id: 3 }], next_cursor: '2026-10-01T12:00:00_3' }
+		});
+		const res = await AiSuggestionsService.page({ status: 'all', limit: 50, cursor: 'c1' });
+		expect(mockGet).toHaveBeenCalledWith('/ai-suggestions?status=all&limit=50&cursor=c1', {});
+		expect(res.data).toEqual({ items: [{ id: 3 }], next_cursor: '2026-10-01T12:00:00_3' });
+	});
+
+	it('ends paging on a null cursor or a plain array', async () => {
+		mockGet.mockResolvedValueOnce({
+			ok: true,
+			status: 200,
+			data: { data: [{ id: 1 }], next_cursor: null }
+		});
+		expect((await AiSuggestionsService.page()).data).toEqual({
+			items: [{ id: 1 }],
+			next_cursor: null
+		});
+		mockGet.mockResolvedValueOnce({ ok: true, status: 200, data: [{ id: 2 }] });
+		expect((await AiSuggestionsService.page()).data).toEqual({
+			items: [{ id: 2 }],
+			next_cursor: null
+		});
+	});
+
 	it('passes errors through', async () => {
 		mockGet.mockResolvedValueOnce({ ok: false, status: 403, data: { message: 'no' } });
 		const res = await AiSuggestionsService.list();
