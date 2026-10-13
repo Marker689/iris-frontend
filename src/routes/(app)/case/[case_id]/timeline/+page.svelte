@@ -2,11 +2,12 @@
 	import { dayKey } from '$lib/utils/time-formatter';
 	import { setContext, getContext } from 'svelte';
 	import { page } from '$app/state';
-	import type {
-		CaseTimelineEvent,
-		CaseTimelineFilterQuery,
-		CreateCaseTimelineEventBody,
-		UpdateCaseTimelineEventBody
+	import {
+		CaseTimelineService,
+		type CaseTimelineEvent,
+		type CaseTimelineFilterQuery,
+		type CreateCaseTimelineEventBody,
+		type UpdateCaseTimelineEventBody
 	} from '$lib/services/case-timeline.service';
 	import {
 		EventCategoriesService,
@@ -47,6 +48,7 @@
 	import TimelineView from './components/timeline-view.svelte';
 	import TimelineEventDialog from './components/timeline-event-dialog.svelte';
 	import { toast } from '$lib/stores/toast.store';
+	import { parseTimelineCsv, timelineCsvDates } from './csv-import';
 	import CaseWorkspace from '../components/CaseWorkspace.svelte';
 	import type { TimelineFilterData, TimelineFilterFieldValue } from './types';
 
@@ -713,11 +715,7 @@
 		}
 	};
 
-	const parseCsvLine = (line: string) => {
-		const matches = [...line.matchAll(/"((?:[^"]|"")*)"|([^,]+)/g)];
-
-		return matches.map((match) => (match[1] ?? match[2] ?? '').replaceAll('""', '"').trim());
-	};
+	const MAX_IMPORT_ERRORS_SHOWN = 5;
 
 	const uploadTimelineCsv = async () => {
 		const input = document.createElement('input');
@@ -727,48 +725,77 @@
 
 		input.onchange = async () => {
 			const file = input.files?.[0];
+			const caseId = timeline.currentCaseId();
 
-			if (!file) return;
+			if (!file || caseId === null) return;
 
-			const text = await file.text();
+			const csv = parseTimelineCsv(await file.text());
+			if (csv.errors.length || !csv.rows.length) {
+				toast({
+					title: 'Cannot import this file',
+					description: csv.errors.join('. ') || 'It has no events.',
+					variant: 'destructive'
+				});
+				return;
+			}
 
-			const lines = text
-				.split(/\r?\n/)
-				.map((line) => line.trim())
-				.filter(Boolean);
+			// Dates of an unusual shape go through the magic date parse
+			const { dated, errors } = await timelineCsvDates(csv.rows, async (value) => {
+				const res = await CaseTimelineService.convertDate(caseId, value, { fetch });
+				return res.ok && res.data && typeof res.data !== 'string' ? res.data : null;
+			});
 
-			if (lines.length <= 1) return;
+			const categoryId = (name: string) =>
+				eventCategories.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id ??
+				defaultEventCategoryId;
 
-			const headers = parseCsvLine(lines[0] ?? '');
-
-			const getIndex = (name: string) => headers.indexOf(name);
-
-			const rows = lines.slice(1);
-
-			for (const row of rows) {
-				const values = parseCsvLine(row);
-
+			let imported = 0;
+			for (const { row, date, tz } of dated) {
 				const payload: CreateCaseTimelineEventBody = {
-					event_title: values[getIndex('event_title')] ?? '',
-					event_date: values[getIndex('event_date(UTC)')] ?? '',
-					event_tz: values[getIndex('event_tz')] ?? '+00:00',
-					event_content: (values[getIndex('event_description')] ?? '').replaceAll(' - ', '\n'),
-					event_tags: values[getIndex('event_tags')] ?? '',
-					event_source: '',
-					event_raw: '',
+					event_title: row.title,
+					event_date: date,
+					event_tz: tz,
+					event_content: row.description,
+					event_tags: row.tags,
+					event_source: row.source,
+					event_raw: row.raw,
 					event_assets: [],
 					event_iocs: [],
 					event_in_summary: false,
 					event_in_graph: true,
 					event_sync_iocs_assets: false,
 					parent_event_id: null,
-					event_category_id: defaultEventCategoryId
+					event_category_id: categoryId(row.category)
 				};
 
-				await timeline.createEvent(payload, { fetch });
+				// One refresh at the end rather than one per event
+				const res = await CaseTimelineService.createEvent(caseId, payload, { fetch });
+				if (res.ok) {
+					imported += 1;
+				} else {
+					errors.push({ number: row.number, message: res.error?.message ?? 'Not saved' });
+				}
 			}
 
 			await refreshTimeline();
+
+			const total = csv.rows.length;
+			if (!errors.length) {
+				toast({ title: `Imported ${imported} event${imported === 1 ? '' : 's'}` });
+				return;
+			}
+			errors.sort((a, b) => a.number - b.number);
+			const shown = errors
+				.slice(0, MAX_IMPORT_ERRORS_SHOWN)
+				.map((e) => `Event ${e.number}: ${e.message}`);
+			if (errors.length > MAX_IMPORT_ERRORS_SHOWN) {
+				shown.push(`… and ${errors.length - MAX_IMPORT_ERRORS_SHOWN} more`);
+			}
+			toast({
+				title: `Imported ${imported} of ${total} events`,
+				description: shown.join('; '),
+				variant: 'destructive'
+			});
 		};
 
 		input.click();
