@@ -70,6 +70,8 @@ describe('VulnerabilitiesService.search', () => {
 			search: '  log4j  ',
 			severity: ['critical', 'high'],
 			kind: ['cve', 'zero-day'],
+			vendor: ['Acme, Inc.', 'Citrix'],
+			product: ['NetScaler ADC'],
 			kev: true,
 			private: false,
 			affected: true
@@ -84,6 +86,8 @@ describe('VulnerabilitiesService.search', () => {
 		expect(q.get('search')).toBe('log4j');
 		expect(q.getAll('severity')).toEqual(['critical,high']);
 		expect(q.get('kind')).toBe('cve,zero-day');
+		expect(q.getAll('vendor')).toEqual(['Acme, Inc.', 'Citrix']);
+		expect(q.getAll('product')).toEqual(['NetScaler ADC']);
 		expect(q.get('kev')).toBe('true');
 		expect(q.get('private')).toBe('false');
 		expect(q.get('affected')).toBe('true');
@@ -94,6 +98,8 @@ describe('VulnerabilitiesService.search', () => {
 			search: '   ',
 			severity: [],
 			kind: [],
+			vendor: [],
+			product: [],
 			affected: false
 		});
 		expect(lastUrl(ApiService.get)).toBe('/manage/vulnerabilities');
@@ -106,6 +112,8 @@ describe('VulnerabilitiesService catalogue entries', () => {
 		expect(lastUrl(ApiService.get)).toBe('/manage/vulnerabilities/7');
 		await VulnerabilitiesService.exposure(7);
 		expect(lastUrl(ApiService.get)).toBe('/manage/vulnerabilities/7/exposure');
+		await VulnerabilitiesService.technologies();
+		expect(lastUrl(ApiService.get)).toBe('/manage/vulnerabilities/technologies');
 		await VulnerabilitiesService.lookup('CVE-2024-3400');
 		expect(lastUrl(ApiService.get)).toBe('/manage/vulnerabilities/lookup?identifier=CVE-2024-3400');
 	});

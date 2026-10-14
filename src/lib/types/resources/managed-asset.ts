@@ -15,6 +15,12 @@
  * investigations the viewer is not cleared for.
  */
 
+import type {
+	ExploitationStatus,
+	RemediationStatus,
+	VulnerabilitySeverity
+} from '$lib/services/vulnerabilities.service';
+
 export type AssetCriticality = 'critical' | 'high' | 'medium' | 'low' | 'unknown';
 
 export type AssetEnvironment = 'production' | 'staging' | 'development' | 'test' | 'dr' | 'unknown';
@@ -33,6 +39,20 @@ export interface ManagedAssetAssetType {
 export interface ManagedAssetCustomer {
 	customer_id: number;
 	customer_name: string;
+}
+
+/**
+ * One vulnerability finding recorded on a registry asset, as listed on
+ * the asset row (worst severity first).
+ */
+export interface ManagedAssetVulnerabilityTag {
+	finding_id: number;
+	vulnerability_id: number;
+	identifier: string;
+	severity: VulnerabilitySeverity;
+	kev: boolean;
+	remediation_status: RemediationStatus;
+	exploitation_status: ExploitationStatus;
 }
 
 export interface ManagedAsset {
@@ -80,6 +100,11 @@ export interface ManagedAsset {
 	 * per asset, so the list endpoint does not pay for it.
 	 */
 	timeline_event_count?: number | null;
+	/**
+	 * Registry findings of the asset (any status). Null when the caller
+	 * cannot read vulnerabilities.
+	 */
+	vulnerabilities?: ManagedAssetVulnerabilityTag[] | null;
 }
 
 /**

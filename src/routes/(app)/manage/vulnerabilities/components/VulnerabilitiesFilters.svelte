@@ -11,7 +11,8 @@
 		VULNERABILITY_KINDS,
 		VULNERABILITY_SEVERITIES,
 		type VulnerabilityKind,
-		type VulnerabilitySeverity
+		type VulnerabilitySeverity,
+		type VulnerabilityTechnology
 	} from '$lib/services/vulnerabilities.service';
 	import { KIND_LABELS, SEVERITY_LABELS } from '$lib/components/vulnerabilities/labels';
 
@@ -19,6 +20,10 @@
 		search: string;
 		severity: VulnerabilitySeverity[];
 		kind: VulnerabilityKind[];
+		vendor: string[];
+		product: string[];
+		/** Vendor / product pairs of the catalogue, for the two pickers. */
+		technologies?: VulnerabilityTechnology[];
 		kev: boolean | null;
 		isPrivate: boolean | null;
 		affected: boolean;
@@ -32,6 +37,9 @@
 		search = $bindable(''),
 		severity = $bindable([]),
 		kind = $bindable([]),
+		vendor = $bindable([]),
+		product = $bindable([]),
+		technologies = [],
 		kev = $bindable(null),
 		isPrivate = $bindable(null),
 		affected = $bindable(false),
@@ -53,6 +61,50 @@
 	}));
 	const KIND_OPTIONS = VULNERABILITY_KINDS.map((value) => ({ value, label: KIND_LABELS[value] }));
 
+	// Names compare case-insensitively, as the backend matches them.
+	const key = (name: string) => name.toLowerCase();
+
+	/** Selected names stay listed (and removable) even when no longer offered. */
+	const withSelected = (options: { value: string; label: string }[], selected: string[]) => {
+		const offered = new Set(options.map((option) => key(option.value)));
+		const missing = selected.filter((name) => !offered.has(key(name)));
+		return [...missing.map((name) => ({ value: name, label: name })), ...options];
+	};
+
+	const vendorOptions = $derived.by(() => {
+		const counts = new Map<string, { name: string; count: number }>();
+		for (const t of technologies) {
+			if (!t.vendor) continue;
+			const entry = counts.get(key(t.vendor)) ?? { name: t.vendor, count: 0 };
+			entry.count += t.vulnerabilities;
+			counts.set(key(t.vendor), entry);
+		}
+		const options = [...counts.values()]
+			.sort((a, b) => a.name.localeCompare(b.name))
+			.map(({ name, count }) => ({ value: name, label: `${name} (${count})` }));
+		return withSelected(options, vendor);
+	});
+
+	// Narrowed to the selected vendors; a product shipped by several
+	// vendors is one option naming them all.
+	const productOptions = $derived.by(() => {
+		const vendors = new Set(vendor.map(key));
+		const products = new Map<string, { name: string; vendors: string[] }>();
+		for (const t of technologies) {
+			if (vendors.size && !(t.vendor && vendors.has(key(t.vendor)))) continue;
+			const entry = products.get(key(t.product)) ?? { name: t.product, vendors: [] };
+			if (t.vendor && !entry.vendors.includes(t.vendor)) entry.vendors.push(t.vendor);
+			products.set(key(t.product), entry);
+		}
+		const options = [...products.values()]
+			.sort((a, b) => a.name.localeCompare(b.name))
+			.map(({ name, vendors: owners }) => ({
+				value: name,
+				label: owners.length ? `${name} — ${owners.join(', ')}` : name
+			}));
+		return withSelected(options, product);
+	});
+
 	const many = (value: string | string[]) => (Array.isArray(value) ? value : value ? [value] : []);
 
 	const onKey = (event: KeyboardEvent) => {
@@ -68,7 +120,7 @@
 		<Input
 			bind:value={search}
 			onkeydown={onKey}
-			placeholder="Search by identifier, alias, title or tag…"
+			placeholder="Search by identifier, alias, title, tag, vendor or product…"
 			class="flex-1"
 			aria-label="Search vulnerabilities"
 		/>
@@ -108,6 +160,42 @@
 					size="sm"
 					onChange={(value) => {
 						kind = many(value) as VulnerabilityKind[];
+						onSubmit();
+					}}
+				/>
+			</div>
+		</div>
+
+		<div class="flex items-center gap-2 text-xs">
+			<span class="text-muted-foreground">Vendor</span>
+			<div class="w-44">
+				<SearchSelect
+					value={vendor}
+					options={vendorOptions}
+					multiple
+					placeholder="Any"
+					searchPlaceholder="Search vendors…"
+					size="sm"
+					onChange={(value) => {
+						vendor = many(value);
+						onSubmit();
+					}}
+				/>
+			</div>
+		</div>
+
+		<div class="flex items-center gap-2 text-xs">
+			<span class="text-muted-foreground">Product</span>
+			<div class="w-52">
+				<SearchSelect
+					value={product}
+					options={productOptions}
+					multiple
+					placeholder="Any"
+					searchPlaceholder="Search products…"
+					size="sm"
+					onChange={(value) => {
+						product = many(value);
 						onSubmit();
 					}}
 				/>

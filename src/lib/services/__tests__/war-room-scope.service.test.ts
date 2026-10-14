@@ -235,6 +235,45 @@ describe('WarRoomScopeService', () => {
 		});
 	});
 
+	describe('registry assets', () => {
+		it('lists the attached registry assets', async () => {
+			mock('get').mockResolvedValueOnce({ ok: true, status: 200 });
+
+			await WarRoomScopeService.listRegistryAssets(7);
+
+			expect(ApiService.get).toHaveBeenCalledWith('/war-rooms/7/scope/registry-assets', {});
+		});
+
+		it('attaches registry assets with their links', async () => {
+			mock('post').mockResolvedValueOnce({ ok: true, status: 200 });
+			const body = { managed_asset_ids: [30, 31], case_id: 4, vulnerability_id: null };
+
+			await WarRoomScopeService.attachRegistryAssets(7, body);
+
+			expect(ApiService.post).toHaveBeenCalledWith('/war-rooms/7/scope/registry-assets', body, {});
+		});
+
+		it('PATCHes the links of one attachment', async () => {
+			mock('patch').mockResolvedValueOnce({ ok: true, status: 200 });
+
+			await WarRoomScopeService.updateRegistryAsset(7, 12, { case_id: null });
+
+			expect(ApiService.patch).toHaveBeenCalledWith(
+				'/war-rooms/7/scope/registry-assets/12',
+				{ case_id: null },
+				{}
+			);
+		});
+
+		it('DELETEs one attachment', async () => {
+			mock('delete').mockResolvedValueOnce({ ok: true, status: 204 });
+
+			await WarRoomScopeService.detachRegistryAsset(7, 12);
+
+			expect(ApiService.delete).toHaveBeenCalledWith('/war-rooms/7/scope/registry-assets/12', {});
+		});
+	});
+
 	describe('listDecisionRefs', () => {
 		it('GETs the room decisions', async () => {
 			mock('get').mockResolvedValueOnce({ ok: true, status: 200, data: [] });

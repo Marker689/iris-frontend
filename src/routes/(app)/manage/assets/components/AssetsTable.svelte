@@ -7,14 +7,21 @@
   viewer may not be able to open, which is an ordering oracle over the
   same information the scope filter exists to hide. The backend rejects
   those sort keys too — this just keeps the UI from offering them.
+
+  The Vulnerabilities column (registry findings, open ones first) needs
+  `vulnerabilities_read`; without it the server sends no data and the
+  column is hidden.
 -->
 <script lang="ts">
 	import {
 		ArrowUpDownIcon,
 		ArrowUpIcon,
 		ArrowDownIcon,
+		FlameIcon,
 		MoreHorizontalIcon,
 		PencilIcon,
+		PlusIcon,
+		ShieldAlertIcon,
 		Trash2Icon
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -24,7 +31,18 @@
 		formatDate as formatCalendarDay,
 		mediumDateTimeFormatter
 	} from '$lib/utils/time-formatter';
-	import type { AssetCriticality, ManagedAsset } from '$lib/types/resources/managed-asset';
+	import type {
+		AssetCriticality,
+		ManagedAsset,
+		ManagedAssetVulnerabilityTag
+	} from '$lib/types/resources/managed-asset';
+	import { findingStatusGroup } from '$lib/services/vulnerabilities.service';
+	import {
+		REMEDIATION_STATUS_LABELS,
+		SEVERITY_CLASSES,
+		SEVERITY_LABELS,
+		labelOf
+	} from '$lib/components/vulnerabilities/labels';
 
 	type SortDir = 'asc' | 'desc';
 
@@ -37,6 +55,12 @@
 		onOpen: (asset: ManagedAsset) => void;
 		onEdit: (asset: ManagedAsset) => void;
 		onDelete: (asset: ManagedAsset) => void;
+		/** Show the Vulnerabilities column (caller can read vulnerabilities). */
+		showVulnerabilities?: boolean;
+		/** Open the asset on its Vulnerabilities tab. */
+		onOpenVulnerabilities?: (asset: ManagedAsset) => void;
+		/** Record a finding on the asset; hidden when unset. */
+		onRecordVulnerability?: (asset: ManagedAsset) => void;
 	};
 
 	let {
@@ -47,7 +71,10 @@
 		onToggleSort,
 		onOpen,
 		onEdit,
-		onDelete
+		onDelete,
+		showVulnerabilities = false,
+		onOpenVulnerabilities,
+		onRecordVulnerability
 	}: Props = $props();
 
 	// Sort keys match `MANAGED_ASSET_SORTABLE_FIELDS` in
@@ -62,8 +89,49 @@
 		{ key: 'owner', label: 'Owner', sortable: true, cls: 'w-32' },
 		{ key: 'sightings', label: 'Sightings', sortable: false, cls: 'w-28' },
 		{ key: 'compromise', label: 'Compromise', sortable: false, cls: 'w-40' },
+		{ key: 'vulnerabilities', label: 'Vulnerabilities', sortable: false, cls: 'w-48' },
 		{ key: 'updated_at', label: 'Updated', sortable: true, cls: 'w-44' }
 	];
+	const columns = $derived(
+		showVulnerabilities ? COLUMNS : COLUMNS.filter((c) => c.key !== 'vulnerabilities')
+	);
+
+	const SEVERITY_RANK: Record<string, number> = {
+		critical: 0,
+		high: 1,
+		medium: 2,
+		low: 3,
+		none: 4,
+		unknown: 5
+	};
+
+	/** Open findings worst first, then the rest; with the open/exploited counts. */
+	const vulnSummary = (tags: ManagedAssetVulnerabilityTag[] | null | undefined) => {
+		const all = (tags ?? []).map((t) => ({
+			...t,
+			open: findingStatusGroup(t.remediation_status) === 'open',
+			exploited: t.exploitation_status === 'exploited'
+		}));
+		const open = all
+			.filter((t) => t.open)
+			.sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9));
+		return {
+			total: all.length,
+			open,
+			exploitedOpen: open.filter((t) => t.exploited).length,
+			title: all.length
+				? all
+						.map(
+							(t) =>
+								`${t.identifier} · ${SEVERITY_LABELS[t.severity] ?? t.severity} · ${labelOf(
+									REMEDIATION_STATUS_LABELS,
+									t.remediation_status
+								)}${t.exploited ? ' · exploited' : ''}${t.kev ? ' · KEV' : ''}`
+						)
+						.join('\n')
+				: 'No vulnerability finding'
+		};
+	};
 
 	const CRITICALITY_STYLE: Record<AssetCriticality, string> = {
 		critical: 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300',
@@ -97,7 +165,7 @@
 			class="sticky top-[3.75rem] z-10 border-b bg-muted text-left text-xs text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/90"
 		>
 			<tr>
-				{#each COLUMNS as col (col.key)}
+				{#each columns as col (col.key)}
 					{@const SortIco = sortIcon(col.key)}
 					{@const active = orderBy === col.key}
 					<th
@@ -205,6 +273,60 @@
 							<span class="text-xs text-muted-foreground">—</span>
 						{/if}
 					</td>
+					{#if showVulnerabilities}
+						{@const v = vulnSummary(asset.vulnerabilities)}
+						<td class="px-3 py-2 text-xs" data-testid="managed-asset-vulns">
+							<div class="flex flex-wrap items-center gap-1">
+								{#if v.total > 0}
+									<button
+										type="button"
+										class="inline-flex flex-wrap items-center gap-1 text-left hover:opacity-80"
+										onclick={() => onOpenVulnerabilities?.(asset)}
+										title={v.title}
+										aria-label={`Vulnerabilities of ${asset.name}`}
+									>
+										{#each v.open.slice(0, 2) as t (t.finding_id)}
+											<span
+												class="inline-flex items-center gap-0.5 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-2xs {SEVERITY_CLASSES[
+													t.severity
+												] ?? SEVERITY_CLASSES.unknown}"
+											>
+												{#if t.exploited}
+													<FlameIcon size={10} />
+												{/if}
+												{t.identifier}
+											</span>
+										{/each}
+										{#if v.open.length > 2}
+											<span class="text-2xs text-muted-foreground">+{v.open.length - 2}</span>
+										{/if}
+										{#if v.open.length === 0}
+											<span class="inline-flex items-center gap-1 text-2xs text-muted-foreground">
+												<ShieldAlertIcon size={12} />
+												{v.total} closed
+											</span>
+										{:else if v.exploitedOpen > 0}
+											<span class="sr-only">{v.exploitedOpen} exploited</span>
+										{/if}
+									</button>
+								{:else}
+									<span class="text-muted-foreground">—</span>
+								{/if}
+								{#if onRecordVulnerability}
+									<button
+										type="button"
+										class="inline-flex h-5 w-5 items-center justify-center rounded-md border border-dashed text-muted-foreground transition-colors hover:border-solid hover:bg-muted hover:text-foreground"
+										onclick={() => onRecordVulnerability(asset)}
+										aria-label={`Record a vulnerability on ${asset.name}`}
+										title="Record a vulnerability on this asset"
+										data-testid="managed-asset-add-vuln"
+									>
+										<PlusIcon size={12} />
+									</button>
+								{/if}
+							</div>
+						</td>
+					{/if}
 					<!--
 					  Sized wide enough (w-44) that the timestamp sits on one line
 					  whenever there is room. Deliberately not `whitespace-nowrap`:
@@ -228,6 +350,16 @@
 							</DropdownMenu.Trigger>
 							<DropdownMenu.Content align="end" class="w-44">
 								<DropdownMenu.Item onSelect={() => onOpen(asset)}>Details</DropdownMenu.Item>
+								{#if showVulnerabilities && onOpenVulnerabilities}
+									<DropdownMenu.Item onSelect={() => onOpenVulnerabilities(asset)}>
+										Vulnerabilities
+									</DropdownMenu.Item>
+								{/if}
+								{#if onRecordVulnerability}
+									<DropdownMenu.Item onSelect={() => onRecordVulnerability(asset)}>
+										<PlusIcon size={14} class="mr-2" /> Record vulnerability
+									</DropdownMenu.Item>
+								{/if}
 								{#if canWrite}
 									<DropdownMenu.Separator />
 									<DropdownMenu.Item onSelect={() => onEdit(asset)}>

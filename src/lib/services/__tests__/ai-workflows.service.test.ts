@@ -96,6 +96,11 @@ describe('AiWorkflowsService', () => {
 		expect(mockPost).toHaveBeenCalledWith('/ai-workflows/validate', v, {});
 	});
 
+	it('checks a python script', async () => {
+		await AiWorkflowsService.checkPython('result = 1');
+		expect(mockPost).toHaveBeenCalledWith('/ai-workflows/python/check', { code: 'result = 1' }, {});
+	});
+
 	it('reads versions', async () => {
 		await AiWorkflowsService.versions(4);
 		expect(mockGet).toHaveBeenCalledWith('/ai-workflows/4/versions', {});

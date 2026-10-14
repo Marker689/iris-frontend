@@ -29,7 +29,7 @@
 		labelOf
 	} from '$lib/components/vulnerabilities/labels';
 	import { canSyncFromCveOrg } from '$lib/components/vulnerabilities/cve-sync';
-	import type { Vulnerability } from '$lib/services/vulnerabilities.service';
+	import type { AffectedProduct, Vulnerability } from '$lib/services/vulnerabilities.service';
 
 	type SortDir = 'asc' | 'desc';
 
@@ -42,6 +42,8 @@
 		onToggleSort: (key: string) => void;
 		onEdit: (vulnerability: Vulnerability) => void;
 		onDelete: (vulnerability: Vulnerability) => void;
+		/** Filters the catalogue on an affected product, when set. */
+		onFilterTechnology?: (product: AffectedProduct) => void;
 		/** Offered on public CVE rows when set (the page gates on the runtime flag). */
 		onSync?: (vulnerability: Vulnerability) => void;
 		/** Row currently syncing, to disable its action. */
@@ -57,27 +59,53 @@
 		onToggleSort,
 		onEdit,
 		onDelete,
+		onFilterTechnology,
 		onSync,
 		syncingId = null
 	}: Props = $props();
 
 	const COLUMNS = [
-		{ key: 'identifier', label: 'Identifier', sortable: true, cls: 'w-48' },
-		{ key: 'title', label: 'Title', sortable: true, cls: '' },
-		{ key: 'kind', label: 'Kind', sortable: false, cls: 'w-28' },
+		{ key: 'identifier', label: 'Identifier', sortable: true, cls: 'w-52' },
+		{ key: 'title', label: 'Title', sortable: true, cls: 'min-w-[16rem]' },
+		{ key: 'technology', label: 'Technology', sortable: false, cls: 'w-64' },
+		{ key: 'kind', label: 'Kind', sortable: false, cls: 'w-20' },
 		{ key: 'severity', label: 'Severity', sortable: true, cls: 'w-24' },
 		{ key: 'cvss_score', label: 'CVSS', sortable: true, cls: 'w-16' },
 		{ key: 'epss_score', label: 'EPSS', sortable: true, cls: 'w-16' },
-		{ key: 'kev', label: 'KEV', sortable: false, cls: 'w-14' },
+		{ key: 'kev', label: 'KEV', sortable: false, cls: 'w-16' },
 		{ key: 'exploit_maturity', label: 'Exploit', sortable: false, cls: 'w-28' },
 		{ key: 'patch_availability', label: 'Patch', sortable: false, cls: 'w-28' },
-		{ key: 'counts', label: 'Exposure', sortable: false, cls: 'w-28' }
+		{ key: 'counts', label: 'Exposure', sortable: false, cls: 'w-32' }
 	];
 
 	const sortIcon = (key: string) => {
 		if (orderBy !== key) return ArrowUpDownIcon;
 		return sortDir === 'asc' ? ArrowUpIcon : ArrowDownIcon;
 	};
+
+	// One line per vendor / product: versions only go to the tooltip.
+	const technologies = (v: Vulnerability): AffectedProduct[] => {
+		const seen = new Set<string>();
+		return (v.affected_products ?? []).filter((p) => {
+			if (!p.product) return false;
+			const id = `${p.vendor ?? ''}\u0000${p.product}`.toLowerCase();
+			if (seen.has(id)) return false;
+			seen.add(id);
+			return true;
+		});
+	};
+
+	const technologyLabel = (p: AffectedProduct) =>
+		p.vendor ? `${p.vendor} ${p.product}` : (p.product ?? '');
+
+	const technologyTitle = (v: Vulnerability) =>
+		(v.affected_products ?? [])
+			.filter((p) => p.product)
+			.map((p) => (p.versions ? `${technologyLabel(p)} — ${p.versions}` : technologyLabel(p)))
+			.join('\n');
+
+	// Shown in the cell; the rest are summarised as "+N" (all in the tooltip).
+	const TECH_SHOWN = 2;
 
 	const href = (v: Vulnerability) => `/manage/vulnerabilities/${v.vulnerability_id}`;
 </script>
@@ -120,6 +148,7 @@
 			{#each vulnerabilities as v (v.vulnerability_id)}
 				{@const editable = canEdit(v)}
 				{@const syncable = !!onSync && canSyncFromCveOrg(v)}
+				{@const techs = technologies(v)}
 				<tr class="border-b transition-colors last:border-0 hover:bg-muted/30">
 					<td class="px-3 py-2 text-xs">
 						<div class="flex items-center gap-1.5">
@@ -140,8 +169,48 @@
 							{/if}
 						</div>
 					</td>
+					<!-- max-w-0 + the header min width: the title takes the space left. -->
 					<td class="max-w-0 px-3 py-2 text-xs">
-						<div class="truncate" title={v.title}>{v.title}</div>
+						<div class="line-clamp-2 break-words" title={v.title}>{v.title}</div>
+					</td>
+					<td class="max-w-0 px-3 py-2 text-xs">
+						{#if techs.length}
+							<div class="flex min-w-0 flex-col gap-0.5" title={technologyTitle(v)}>
+								{#each techs.slice(0, TECH_SHOWN) as t, i (i)}
+									<div class="flex min-w-0 items-center gap-1">
+										{#if onFilterTechnology}
+											<button
+												type="button"
+												class="truncate text-left hover:text-primary hover:underline"
+												onclick={() => onFilterTechnology(t)}
+												aria-label={`Filter on ${technologyLabel(t)}`}
+											>
+												{#if t.vendor}
+													<span class="text-muted-foreground">{t.vendor}</span>
+												{/if}
+												{t.product}
+											</button>
+										{:else}
+											<span class="truncate">
+												{#if t.vendor}
+													<span class="text-muted-foreground">{t.vendor}</span>
+												{/if}
+												{t.product}
+											</span>
+										{/if}
+										{#if i === TECH_SHOWN - 1 && techs.length > TECH_SHOWN}
+											<span
+												class="shrink-0 rounded border border-border bg-muted px-1 text-2xs tabular-nums text-muted-foreground"
+											>
+												+{techs.length - TECH_SHOWN}
+											</span>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<span class="text-muted-foreground">—</span>
+						{/if}
 					</td>
 					<td class="px-3 py-2 text-xs">{labelOf(KIND_LABELS, v.kind)}</td>
 					<td class="px-3 py-2"><SeverityBadge severity={v.severity} /></td>

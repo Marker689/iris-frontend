@@ -13,7 +13,8 @@ import type { ApiOptions, RequestResponse } from './api.service';
 import type {
 	ExploitationStatus,
 	RemediationStatus,
-	VulnerabilitySeverity
+	VulnerabilitySeverity,
+	VulnerabilityShort
 } from './vulnerabilities.service';
 import { auth } from '$lib/stores/auth.store';
 import { SCOPE_MAX_TARGET_CASES, chunkIds, mergeCaseBatchResults } from './war-room-scope-batches';
@@ -303,6 +304,69 @@ export interface ScopeDecisionRef {
 	status: string;
 }
 
+/**
+ * A registry asset (Assets Manager) attached to the room's scope without
+ * being created in a case. It can be linked to an attached case, to a
+ * catalogue vulnerability, to both or to neither; the same asset can be
+ * attached several times with different links.
+ */
+export interface ScopeRegistryAsset {
+	id: number;
+	managed_asset_id: number;
+	asset_name: string;
+	asset_type_id: number;
+	asset_type_name: string | null;
+	asset_ip: string | null;
+	asset_domain: string | null;
+	asset_description: string | null;
+	asset_tags: string | null;
+	criticality: string | null;
+	environment: string | null;
+	owner: string | null;
+	is_active: boolean;
+	customer_id: number | null;
+	customer_name: string | null;
+	case_id: number | null;
+	case_name: string | null;
+	note: string | null;
+	added_at: string | null;
+	added_by_id: number | null;
+	added_by_name: string | null;
+	/** Absent without the vulnerabilities permission. */
+	vulnerability?: VulnerabilityShort | null;
+	/** Registry findings of the asset; absent without the permission. */
+	vulnerabilities?: ScopeAssetVulnerability[];
+}
+
+export interface ScopeRegistryAssetList {
+	data: ScopeRegistryAsset[];
+	truncated: boolean;
+	limit: number;
+	/** False when the caller cannot read the Assets Manager. */
+	allowed: boolean;
+}
+
+export interface ScopeRegistryAttachBody {
+	managed_asset_ids: number[];
+	case_id?: number | null;
+	vulnerability_id?: number | null;
+	note?: string;
+}
+
+/** Managed asset ids, by outcome. */
+export interface ScopeRegistryAttachResult {
+	created: number[];
+	existing: number[];
+	not_found: number[];
+}
+
+/** Absent keys are left untouched; null clears a link. */
+export interface ScopeRegistryUpdateBody {
+	case_id?: number | null;
+	vulnerability_id?: number | null;
+	note?: string | null;
+}
+
 export type ScopeExportFormat = 'txt' | 'csv' | 'stix';
 
 export interface ScopeDownload {
@@ -564,6 +628,38 @@ export class WarRoomScopeService {
 			caseIds ? { case_ids: caseIds } : {},
 			options
 		);
+	}
+
+	static listRegistryAssets(
+		warRoomId: number,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<ScopeRegistryAssetList>> {
+		return ApiService.get(`${base(warRoomId)}/registry-assets`, options);
+	}
+
+	static attachRegistryAssets(
+		warRoomId: number,
+		body: ScopeRegistryAttachBody,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<ScopeRegistryAttachResult>> {
+		return ApiService.post(`${base(warRoomId)}/registry-assets`, body, options);
+	}
+
+	static updateRegistryAsset(
+		warRoomId: number,
+		attachmentId: number,
+		body: ScopeRegistryUpdateBody,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<{ id: number }>> {
+		return ApiService.patch(`${base(warRoomId)}/registry-assets/${attachmentId}`, body, options);
+	}
+
+	static detachRegistryAsset(
+		warRoomId: number,
+		attachmentId: number,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<null>> {
+		return ApiService.delete<null>(`${base(warRoomId)}/registry-assets/${attachmentId}`, options);
 	}
 
 	/** Decisions of the room, to link a flag change to one. */

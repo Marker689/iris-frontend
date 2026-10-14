@@ -40,6 +40,8 @@
 		asset: ManagedAssetDetail | null;
 		loading?: boolean;
 		canWrite?: boolean;
+		/** Tab shown when an asset opens (e.g. 'vulnerabilities'). */
+		initialTab?: string;
 		onClose: () => void;
 		onEdit: (asset: ManagedAssetDetail) => void;
 		onSaveAttributes: (
@@ -53,6 +55,7 @@
 		asset,
 		loading = false,
 		canWrite = false,
+		initialTab = 'overview',
 		onClose,
 		onEdit,
 		onSaveAttributes
@@ -71,9 +74,10 @@
 	});
 
 	// A different asset means the tabs must remount, and the panel should
-	// open where it always opens rather than on whatever tab was last read.
+	// open where it was asked to (the overview by default) rather than on
+	// whatever tab was last read.
 	$effect(() => {
-		if (asset?.managed_asset_id !== undefined) tab = 'overview';
+		if (asset?.managed_asset_id !== undefined) tab = initialTab;
 	});
 
 	const formatDate = (iso: string | null | undefined) => {

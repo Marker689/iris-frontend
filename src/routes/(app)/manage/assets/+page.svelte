@@ -62,6 +62,11 @@
 	import AssetExportDialog from './components/AssetExportDialog.svelte';
 	import AssetAuditLogDialog from './components/AssetAuditLogDialog.svelte';
 	import RestrictedScopeBanner from './components/RestrictedScopeBanner.svelte';
+	import ManagedFindingDialog from '$lib/components/vulnerabilities/findings/ManagedFindingDialog.svelte';
+	import {
+		canReadVulnerabilities,
+		canWriteFindings
+	} from '$lib/components/vulnerabilities/permissions';
 
 	const DEFAULT_PER_PAGE = 50;
 
@@ -73,6 +78,8 @@
 	// conclude the registry is empty.
 	const canRead = $derived(userCtx.can('asset_manager_read'));
 	const canWrite = $derived(userCtx.can('asset_manager_write'));
+	const canReadVulns = $derived(canReadVulnerabilities(userCtx));
+	const canWriteVulns = $derived(canWriteFindings(userCtx, canWrite));
 
 	type SortDir = 'asc' | 'desc';
 
@@ -354,12 +361,39 @@
 		}
 	};
 
-	const openDetail = (asset: ManagedAsset) => showDetail(asset.managed_asset_id);
+	// Tab the detail modal opens on; the Vulnerabilities cell opens it there.
+	let detailTab = $state('overview');
+
+	const openDetail = (asset: ManagedAsset) => {
+		detailTab = 'overview';
+		void showDetail(asset.managed_asset_id);
+	};
+
+	const openVulnerabilities = (asset: ManagedAsset) => {
+		detailTab = 'vulnerabilities';
+		void showDetail(asset.managed_asset_id);
+	};
 
 	const closeDetail = () => {
 		detailOpen = false;
 		detailAsset = null;
 		detailResumeId = null;
+	};
+
+	// Findings can be recorded or changed from the panel, and the table's
+	// Vulnerabilities column is a summary of them, so re-read on close.
+	const dismissDetail = () => {
+		closeDetail();
+		if (canReadVulns) void refreshInPlace();
+	};
+
+	// Recording a finding straight from a table row.
+	let findingOpen = $state(false);
+	let findingAsset = $state<ManagedAsset | null>(null);
+
+	const recordVulnerability = (asset: ManagedAsset) => {
+		findingAsset = asset;
+		findingOpen = true;
 	};
 
 	/**
@@ -614,6 +648,13 @@
 
 		lastQuery = snapshot();
 		void runQuery(lastQuery, page);
+
+		// Deep link from elsewhere (e.g. a war room scope): open the asset.
+		const assetId = readId(params, 'asset');
+		if (assetId !== null) {
+			detailTab = params.get('tab') === 'vulnerabilities' ? 'vulnerabilities' : 'overview';
+			void showDetail(assetId);
+		}
 	});
 </script>
 
@@ -769,6 +810,9 @@
 							onOpen={openDetail}
 							onEdit={openEdit}
 							onDelete={deleteAsset}
+							showVulnerabilities={canReadVulns}
+							onOpenVulnerabilities={openVulnerabilities}
+							onRecordVulnerability={canWriteVulns ? recordVulnerability : undefined}
 						/>
 					{:else if envelope}
 						<p class="py-8 text-center text-sm text-muted-foreground">
@@ -788,7 +832,8 @@
 	asset={detailAsset}
 	loading={detailLoading}
 	{canWrite}
-	onClose={closeDetail}
+	initialTab={detailTab}
+	onClose={dismissDetail}
 	onEdit={editFromDetail}
 	onSaveAttributes={saveAttributes}
 />
@@ -802,6 +847,15 @@
 	onCreate={createAsset}
 	onUpdate={updateAsset}
 />
+
+{#if findingAsset}
+	<ManagedFindingDialog
+		bind:open={findingOpen}
+		managedAssetId={findingAsset.managed_asset_id}
+		assetName={findingAsset.name}
+		onSaved={refreshInPlace}
+	/>
+{/if}
 
 <AssetImportDialog bind:open={importOpen} {customers} onImported={submit} />
 

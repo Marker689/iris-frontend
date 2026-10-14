@@ -23,6 +23,7 @@
 	import PairsEditor from './PairsEditor.svelte';
 	import TemplateField from './TemplateField.svelte';
 	import TemplateHelp from './TemplateHelp.svelte';
+	import PythonEditor from './PythonEditor.svelte';
 	import type { TemplateFieldCtx, WorkflowEditorCtx } from '../helpers/editor';
 	import type { TemplateMode } from '../helpers/template-complete';
 	import {
@@ -38,7 +39,6 @@
 		SELECT_CLASS,
 		SUGGESTION_AUDIENCE_LABELS,
 		TEMPLATE_FIELD_CTX,
-		TEXTAREA_CLASS,
 		WORKFLOW_EDITOR_CTX
 	} from '../helpers/ui';
 
@@ -1194,18 +1194,10 @@
 					</Button>
 				{/if}
 			</div>
-			<label class="flex flex-col gap-1">
+			<div class="flex flex-col gap-1">
 				<span class={LABEL_CLASS}>Script</span>
-				<textarea
-					class={`${TEXTAREA_CLASS} font-mono`}
-					rows={18}
-					spellcheck="false"
-					disabled={readOnly}
-					value={str(c.code)}
-					oninput={(e) => set('code', (e.currentTarget as HTMLTextAreaElement).value)}
-					data-testid="wf-cfg-code"
-				></textarea>
-			</label>
+				<PythonEditor value={str(c.code)} {readOnly} onInput={(v) => set('code', v)} />
+			</div>
 			<p class="text-[11px] text-muted-foreground">
 				A restricted Python subset, interpreted in a sandbox: plain data only, no imports, no
 				classes, no file, network or process access. The script reads <code>inputs</code>,

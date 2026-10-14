@@ -272,6 +272,16 @@ export interface AiValidateResult {
 	errors: AiValidationError[];
 }
 
+/** A static error of a `python` node script (what the sandbox would refuse). */
+export interface AiPythonCheckError {
+	line: number | null;
+	message: string;
+}
+
+export interface AiPythonCheckResult {
+	errors: AiPythonCheckError[];
+}
+
 // ---- Runs ----------------------------------------------------------------------
 
 export interface AiRunSummary {
@@ -703,6 +713,13 @@ export class AiWorkflowsService {
 		options: ApiOptions = {}
 	): Promise<RequestResponse<AiValidateResult>> {
 		return ApiService.post<AiValidateResult>(`${BASE}/validate`, body, options);
+	}
+
+	static async checkPython(
+		code: string,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<AiPythonCheckResult>> {
+		return ApiService.post<AiPythonCheckResult>(`${BASE}/python/check`, { code }, options);
 	}
 
 	static async versions(

@@ -7,6 +7,9 @@
   them, and drain the war-room staging inbox. The server only
   ever returns cases the caller can read; writes are re-checked per case
   (full access + attached) and come back as one result per case.
+  Registry assets (Assets Manager) can also be attached to the scope
+  without being in a case, optionally linked to a case and/or a
+  vulnerability.
   Assets and IOCs are paged server-side (with per-case totals) so a room
   with hundreds of cases and thousands of objects stays responsive;
   selections survive page changes.
@@ -24,6 +27,7 @@
 		Flag,
 		Inbox,
 		Loader2,
+		Paperclip,
 		Pin,
 		Plus,
 		ShieldPlus,
@@ -38,7 +42,6 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { Switch } from '$lib/components/ui/switch';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { SearchableSelect } from '$lib/components/ui/searchable-select';
 	import { toast } from '$lib/components/ui/toast';
@@ -61,6 +64,7 @@
 		type ScopeExportFormat,
 		type ScopeFlagAction,
 		type ScopeIocPage,
+		type ScopeRegistryAsset,
 		type StagedObject
 	} from '$lib/services/war-room-scope.service';
 	import ScopeAssetsTable from './components/scope-assets-table.svelte';
@@ -74,6 +78,7 @@
 	import ScopeVulnerabilitiesMatrix from './components/scope-vulnerabilities-matrix.svelte';
 	import ScopeRecordVulnerabilityDialog from './components/scope-record-vulnerability-dialog.svelte';
 	import ScopeTrackVulnerabilityDialog from './components/scope-track-vulnerability-dialog.svelte';
+	import ScopeRegistryAttachDialog from './components/scope-registry-attach-dialog.svelte';
 	import VulnerabilityFormDialog from '$lib/components/vulnerabilities/VulnerabilityFormDialog.svelte';
 	import {
 		canCreateVulnerability,
@@ -90,8 +95,10 @@
 	} from '$lib/services/vulnerabilities.service';
 	import {
 		VULNERABLE_FILTERS,
+		filterAttachedRows,
 		parseVulnerableFilter,
 		scopeVulnIdentifiers,
+		type AssetGroupMode,
 		type VulnerableFilter
 	} from './components/vulnerability-helpers';
 	import {
@@ -166,7 +173,23 @@
 		vulnerabilityInput = next ?? '';
 		vulnerabilityFilter = next;
 	};
-	let groupByCase = $state(true);
+	const groupFromUrl = (): AssetGroupMode => {
+		const g = page.url.searchParams.get('group');
+		return g === 'none' || g === 'vulnerability' ? g : 'case';
+	};
+	let groupBy = $state<AssetGroupMode>(groupFromUrl());
+	// Case groups are pointless within one case, vulnerability groups
+	// need the vulnerability data.
+	const effectiveGroupBy = $derived<AssetGroupMode>(
+		(groupBy === 'case' && caseFilter !== null) || (groupBy === 'vulnerability' && !canReadVulns)
+			? 'none'
+			: groupBy
+	);
+	const GROUP_MODES: { value: AssetGroupMode; label: string }[] = [
+		{ value: 'case', label: 'Case' },
+		{ value: 'vulnerability', label: 'Vulnerability' },
+		{ value: 'none', label: 'None' }
+	];
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const onSearch = (value: string) => {
@@ -201,7 +224,7 @@
 	let iocsPage = $state(1);
 	// Grouped tables need the page ordered by case so groups are contiguous.
 	const assetSort = $derived<'name' | 'case'>(
-		groupByCase && caseFilter === null && assetView === 'table' ? 'case' : 'name'
+		effectiveGroupBy === 'case' && assetView === 'table' ? 'case' : 'name'
 	);
 	let staging = $state<StagedObject[]>([]);
 	let loadingAssets = $state(true);
@@ -392,6 +415,75 @@
 		});
 	});
 
+	// --- Registry assets attached to the room ----------------------------
+	// Assets Manager entries put in scope without a case. A small, unpaged
+	// list: filtered here with the page filters, and listed in the assets
+	// table (first page) among the case assets. Absent without the Assets
+	// Manager read permission (`allowed`).
+	let attached = $state<ScopeRegistryAsset[]>([]);
+	let attachedAllowed = $state(false);
+	let attachedTruncated = $state(false);
+	let attachedSeq = 0;
+	const loadAttached = async () => {
+		const seq = ++attachedSeq;
+		const res = await WarRoomScopeService.listRegistryAssets(warRoomId);
+		if (seq !== attachedSeq) return;
+		if (res.ok && res.data && typeof res.data === 'object') {
+			attached = res.data.data;
+			attachedAllowed = res.data.allowed;
+			attachedTruncated = res.data.truncated;
+		} else {
+			attached = [];
+			attachedAllowed = false;
+		}
+	};
+	$effect(() => {
+		void warRoomId;
+		untrack(() => void loadAttached());
+	});
+
+	const visibleAttached = $derived(
+		filterAttachedRows(attached, {
+			search: debouncedSearch,
+			caseId: caseFilter,
+			flag: flagFilter,
+			compromisedOnly,
+			vulnerable: canReadVulns ? vulnerableFilter : null,
+			vulnerability: canReadVulns ? vulnerabilityFilter : null
+		})
+	);
+	// Listed once, with the first page of case assets.
+	const attachedRows = $derived(assetsPage === 1 ? visibleAttached : []);
+
+	let attachOpen = $state(false);
+	let attachEditing = $state<ScopeRegistryAsset | null>(null);
+	const openAttach = (row: ScopeRegistryAsset | null = null) => {
+		attachEditing = row;
+		attachOpen = true;
+	};
+
+	let detachingId = $state<number | null>(null);
+	const detachAttached = async (r: ScopeRegistryAsset) => {
+		if (detachingId !== null) return;
+		if (!confirm(`Detach ${r.asset_name} from the scope? It stays in the Assets Manager.`)) return;
+		detachingId = r.id;
+		try {
+			const res = await WarRoomScopeService.detachRegistryAsset(warRoomId, r.id);
+			if (res.ok) {
+				attached = attached.filter((x) => x.id !== r.id);
+				toast({ title: `${r.asset_name} detached`, variant: 'success' });
+			} else if (res.status !== 403) {
+				toast({
+					title: 'Could not detach the asset',
+					description: errorMessage(res, 'The server refused the request.'),
+					variant: 'destructive'
+				});
+			}
+		} finally {
+			detachingId = null;
+		}
+	};
+
 	const goAssetsPage = (p: number) => {
 		assetsPage = p;
 		void loadAssets();
@@ -482,7 +574,9 @@
 	const truncatedLimit = $derived(tab === 'assets' ? assetsRes?.limit : iocsRes?.limit);
 
 	const tabCount = (key: Tab): number | null => {
-		if (key === 'assets') return assetsRes ? (assetsRes.total ?? assets.length) : null;
+		if (key === 'assets') {
+			return assetsRes ? (assetsRes.total ?? assets.length) + visibleAttached.length : null;
+		}
 		if (key === 'iocs') return iocsRes ? (iocsRes.total ?? iocRows.length) : null;
 		if (key === 'vulnerabilities') return matrix ? (matrix.total ?? matrixRows.length) : null;
 		return loadingStaging ? null : staging.length;
@@ -870,6 +964,18 @@
 					<Columns3 class="h-4 w-4" />
 				</Button>
 			</div>
+			{#if assetView === 'table' && canWrite && attachedAllowed}
+				<Button
+					variant="outline"
+					size="sm"
+					class="ml-auto gap-1.5"
+					onclick={() => openAttach()}
+					title="Put assets of the Assets Manager in scope, with or without a case"
+					data-testid="scope-registry-attach"
+				>
+					<Paperclip class="h-3.5 w-3.5" /> Attach from Assets Manager
+				</Button>
+			{/if}
 		{/if}
 
 		{#if tab === 'vulnerabilities' && canRecord && canReadVulns}
@@ -1070,13 +1176,21 @@
 				{/if}
 
 				{#if assetView === 'table'}
-					<label class="flex shrink-0 items-center gap-1.5 text-2xs" for="scope-group-case">
-						<span class="text-muted-foreground">Group by case</span>
-						<Switch
-							id="scope-group-case"
-							checked={groupByCase}
-							onCheckedChange={(v) => (groupByCase = !!v)}
-						/>
+					<label class="flex shrink-0 items-center gap-1.5 text-2xs" for="scope-group-by">
+						<span class="text-muted-foreground">Group by</span>
+						<select
+							id="scope-group-by"
+							class="h-8 rounded-md border bg-background px-2 text-xs"
+							value={groupBy}
+							onchange={(e) => (groupBy = (e.target as HTMLSelectElement).value as AssetGroupMode)}
+							data-testid="scope-group-by"
+						>
+							{#each GROUP_MODES as m (m.value)}
+								{#if m.value !== 'vulnerability' || canReadVulns}
+									<option value={m.value}>{m.label}</option>
+								{/if}
+							{/each}
+						</select>
 					</label>
 				{/if}
 			{/if}
@@ -1166,10 +1280,11 @@
 					<Skeleton class="h-10 w-full" />
 				{/each}
 			</div>
-		{:else if cases.length === 0}
+		{:else if cases.length === 0 && (assetView === 'board' || attached.length === 0)}
 			<div class="flex flex-1 flex-col items-center justify-center gap-2 text-center">
 				<p class="text-sm text-muted-foreground">
-					No attached case you can access. Attach cases from the Cases tab first.
+					No attached case you can access. Attach cases from the Cases tab first{#if attachedAllowed && canWrite},
+						or attach assets from the Assets Manager{/if}.
 				</p>
 			</div>
 		{:else if assetView === 'board'}
@@ -1190,7 +1305,7 @@
 				{cases}
 				selected={selectedAssets}
 				onSelectionChange={(next) => (selectedAssets = next)}
-				groupByCase={groupByCase && caseFilter === null}
+				groupBy={effectiveGroupBy}
 				{canWrite}
 				onFlag={(a) => openFlag([a])}
 				onPush={(a) => openAssetPush([a])}
@@ -1199,7 +1314,16 @@
 					applyVulnerabilityFilter(vulnerabilityFilter === identifier ? null : identifier)}
 				activeVulnerability={vulnerabilityFilter}
 				showVulnerabilities={canReadVulns}
+				attached={attachedRows}
+				onEditAttached={(r) => openAttach(r)}
+				onDetachAttached={detachAttached}
+				{detachingId}
 			/>
+			{#if attachedTruncated && attachedRows.length > 0}
+				<p class="text-2xs text-amber-700 dark:text-amber-300">
+					Only the most recent assets attached from the Assets Manager are listed.
+				</p>
+			{/if}
 		{/if}
 		{#if !loadingAssets && assetsRes}
 			<ScopePager
@@ -1366,6 +1490,17 @@
 			onTracked={() => void loadMatrix()}
 		/>
 	{/if}
+{/if}
+
+{#if canWrite && attachedAllowed}
+	<ScopeRegistryAttachDialog
+		bind:open={attachOpen}
+		{warRoomId}
+		{cases}
+		editing={attachEditing}
+		showVulnerabilities={canReadVulns}
+		onDone={() => void loadAttached()}
+	/>
 {/if}
 
 <ScopeAddDialog

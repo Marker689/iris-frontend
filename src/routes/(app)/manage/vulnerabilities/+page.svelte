@@ -27,11 +27,13 @@
 		VULNERABILITY_KINDS,
 		VULNERABILITY_SEVERITIES,
 		VulnerabilitiesService,
+		type AffectedProduct,
 		type Vulnerability,
 		type VulnerabilityInput,
 		type VulnerabilityKind,
 		type VulnerabilityPage,
-		type VulnerabilitySeverity
+		type VulnerabilitySeverity,
+		type VulnerabilityTechnology
 	} from '$lib/services/vulnerabilities.service';
 	import {
 		canAdministerVulnerabilities,
@@ -62,6 +64,8 @@
 	let search = $state('');
 	let severity = $state<VulnerabilitySeverity[]>([]);
 	let kind = $state<VulnerabilityKind[]>([]);
+	let vendor = $state<string[]>([]);
+	let product = $state<string[]>([]);
 	let kev = $state<boolean | null>(null);
 	let isPrivate = $state<boolean | null>(null);
 	let affected = $state(false);
@@ -76,6 +80,8 @@
 
 	const rows = $derived(envelope?.data ?? []);
 
+	let technologies = $state<VulnerabilityTechnology[]>([]);
+
 	let formOpen = $state(false);
 	let formEntry = $state<Vulnerability | null>(null);
 	let saving = $state(false);
@@ -89,6 +95,8 @@
 		search: string;
 		severity: VulnerabilitySeverity[];
 		kind: VulnerabilityKind[];
+		vendor: string[];
+		product: string[];
 		kev: boolean | null;
 		isPrivate: boolean | null;
 		affected: boolean;
@@ -101,6 +109,8 @@
 		search: search.trim(),
 		severity: [...severity],
 		kind: [...kind],
+		vendor: [...vendor],
+		product: [...product],
 		kev,
 		isPrivate,
 		affected,
@@ -113,6 +123,9 @@
 		if (q.search) params.set('q', q.search);
 		if (q.severity.length) params.set('severity', q.severity.join(','));
 		if (q.kind.length) params.set('kind', q.kind.join(','));
+		// Repeated: a vendor or product name can hold a comma.
+		for (const name of q.vendor) params.append('vendor', name);
+		for (const name of q.product) params.append('product', name);
 		if (q.kev !== null) params.set('kev', q.kev ? '1' : '0');
 		if (q.isPrivate !== null) params.set('private', q.isPrivate ? '1' : '0');
 		if (q.affected) params.set('affected', '1');
@@ -141,6 +154,8 @@
 				search: q.search || undefined,
 				severity: q.severity,
 				kind: q.kind,
+				vendor: q.vendor,
+				product: q.product,
 				kev: q.kev ?? undefined,
 				private: q.isPrivate ?? undefined,
 				affected: q.affected
@@ -158,6 +173,12 @@
 		} finally {
 			loading = false;
 		}
+	};
+
+	/** Picker options; a failure only leaves the pickers empty. */
+	const loadTechnologies = async () => {
+		const res = await VulnerabilitiesService.technologies();
+		if (res.ok && Array.isArray(res.data)) technologies = res.data;
 	};
 
 	const submit = async () => {
@@ -186,7 +207,7 @@
 			await submit();
 			return;
 		}
-		await refreshInPlace();
+		await Promise.all([refreshInPlace(), loadTechnologies()]);
 		toast({ title: 'Refreshed', variant: 'success' });
 	};
 
@@ -194,6 +215,8 @@
 		search = '';
 		severity = [];
 		kind = [];
+		vendor = [];
+		product = [];
 		kev = null;
 		isPrivate = null;
 		affected = false;
@@ -220,11 +243,21 @@
 		!!search ||
 			severity.length > 0 ||
 			kind.length > 0 ||
+			vendor.length > 0 ||
+			product.length > 0 ||
 			kev !== null ||
 			isPrivate !== null ||
 			affected ||
 			orderBy !== null
 	);
+
+	/** From a table row: only that vendor / product. */
+	const filterTechnology = (p: AffectedProduct) => {
+		if (!p.product) return;
+		vendor = p.vendor ? [p.vendor] : [];
+		product = [p.product];
+		void submit();
+	};
 
 	// ---------------------------------------------------------------
 	// Mutations
@@ -252,7 +285,7 @@
 				formOpen = false;
 				if (editing) {
 					toast({ title: `${saved.identifier} updated`, variant: 'success' });
-					await refreshInPlace();
+					await Promise.all([refreshInPlace(), loadTechnologies()]);
 				} else {
 					toast({ title: `Created ${saved.identifier}`, variant: 'success' });
 					await goto(`/manage/vulnerabilities/${saved.vulnerability_id}`);
@@ -369,6 +402,7 @@
 		if (!urlRead || initialLoaded || !userCtx.ready || !canRead || !lastQuery) return;
 		initialLoaded = true;
 		void runQuery(lastQuery, page);
+		void loadTechnologies();
 	});
 
 	onMount(() => {
@@ -376,6 +410,8 @@
 		search = params.get('q') ?? '';
 		severity = readList(params, 'severity', VULNERABILITY_SEVERITIES);
 		kind = readList(params, 'kind', VULNERABILITY_KINDS);
+		vendor = params.getAll('vendor').filter((name) => name.trim());
+		product = params.getAll('product').filter((name) => name.trim());
 		kev = readBool(params, 'kev');
 		isPrivate = readBool(params, 'private');
 		affected = params.get('affected') === '1';
@@ -398,7 +434,7 @@
 
 <div class="flex grow flex-col bg-card">
 	<div class="shrink-0 border-b border-border/60 bg-muted/30 px-5 py-2">
-		<div class="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3">
+		<div class="mx-auto flex w-full max-w-screen-2xl flex-wrap items-center justify-between gap-3">
 			<div class="flex min-w-0 items-baseline gap-2">
 				<h1 class="text-sm font-semibold tracking-tight">Vulnerabilities</h1>
 				<span class="truncate text-xs text-muted-foreground">
@@ -423,13 +459,16 @@
 	{#if denied}
 		<VulnerabilitiesAccessDenied />
 	{:else}
-		<div class="mx-auto flex w-full max-w-6xl flex-col px-5 py-4">
+		<div class="mx-auto flex w-full max-w-screen-2xl flex-col px-5 py-4">
 			<div class="flex flex-col">
 				<div class="border-b border-border/60 p-0 pb-4">
 					<VulnerabilitiesFilters
 						bind:search
 						bind:severity
 						bind:kind
+						bind:vendor
+						bind:product
+						{technologies}
 						bind:kev
 						bind:isPrivate
 						bind:affected
@@ -502,6 +541,7 @@
 							onToggleSort={toggleSort}
 							onEdit={openEdit}
 							onDelete={askDelete}
+							onFilterTechnology={filterTechnology}
 							onSync={runtimeConfig.cveSyncEnabled && canCreate ? syncRow : undefined}
 							{syncingId}
 						/>

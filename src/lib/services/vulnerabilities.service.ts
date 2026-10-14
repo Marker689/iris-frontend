@@ -202,10 +202,22 @@ export interface VulnerabilitySearchQuery {
 	search?: string;
 	severity?: VulnerabilitySeverity[];
 	kind?: VulnerabilityKind[];
+	/** Affected vendors, case-insensitive. */
+	vendor?: string[];
+	/** Affected products, case-insensitive; with `vendor`, of the same affected product. */
+	product?: string[];
 	kev?: boolean;
 	private?: boolean;
 	/** Only entries with an open finding in a readable case. */
 	affected?: boolean;
+}
+
+/** A vendor / product pair named by catalogue entries. */
+export interface VulnerabilityTechnology {
+	vendor: string | null;
+	product: string;
+	/** Catalogue entries naming it. */
+	vulnerabilities: number;
 }
 
 export interface VulnerabilityPage {
@@ -555,12 +567,22 @@ export class VulnerabilitiesService {
 				search: search ? search : undefined,
 				severity: query.severity?.length ? query.severity.join(',') : undefined,
 				kind: query.kind?.length ? query.kind.join(',') : undefined,
+				// Repeated rather than comma-joined: a name can hold a comma.
+				vendor: query.vendor?.length ? query.vendor : undefined,
+				product: query.product?.length ? query.product : undefined,
 				kev: query.kev === undefined ? undefined : String(query.kev),
 				private: query.private === undefined ? undefined : String(query.private),
 				affected: query.affected ? 'true' : undefined
 			}),
 			options
 		);
+	}
+
+	/** Vendor / product pairs of the catalogue, the most common first. */
+	static technologies(
+		options: ApiOptions = {}
+	): Promise<RequestResponse<VulnerabilityTechnology[]>> {
+		return ApiService.get(`${CATALOGUE}/technologies`, options);
 	}
 
 	/** The entry an identifier or alias designates, `null` when unknown. */
