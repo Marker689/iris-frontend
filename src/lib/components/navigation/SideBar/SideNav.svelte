@@ -28,7 +28,11 @@
 	import { canReadVulnerabilities as canReadVulnerabilitiesGate } from '$lib/components/vulnerabilities/permissions';
 	import { aiSuggestionsEnabled } from '$lib/stores/ai-suggestions.store.svelte';
 	import MenuItem from './MenuItem.svelte';
-	import { SETTINGS_PERMISSIONS, visibleSettingsPages } from '../settings-pages';
+	import {
+		groupSettingsPages,
+		SETTINGS_PERMISSIONS,
+		visibleSettingsPages
+	} from '../settings-pages';
 
 	type Props = {
 		collapsed: boolean;
@@ -157,6 +161,7 @@
 	// the user can see. The group unfolds whenever a settings page is
 	// open; the chevron folds it away without navigating.
 	const settingsPages = $derived(visibleSettingsPages(userCtx.can, userCtx.ctx));
+	const settingsSections = $derived(groupSettingsPages(settingsPages));
 	const settingsHref = $derived(
 		settingsPages.length ? `/settings${settingsPages[0].href}` : '/settings'
 	);
@@ -307,22 +312,32 @@
 
 			{#if expanded}
 				<li class="w-full">
-					<ul
-						class="ml-5 flex flex-col gap-0.5 border-l border-[hsl(var(--sidebar-border))] py-1 pl-2"
-					>
-						{#each settingsPages as item (item.href)}
-							{@const active = isSettingsPageActive(item.href)}
-							<li>
-								<a
-									href={`/settings${item.href}`}
-									class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors {active
-										? 'bg-iris-blue font-medium text-white shadow-sm'
-										: 'text-sidebar-foreground hover:bg-[hsl(var(--sidebar-hover))] hover:text-foreground'}"
-									aria-current={active ? 'page' : undefined}
+					<ul class="ml-5 flex flex-col border-l border-[hsl(var(--sidebar-border))] py-1 pl-2">
+						{#each settingsSections as section (section.group)}
+							<li class="flex flex-col gap-0.5 pb-1.5 last:pb-0">
+								<span
+									class="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50"
+									data-testid="settings-menu-section"
 								>
-									<item.icon size={14} class="shrink-0" />
-									<span class="truncate">{item.label}</span>
-								</a>
+									{section.group}
+								</span>
+								<ul class="flex flex-col gap-0.5" aria-label={`${section.group} settings`}>
+									{#each section.pages as item (item.href)}
+										{@const active = isSettingsPageActive(item.href)}
+										<li>
+											<a
+												href={`/settings${item.href}`}
+												class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors {active
+													? 'bg-iris-blue font-medium text-white shadow-sm'
+													: 'text-sidebar-foreground hover:bg-[hsl(var(--sidebar-hover))] hover:text-foreground'}"
+												aria-current={active ? 'page' : undefined}
+											>
+												<item.icon size={14} class="shrink-0" />
+												<span class="truncate">{item.label}</span>
+											</a>
+										</li>
+									{/each}
+								</ul>
 							</li>
 						{/each}
 					</ul>

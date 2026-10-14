@@ -10,7 +10,7 @@
 	const userCtx = getContext<UserCtx>(USER_CTX);
 
 	// `/settings` has no page of its own: open the first one the user
-	// can see (Modules for an administrator). Permissions only exist
+	// can see (Access control for an administrator). Permissions only exist
 	// client-side once the user context has loaded, hence the effect.
 	const first = $derived(
 		userCtx.ready ? visibleSettingsPages(userCtx.can, userCtx.ctx)[0] : undefined

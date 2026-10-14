@@ -35,6 +35,6 @@ test.describe('Settings · shell', () => {
 
 	test('/settings opens the first settings page', async ({ page }) => {
 		await page.goto('/settings');
-		await expect(page).toHaveURL(/\/settings\/modules$/, { timeout: 10_000 });
+		await expect(page).toHaveURL(/\/settings\/access-control$/, { timeout: 10_000 });
 	});
 });

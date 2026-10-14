@@ -27,34 +27,60 @@ import {
 } from '$lib/services/user-context.service';
 import { runtimeConfig } from '$lib/stores/runtime-config.store.svelte';
 
-export type SettingsPage = { icon: typeof Icon; label: string; href: string };
+export type SettingsGroup = 'Access' | 'Cases' | 'Alerts' | 'Integrations' | 'AI' | 'Platform';
+
+export type SettingsPage = {
+	icon: typeof Icon;
+	label: string;
+	href: string;
+	group: SettingsGroup;
+};
 
 /**
  * Every Settings page in menu order, `href` relative to `/settings`.
- * Rendered as the Settings sub-menu of the side bar; `/settings`
- * itself opens the first one the user can see.
+ * Rendered as the Settings sub-menu of the side bar, one titled section
+ * per `group` (pages of a group stay contiguous); `/settings` itself
+ * opens the first one the user can see.
  */
 export const SETTINGS_PAGES: SettingsPage[] = [
-	{ icon: ServerIcon, label: 'Modules', href: '/modules' },
-	{ icon: CircleUserIcon, label: 'Customers', href: '/customers' },
-	{ icon: LayersIcon, label: 'Case Objects', href: '/case-objects' },
-	{ icon: FlagIcon, label: 'Asset flags', href: '/asset-flags' },
-	{ icon: WaypointsIcon, label: 'Custom Attributes', href: '/custom-attributes' },
-	{ icon: BookDashedIcon, label: 'Case Templates', href: '/case-templates' },
-	{ icon: NewspaperIcon, label: 'Report Templates', href: '/report-templates' },
-	{ icon: LockKeyholeIcon, label: 'Access Control', href: '/access-control' },
-	{ icon: BellIcon, label: 'Notifications', href: '/notifications' },
-	{ icon: MailIcon, label: 'Mail rules', href: '/mail' },
-	{ icon: WebhookIcon, label: 'Webhooks', href: '/webhooks' },
-	{ icon: FilterIcon, label: 'Clustering Rules', href: '/cluster-rules' },
-	{ icon: CheckSquareIcon, label: 'Investigation flows', href: '/investigation-flows' },
-	{ icon: PlugIcon, label: 'MCP Server', href: '/mcp' },
-	{ icon: SparklesIcon, label: 'Chatbot', href: '/chatbot' },
-	{ icon: WorkflowIcon, label: 'Workflows', href: '/ai-workflows' },
-	{ icon: KeyRoundIcon, label: 'Keystore', href: '/keystore' },
-	{ icon: MegaphoneIcon, label: 'Banners', href: '/banners' },
-	{ icon: SettingsIcon, label: 'Server Settings', href: '/server' }
+	{ icon: LockKeyholeIcon, label: 'Access control', href: '/access-control', group: 'Access' },
+	{ icon: CircleUserIcon, label: 'Customers', href: '/customers', group: 'Access' },
+	{ icon: BookDashedIcon, label: 'Case templates', href: '/case-templates', group: 'Cases' },
+	{ icon: NewspaperIcon, label: 'Report templates', href: '/report-templates', group: 'Cases' },
+	{ icon: LayersIcon, label: 'Case objects', href: '/case-objects', group: 'Cases' },
+	{ icon: WaypointsIcon, label: 'Custom attributes', href: '/custom-attributes', group: 'Cases' },
+	{ icon: FlagIcon, label: 'Asset flags', href: '/asset-flags', group: 'Cases' },
+	{ icon: MailIcon, label: 'Mail ingest', href: '/mail', group: 'Alerts' },
+	{ icon: FilterIcon, label: 'Clustering rules', href: '/cluster-rules', group: 'Alerts' },
+	{
+		icon: CheckSquareIcon,
+		label: 'Investigation flows',
+		href: '/investigation-flows',
+		group: 'Alerts'
+	},
+	{ icon: ServerIcon, label: 'Modules', href: '/modules', group: 'Integrations' },
+	{ icon: WebhookIcon, label: 'Webhooks', href: '/webhooks', group: 'Integrations' },
+	{ icon: SparklesIcon, label: 'Chatbot', href: '/chatbot', group: 'AI' },
+	{ icon: WorkflowIcon, label: 'Workflows', href: '/ai-workflows', group: 'AI' },
+	{ icon: KeyRoundIcon, label: 'Keystore', href: '/keystore', group: 'AI' },
+	{ icon: PlugIcon, label: 'MCP server', href: '/mcp', group: 'AI' },
+	{ icon: BellIcon, label: 'Notifications', href: '/notifications', group: 'Platform' },
+	{ icon: MegaphoneIcon, label: 'Banners', href: '/banners', group: 'Platform' },
+	{ icon: SettingsIcon, label: 'Server settings', href: '/server', group: 'Platform' }
 ];
+
+/** Split pages into consecutive titled sections, dropping empty ones. */
+export function groupSettingsPages(
+	pages: SettingsPage[]
+): { group: SettingsGroup; pages: SettingsPage[] }[] {
+	const sections: { group: SettingsGroup; pages: SettingsPage[] }[] = [];
+	for (const page of pages) {
+		const last = sections.at(-1);
+		if (last?.group === page.group) last.pages.push(page);
+		else sections.push({ group: page.group, pages: [page] });
+	}
+	return sections;
+}
 
 /**
  * The Settings pages the user's permissions open — someone granted
