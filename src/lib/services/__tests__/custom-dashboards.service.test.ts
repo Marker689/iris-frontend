@@ -9,7 +9,12 @@ vi.mock('../api.service', () => ({
 	}
 }));
 
-import { CustomDashboardsService } from '../custom-dashboards.service';
+import {
+	CustomDashboardsService,
+	isNullFilterOperator,
+	parseWidgetRowLink,
+	widgetRowHref
+} from '../custom-dashboards.service';
 import { ApiService } from '../api.service';
 
 describe('CustomDashboardsService', () => {
@@ -109,5 +114,52 @@ describe('CustomDashboardsService', () => {
 		});
 		await CustomDashboardsService.getPresets();
 		expect(ApiService.get).toHaveBeenCalledWith('/custom-dashboards/presets', undefined);
+	});
+});
+
+describe('isNullFilterOperator', () => {
+	it('recognises the operators that take no value', () => {
+		expect(isNullFilterOperator('is_null')).toBe(true);
+		expect(isNullFilterOperator('is_not_null')).toBe(true);
+		expect(isNullFilterOperator('eq')).toBe(false);
+		expect(isNullFilterOperator(undefined)).toBe(false);
+	});
+});
+
+describe('parseWidgetRowLink', () => {
+	it('accepts a case or alert target with a key', () => {
+		expect(parseWidgetRowLink({ target: 'case', key: 'cases_case_id' })).toEqual({
+			target: 'case',
+			key: 'cases_case_id'
+		});
+		expect(parseWidgetRowLink({ target: 'alert', key: 'alert_id' })).toEqual({
+			target: 'alert',
+			key: 'alert_id'
+		});
+	});
+
+	it('rejects anything else', () => {
+		expect(parseWidgetRowLink(undefined)).toBeNull();
+		expect(parseWidgetRowLink('case')).toBeNull();
+		expect(parseWidgetRowLink({ target: 'user', key: 'id' })).toBeNull();
+		expect(parseWidgetRowLink({ target: 'case', key: '' })).toBeNull();
+		expect(parseWidgetRowLink({ target: 'case' })).toBeNull();
+	});
+});
+
+describe('widgetRowHref', () => {
+	const caseLink = { target: 'case' as const, key: 'cases_case_id' };
+	const alertLink = { target: 'alert' as const, key: 'alert_id' };
+
+	it('builds the case and alert pages', () => {
+		expect(widgetRowHref(caseLink, 3275)).toBe('/case/3275');
+		expect(widgetRowHref(alertLink, 12)).toBe('/alerts/12');
+		expect(widgetRowHref(alertLink, ' 12 ')).toBe('/alerts/12');
+	});
+
+	it('returns null for values that are not a positive integer identifier', () => {
+		for (const value of [null, undefined, '', 'N/A', 0, -1, 1.5, '1,234', '../settings', {}]) {
+			expect(widgetRowHref(caseLink, value)).toBeNull();
+		}
 	});
 });

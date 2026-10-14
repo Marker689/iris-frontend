@@ -1,13 +1,15 @@
 <!--
   One filter rule (table.column operator value). Value input swaps shape
-  by operator: comma-list for in/nin, two inputs for between, single for
-  the rest. Backend validates types per column.
+  by operator: comma-list for in/nin, two inputs for between, none for
+  is_null/is_not_null, single for the rest. Backend validates types per
+  column.
 -->
 <script lang="ts">
 	import { XIcon } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
+	import { isNullFilterOperator } from '$lib/services/custom-dashboards.service';
 	import type { DashboardFilter, DashboardSchema } from '$lib/services/custom-dashboards.service';
 
 	type Props = {
@@ -61,7 +63,8 @@
 
 		<Select
 			value={filter.operator ?? ''}
-			onValueChange={(v) => patch({ operator: v })}
+			onValueChange={(v) =>
+				patch(isNullFilterOperator(v) ? { operator: v, value: null } : { operator: v })}
 			type="single"
 		>
 			<SelectTrigger>{filter.operator || 'Operator'}</SelectTrigger>
@@ -72,7 +75,9 @@
 			</SelectContent>
 		</Select>
 
-		{#if filter.operator === 'between'}
+		{#if isNullFilterOperator(filter.operator)}
+			<div class="flex h-9 items-center px-2 text-xs text-muted-foreground">No value needed</div>
+		{:else if filter.operator === 'between'}
 			{@const [lo, hi] = valueAsArray()}
 			<div class="flex gap-1">
 				<Input

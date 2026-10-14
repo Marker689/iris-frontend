@@ -183,6 +183,62 @@ export function safeCssPalette(value: unknown): string[] | undefined {
 	return out.length > 0 ? out : undefined;
 }
 
+// Filter operators that match on emptiness and so take no value.
+export const NULL_FILTER_OPERATORS = ['is_null', 'is_not_null'];
+
+export function isNullFilterOperator(operator: unknown): boolean {
+	return typeof operator === 'string' && NULL_FILTER_OPERATORS.includes(operator);
+}
+
+// Table widgets can turn their rows into links to the case or alert a row
+// is about. Stored as `options.row_link = { target, key }`, where `key` is
+// the result column (field alias or `table_column`) holding the identifier.
+export type WidgetRowLinkTarget = 'case' | 'alert';
+
+export interface WidgetRowLink {
+	target: WidgetRowLinkTarget;
+	key: string;
+}
+
+export const ROW_LINK_TARGETS: Array<{ value: WidgetRowLinkTarget; label: string }> = [
+	{ value: 'case', label: 'Case' },
+	{ value: 'alert', label: 'Alert' }
+];
+
+// Columns known to carry each target's identifier, used to preselect the
+// link column when the user picks a target.
+export const ROW_LINK_IDENTIFIER_COLUMNS: Record<WidgetRowLinkTarget, string[]> = {
+	case: [
+		'cases.case_id',
+		'case_notes.note_case_id',
+		'case_tasks.task_case_id',
+		'case_events.case_id',
+		'case_assets.case_id',
+		'case_iocs.case_id',
+		'case_tags.case_id'
+	],
+	alert: ['alerts.alert_id']
+};
+
+export function parseWidgetRowLink(value: unknown): WidgetRowLink | null {
+	if (typeof value !== 'object' || value === null) return null;
+	const link = value as Record<string, unknown>;
+	if (link.target !== 'case' && link.target !== 'alert') return null;
+	if (typeof link.key !== 'string' || !link.key) return null;
+	return { target: link.target, key: link.key };
+}
+
+// Only a positive integer becomes a link, so a widget value can never
+// steer the navigation anywhere but a case or alert page.
+export function widgetRowHref(link: WidgetRowLink, identifier: unknown): string | null {
+	let id = Number.NaN;
+	if (typeof identifier === 'number') id = identifier;
+	else if (typeof identifier === 'string' && /^\d+$/.test(identifier.trim()))
+		id = Number(identifier.trim());
+	if (!Number.isSafeInteger(id) || id <= 0) return null;
+	return link.target === 'case' ? `/case/${id}` : `/alerts/${id}`;
+}
+
 export class CustomDashboardsService {
 	static list(options?: ApiOptions): Promise<RequestResponse<CustomDashboard[]>> {
 		return ApiService.get<CustomDashboard[]>('/custom-dashboards', options);

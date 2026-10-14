@@ -31,6 +31,7 @@
 	import JsonEditor from '$lib/components/common/editors/JsonEditor.svelte';
 	import {
 		CustomDashboardsService,
+		isNullFilterOperator,
 		type CustomDashboard,
 		type DashboardSchema,
 		type DashboardSection,
@@ -173,7 +174,8 @@
 					`${path}.operator "${fl.operator}" is not allowed. Allowed: ${[...allowedOperators].join(', ')}.`
 				);
 			}
-			if (!('value' in fl)) issues.push(`${path}.value is required.`);
+			if (!('value' in fl) && !isNullFilterOperator(fl.operator))
+				issues.push(`${path}.value is required.`);
 		};
 
 		const validateWidget = (path: string, widget: unknown) => {

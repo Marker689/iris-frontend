@@ -26,6 +26,7 @@
 	import { HelpCircleIcon } from 'lucide-svelte';
 	import {
 		CustomDashboardsService,
+		parseWidgetRowLink,
 		safeCssColor,
 		safeCssPalette,
 		type CustomDashboard,
@@ -331,6 +332,9 @@
 							totalLabel={widget.total_label}
 							defaultSort={((widget.options ?? {}) as Record<string, unknown>)
 								.default_sort as never}
+							rowLink={parseWidgetRowLink(
+								((widget.options ?? {}) as Record<string, unknown>).row_link
+							)}
 						/>
 					</CardContent>
 				</Card>

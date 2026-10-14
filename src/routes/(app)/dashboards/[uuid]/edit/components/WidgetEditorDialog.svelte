@@ -21,11 +21,18 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
 	import { Badge } from '$lib/components/ui/badge';
+	import {
+		parseWidgetRowLink,
+		ROW_LINK_IDENTIFIER_COLUMNS,
+		ROW_LINK_TARGETS
+	} from '$lib/services/custom-dashboards.service';
 	import type {
 		DashboardSchema,
 		DashboardWidget,
 		DashboardWidgetField,
-		DashboardFilter
+		DashboardFilter,
+		WidgetRowLink,
+		WidgetRowLinkTarget
 	} from '$lib/services/custom-dashboards.service';
 	import FieldRow from './FieldRow.svelte';
 	import FilterRow from './FilterRow.svelte';
@@ -162,6 +169,54 @@
 		if (next < 0 || next >= list.length) return;
 		[list[idx], list[next]] = [list[next], list[idx]];
 		setSortList(list);
+	}
+
+	// Columns a row link can read its identifier from: plain (non-aggregated)
+	// fields and group-by columns, keyed the way the backend names them.
+	const linkableKeys = $derived.by(() => {
+		const seen = new Set<string>();
+		const out: { key: string; label: string; source: string }[] = [];
+		const add = (key: string, label: string, source: string) => {
+			if (!key || seen.has(key)) return;
+			seen.add(key);
+			out.push({ key, label, source });
+		};
+		for (const f of draft.fields ?? []) {
+			if (f.aggregation || !f.table || !f.column) continue;
+			const source = `${f.table}.${f.column}`;
+			add(f.alias || `${f.table}_${f.column}`, f.alias || source, source);
+		}
+		for (const entry of groupByText.split(',')) {
+			const [table, column] = entry.trim().split('.', 2);
+			if (!table || !column) continue;
+			add(`${table}_${column}`, `${table}.${column}`, `${table}.${column}`);
+		}
+		return out;
+	});
+
+	function setRowLink(link: WidgetRowLink | null) {
+		const opts = { ...((draft.options ?? {}) as Record<string, unknown>) };
+		if (link) {
+			opts.row_link = link;
+		} else {
+			delete opts.row_link;
+		}
+		draft.options = opts;
+	}
+
+	function setRowLinkTarget(target: string) {
+		if (target !== 'case' && target !== 'alert') {
+			setRowLink(null);
+			return;
+		}
+		const current = parseWidgetRowLink(draft.options?.row_link);
+		const keepKey = current && linkableKeys.some((k) => k.key === current.key);
+		const preferred = linkableKeys.find((k) =>
+			ROW_LINK_IDENTIFIER_COLUMNS[target as WidgetRowLinkTarget].includes(k.source)
+		);
+		const key = keepKey ? current.key : (preferred ?? linkableKeys[0])?.key;
+		if (!key) return;
+		setRowLink({ target, key });
 	}
 
 	function commit() {
@@ -375,6 +430,54 @@
 											</Button>
 										</div>
 									{/each}
+								</div>
+							{/if}
+						</section>
+						{@const rowLink = parseWidgetRowLink(draft.options?.row_link)}
+						<section class="flex flex-col gap-2">
+							<Label>Row link</Label>
+							{#if linkableKeys.length === 0}
+								<p class="text-xs text-muted-foreground">
+									Add a non-aggregated field holding a case or alert identifier (e.g.
+									<span class="font-mono">cases.case_id</span>) to make rows clickable.
+								</p>
+							{:else}
+								<p class="text-xs text-muted-foreground">
+									Clicking a row opens the case or alert whose identifier is in the chosen column.
+									Ctrl/Cmd-click opens it in a new tab.
+								</p>
+								<div class="grid gap-2 sm:grid-cols-2">
+									<Select
+										value={rowLink?.target ?? ''}
+										onValueChange={setRowLinkTarget}
+										type="single"
+									>
+										<SelectTrigger>
+											{ROW_LINK_TARGETS.find((t) => t.value === rowLink?.target)?.label ?? '(none)'}
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="">(none)</SelectItem>
+											{#each ROW_LINK_TARGETS as t (t.value)}
+												<SelectItem value={t.value}>{t.label}</SelectItem>
+											{/each}
+										</SelectContent>
+									</Select>
+									{#if rowLink}
+										<Select
+											value={rowLink.key}
+											onValueChange={(v) => setRowLink({ target: rowLink.target, key: v })}
+											type="single"
+										>
+											<SelectTrigger>
+												{linkableKeys.find((k) => k.key === rowLink.key)?.label ?? rowLink.key}
+											</SelectTrigger>
+											<SelectContent>
+												{#each linkableKeys as k (k.key)}
+													<SelectItem value={k.key}>{k.label}</SelectItem>
+												{/each}
+											</SelectContent>
+										</Select>
+									{/if}
 								</div>
 							{/if}
 						</section>

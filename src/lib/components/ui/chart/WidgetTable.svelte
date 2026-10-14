@@ -10,9 +10,11 @@
 <script lang="ts">
 	import type { ColumnDef } from '@tanstack/svelte-table';
 	import DataTable from '$lib/components/ui/data-table-tanstack/data-table.svelte';
+	import { widgetRowHref } from '$lib/services/custom-dashboards.service';
 	import type {
 		RenderedTableRow,
-		RenderedTableCell
+		RenderedTableCell,
+		WidgetRowLink
 	} from '$lib/services/custom-dashboards.service';
 
 	type DefaultSortEntry = { key: string; dir?: 'asc' | 'desc' };
@@ -29,6 +31,9 @@
 		// widget loads in the user-chosen order; clicking a header still
 		// overrides with the wrapper's single-column interactive sort.
 		defaultSort?: DefaultSortEntry[];
+		// Turns each row into a link to the case/alert whose identifier
+		// sits in the `rowLink.key` column. Rows without one stay inert.
+		rowLink?: WidgetRowLink | null;
 	};
 
 	let {
@@ -39,7 +44,8 @@
 		rows = [],
 		totals = [],
 		totalLabel = 'Total',
-		defaultSort = []
+		defaultSort = [],
+		rowLink = null
 	}: Props = $props();
 
 	type FlatRow = Record<
@@ -143,6 +149,12 @@
 		return cols;
 	});
 
+	const rowHref = $derived.by(() => {
+		const link = rowLink;
+		if (!link) return undefined;
+		return (row: unknown) => widgetRowHref(link, (row as FlatRow)[link.key]?.raw);
+	});
+
 	const showTotals = $derived(totals.length > 0 && rows.length > 0);
 </script>
 
@@ -151,6 +163,7 @@
 		data={sortedData}
 		columns={columns as import('@tanstack/svelte-table').ColumnDef<unknown>[]}
 		tableClass="w-full table-auto text-xs"
+		{rowHref}
 	/>
 	{#if showTotals}
 		<div class="flex flex-wrap justify-end gap-3 border-t pt-2 text-xs">

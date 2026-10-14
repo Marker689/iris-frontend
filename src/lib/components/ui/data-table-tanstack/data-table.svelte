@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { type Component } from 'svelte';
 	import type { ColumnDef } from '@tanstack/svelte-table';
+	import { goto } from '$app/navigation';
 	import {
 		ArrowDownIcon,
 		ArrowUpDownIcon,
@@ -39,6 +40,12 @@
 		 * affordances on the same column.
 		 */
 		showColumnFilters?: boolean;
+		/**
+		 * Makes a row navigate when clicked (or Enter-ed). Return null for
+		 * rows that should stay inert. Ctrl/Cmd- and middle-click open the
+		 * target in a new tab, like a regular link.
+		 */
+		rowHref?: (row: T) => string | null;
 	};
 
 	let {
@@ -52,7 +59,8 @@
 		pageSizeOptions = [10, 20, 25, 50, 100],
 		sort: sortProp,
 		onSortChange,
-		showColumnFilters = true
+		showColumnFilters = true,
+		rowHref
 	}: Props<unknown> = $props();
 
 	const isControlledSort = $derived(sortProp !== undefined);
@@ -223,6 +231,18 @@
 		}
 	};
 
+	const openRow = (event: MouseEvent | KeyboardEvent, href: string) => {
+		// Leave a text selection made by dragging across the row alone.
+		if (event.type === 'click' && window.getSelection()?.toString()) return;
+		const newTab =
+			event.ctrlKey || event.metaKey || (event instanceof MouseEvent && event.button === 1);
+		if (newTab) {
+			window.open(href, '_blank', 'noopener');
+		} else {
+			void goto(href);
+		}
+	};
+
 	const toggleFilter = (id: string) => (filterColumn = filterColumn === id ? null : id);
 
 	const setFilter = (id: string, v: string) => {
@@ -238,6 +258,22 @@
 		page = 1;
 	};
 </script>
+
+{#snippet rowCells(row: unknown)}
+	{#each cols as col (col.key)}
+		{@const v = columnCell(col.c, row, () => columnValue(col.c, row))}
+		{@const colMeta = (col.c as { meta?: { thClass?: string; tdClass?: string } }).meta}
+
+		<td class="px-3 py-2 {colMeta?.tdClass ?? ''}">
+			{#if typeof v === 'function'}
+				{@const Comp = v as Component}
+				<Comp />
+			{:else}
+				{v}
+			{/if}
+		</td>
+	{/each}
+{/snippet}
 
 <div class={`flex min-h-0 w-full min-w-0 flex-col ${className}`}>
 	<!--
@@ -323,23 +359,25 @@
 					</tr>
 				{:else}
 					{#each paged as row, i (i)}
-						<tr
-							class="border-b border-border/30 transition-colors last:border-b-0 hover:bg-muted/40"
-						>
-							{#each cols as col (col.key)}
-								{@const v = columnCell(col.c, row, () => columnValue(col.c, row))}
-								{@const colMeta = (col.c as { meta?: { thClass?: string; tdClass?: string } }).meta}
-
-								<td class="px-3 py-2 {colMeta?.tdClass ?? ''}">
-									{#if typeof v === 'function'}
-										{@const Comp = v as Component}
-										<Comp />
-									{:else}
-										{v}
-									{/if}
-								</td>
-							{/each}
-						</tr>
+						{@const href = rowHref?.(row) ?? null}
+						{#if href}
+							<tr
+								class="cursor-pointer border-b border-border/30 transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
+								role="link"
+								tabindex="0"
+								onclick={(e) => openRow(e, href)}
+								onauxclick={(e) => e.button === 1 && openRow(e, href)}
+								onkeydown={(e) => e.key === 'Enter' && openRow(e, href)}
+							>
+								{@render rowCells(row)}
+							</tr>
+						{:else}
+							<tr
+								class="border-b border-border/30 transition-colors last:border-b-0 hover:bg-muted/40"
+							>
+								{@render rowCells(row)}
+							</tr>
+						{/if}
 					{/each}
 				{/if}
 			</tbody>
