@@ -52,6 +52,16 @@
 				return `Update asset #${a.asset_identifier} on case #${a.case_identifier}.`;
 			case 'iris_case_assets_delete':
 				return `Delete asset #${a.asset_identifier} from case #${a.case_identifier}.`;
+			case 'iris_case_events_create': {
+				const p = (a.payload as Record<string, unknown>) ?? {};
+				return `Add the event${p.event_title ? ` "${p.event_title}"` : ''} to the timeline of case #${
+					a.case_identifier
+				}.`;
+			}
+			case 'iris_case_events_update':
+				return `Update event #${a.event_identifier} on case #${a.case_identifier}.`;
+			case 'iris_case_events_delete':
+				return `Delete event #${a.event_identifier} from case #${a.case_identifier}.`;
 			case 'iris_case_notes_create': {
 				const p = (a.payload as Record<string, unknown>) ?? {};
 				return `Create a note${p.note_title ? ` titled "${p.note_title}"` : ''} on case #${a.case_identifier}.`;
