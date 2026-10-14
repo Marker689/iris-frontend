@@ -13,6 +13,7 @@
 	import { CaseTimelineService, type CaseTimelineEvent } from '$lib/services/case-timeline.service';
 	import type { CaseTimeline } from '$lib/services/case-timelines.service';
 	import TimelineEventForm, { type TimelineEventFormData } from './timeline-event-form.svelte';
+	import { normaliseEventTime } from '../event-datetime';
 
 	type Props = {
 		open: boolean;
@@ -195,7 +196,7 @@
 		return null;
 	};
 
-	const toEventDate = () => `${form.event_date}T${form.event_time}`;
+	const toEventDate = () => `${form.event_date}T${normaliseEventTime(form.event_time)}`;
 
 	const save = async () => {
 		if (!form.event_title.trim() || !form.event_date || !form.event_time || !form.event_tz) {

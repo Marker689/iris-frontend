@@ -4,7 +4,7 @@
 	import type { EventCategory } from '$lib/services/event-categories.service';
 	import type { Asset } from '$lib/types/resources/asset';
 	import type { Ioc } from '$lib/types/resources/ioc';
-	import { PlusIcon, RotateCwIcon, WandSparklesIcon } from 'lucide-svelte';
+	import { ClockIcon, PlusIcon, RotateCwIcon, WandSparklesIcon } from 'lucide-svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Button } from '$lib/components/ui/button';
@@ -18,6 +18,7 @@
 		hasCustomAttributes
 	} from '$lib/stores/custom-attributes.store.svelte';
 	import { onMount } from 'svelte';
+	import { nowEventDateTime } from '../event-datetime';
 
 	onMount(() => {
 		void ensureHasCustomAttributes('event');
@@ -164,6 +165,13 @@
 	const updateTextField = (field: keyof TimelineEventFormData, value: string) => {
 		onUpdateField(field, value);
 	};
+
+	const setNow = () => {
+		const now = nowEventDateTime();
+		onUpdateField('event_date', now.date);
+		onUpdateField('event_time', now.time);
+		onUpdateField('event_tz', now.tz);
+	};
 </script>
 
 <div class="space-y-8">
@@ -206,9 +214,10 @@
 							<p class="text-sm font-medium text-muted-foreground">Time *</p>
 
 							<Input
+								type="time"
+								step="0.001"
 								value={data.event_time}
 								oninput={(e) => updateTextField('event_time', (e.target as HTMLInputElement).value)}
-								placeholder="00:00:00.000"
 								class="mt-1"
 							/>
 						</div>
@@ -224,6 +233,17 @@
 							/>
 						</div>
 					</div>
+
+					<Button
+						variant="ghost"
+						size="icon"
+						class="mt-6 h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
+						onclick={setNow}
+						title="Set to now (local time and timezone)"
+						aria-label="Set date and time to now"
+					>
+						<ClockIcon class="h-4 w-4" />
+					</Button>
 
 					{#if onConvertDate}
 						<Button
