@@ -24,26 +24,39 @@ describe('EventCategoriesService', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('list() should call ApiService.get with /manage/event-categories/list + options', async () => {
+	it('list() unwraps the paginated envelope and asks for every category', async () => {
 		const options: ApiOptions = { skipTokenRefresh: true };
+		const categories: EventCategory[] = [{ id: 1, name: 'Unspecified' }];
 
-		const mockResponse = {
+		(ApiService.withQuery as unknown as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+			'/manage/event-categories?per_page=10000'
+		);
+		(ApiService.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
 			ok: true,
 			status: 200,
-			data: [
-				{
-					id: 1,
-					name: 'Unspecified'
-				}
-			] satisfies EventCategory[]
-		};
-
-		(ApiService.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockResponse);
+			data: { total: 1, data: categories, last_page: 1, current_page: 1, next_page: null }
+		});
 
 		const res = await EventCategoriesService.list(options);
 
-		expect(ApiService.get).toHaveBeenCalledTimes(1);
-		expect(ApiService.get).toHaveBeenCalledWith('/manage/event-categories', options);
-		expect(res).toBe(mockResponse);
+		expect(ApiService.withQuery).toHaveBeenCalledWith('/manage/event-categories', {
+			per_page: 10000
+		});
+		expect(ApiService.get).toHaveBeenCalledWith('/manage/event-categories?per_page=10000', options);
+		expect(res.ok).toBe(true);
+		expect(res.data).toEqual(categories);
+	});
+
+	it('list() returns an empty list on failure', async () => {
+		(ApiService.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			ok: false,
+			status: 500,
+			data: 'boom'
+		});
+
+		const res = await EventCategoriesService.list();
+
+		expect(res.ok).toBe(false);
+		expect(res.data).toEqual([]);
 	});
 });
