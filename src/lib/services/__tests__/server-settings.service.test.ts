@@ -33,6 +33,7 @@ describe('ServerSettingsService', () => {
 				settings: {
 					http_proxy: null,
 					https_proxy: null,
+					no_proxy: null,
 					prevent_post_mod_repush: false,
 					prevent_post_objects_repush: false,
 					has_updates_available: false,

@@ -123,7 +123,7 @@
 		'falsy'
 	];
 	const UNARY = new Set(['exists', 'not_exists', 'truthy', 'falsy']);
-	const FIELD_TYPES = ['text', 'textarea', 'number', 'boolean', 'select'];
+	const FIELD_TYPES = ['text', 'textarea', 'number', 'boolean', 'select', 'date'];
 	const SEVERITIES = ['low', 'medium', 'high', 'critical'];
 	const SUGGESTION_KINDS = $derived(
 		catalogue?.suggestion_kinds?.length
@@ -243,6 +243,18 @@
 	function setInputMode(index: number, path: boolean) {
 		const current = inputText(list<ScriptInput>(c.inputs)[index]?.value);
 		setInput(index, { value: path ? { $path: current } : current });
+	}
+
+	// ---- notify: the entity it is about, when not the run's own ----
+	type NotifyAbout = { entity_type: string; entity_id: unknown };
+	const notifyAbout = $derived(
+		c.about && typeof c.about === 'object' && (c.about as NotifyAbout).entity_type
+			? (c.about as NotifyAbout)
+			: null
+	);
+	function setAbout(patch: Partial<NotifyAbout>) {
+		const next = { entity_type: '', entity_id: '', ...(notifyAbout ?? {}), ...patch };
+		set('about', next.entity_type ? next : null);
 	}
 
 	// ---- sides of the connectors ----
@@ -711,8 +723,38 @@
 			{@render choice('auth_type', 'Authentication', [
 				['none', 'None'],
 				['basic', 'Basic'],
-				['bearer', 'Bearer token']
+				['bearer', 'Bearer token'],
+				['oauth2_client_credentials', 'OAuth2 client credentials']
 			])}
+			{#if c.auth_type === 'oauth2_client_credentials'}
+				{@render text(
+					'oauth_token_url',
+					'Token URL (template)',
+					'https://login.microsoftonline.com/{{ tenant }}/oauth2/v2.0/token',
+					true
+				)}
+				<div class="grid grid-cols-2 gap-2">
+					{@render text('oauth_client_id', 'Client ID', "{{ key('CLIENT_ID') }}", true)}
+					{@render text('oauth_client_secret', 'Client secret', "{{ key('CLIENT_SECRET') }}", true)}
+				</div>
+				<div class="grid grid-cols-2 gap-2">
+					{@render text(
+						'oauth_scope',
+						'Scope (template)',
+						'https://api.example.com/.default',
+						true
+					)}
+					{@render choice('oauth_client_auth', 'Client authentication', [
+						['body', 'In the body'],
+						['basic', 'Basic header']
+					])}
+				</div>
+				<p class="text-2xs text-muted-foreground">
+					The token is fetched over https, cached until it expires and sent as a bearer token.
+					Reference the client secret with <code class="font-mono">{"{{ key('NAME') }}"}</code>
+					and restrict that key to the token endpoint's host.
+				</p>
+			{/if}
 			{#if c.auth_type === 'basic'}
 				{@render text('auth_username', 'Username', '', true)}
 			{/if}
@@ -1048,6 +1090,58 @@
 			</p>
 			{#if c.audience === 'users'}
 				{@render userPicker()}
+			{/if}
+			<label class="flex flex-col gap-1">
+				<span class={LABEL_CLASS}>About</span>
+				<select
+					class={SELECT_CLASS}
+					disabled={readOnly}
+					value={notifyAbout?.entity_type ?? ''}
+					onchange={(e) => setAbout({ entity_type: (e.currentTarget as HTMLSelectElement).value })}
+					data-testid="wf-cfg-about-type"
+				>
+					<option value="">The entity of the run</option>
+					<option value="case">A case</option>
+					<option value="alert">An alert</option>
+					<option value="war_room">A war room</option>
+				</select>
+			</label>
+			{#if notifyAbout}
+				<div class="grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-1">
+					<select
+						class={SELECT_CLASS}
+						disabled={readOnly}
+						value={isPath(notifyAbout.entity_id) ? 'path' : 'template'}
+						onchange={(e) => {
+							const current = inputText(notifyAbout?.entity_id);
+							setAbout({
+								entity_id:
+									(e.currentTarget as HTMLSelectElement).value === 'path'
+										? { $path: current }
+										: current
+							});
+						}}
+						title="A template renders the identifier; a path reads it as is"
+					>
+						<option value="template">Template</option>
+						<option value="path">Path</option>
+					</select>
+					<TemplateField
+						mode={isPath(notifyAbout.entity_id) ? 'path' : 'template'}
+						placeholder={isPath(notifyAbout.entity_id)
+							? 'nodes.room.output.result.war_room_id'
+							: '{{ vars.war_room_id }}'}
+						disabled={readOnly}
+						value={inputText(notifyAbout.entity_id)}
+						onInput={(v) =>
+							setAbout({ entity_id: isPath(notifyAbout?.entity_id) ? { $path: v } : v })}
+						testId="wf-cfg-about-id"
+					/>
+				</div>
+				<p class="text-2xs text-muted-foreground">
+					The notification links to this entity, and only users who can see it are notified. It must
+					be in the scope of the run: one the run's workflow created, or of its customers.
+				</p>
 			{/if}
 			{@render text('title', 'Title (template)')}
 			{@render area('body', 'Body (template)', '', 4)}

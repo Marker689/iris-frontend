@@ -12,15 +12,17 @@
 		caseId: CaseIdentifier;
 		groupIds?: string[];
 		access?: string;
+		/** The groups offered, bound out so the caller can name them. */
+		groups?: CaseAccessGroupRow[];
 	};
 
 	let {
 		caseId,
 		groupIds = $bindable<string[]>([]),
-		access = $bindable<string>('')
+		access = $bindable<string>(''),
+		groups = $bindable<CaseAccessGroupRow[]>([])
 	}: Props = $props();
 
-	let groups = $state<CaseAccessGroupRow[]>([]);
 	let loading = $state(false);
 
 	const opts = $derived.by(() =>

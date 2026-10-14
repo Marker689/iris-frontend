@@ -175,10 +175,18 @@
 		}
 	};
 
-	/** Picker options; a failure only leaves the pickers empty. */
+	/** Picker options; a failure leaves the pickers empty, and says so. */
 	const loadTechnologies = async () => {
 		const res = await VulnerabilitiesService.technologies();
-		if (res.ok && Array.isArray(res.data)) technologies = res.data;
+		if (res.ok && Array.isArray(res.data)) {
+			technologies = res.data;
+			return;
+		}
+		toast({
+			title: 'Failed to load the vendors and products',
+			description: apiErrorMessage(res, `Unexpected response (HTTP ${res.status})`),
+			variant: 'destructive'
+		});
 	};
 
 	const submit = async () => {

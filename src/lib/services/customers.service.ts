@@ -24,6 +24,9 @@ export interface Customer {
 	customer_uuid: string;
 	contacts?: CustomerContact[];
 	custom_attributes?: Record<string, unknown> | null;
+	// Free per-customer settings (a tenant ID, an index name), readable by
+	// workflows through iris_customers_get. Not for secrets.
+	customer_key_values?: Record<string, string> | null;
 }
 
 export interface CustomerBody {
@@ -31,6 +34,7 @@ export interface CustomerBody {
 	customer_description?: string;
 	customer_sla?: string;
 	custom_attributes?: Record<string, unknown>;
+	customer_key_values?: Record<string, string>;
 }
 
 export interface CustomerContactBody {

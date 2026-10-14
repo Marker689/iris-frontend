@@ -118,6 +118,12 @@
 	// separate state instead of nesting inside `editForm` so the
 	// section's proxy mutations stay stable across `openEdit` calls.
 	let editCustomAttributes = $state<Record<string, Record<string, unknown>>>({});
+	// Key/values as editable rows; folded back into an object on save.
+	// Same limits as the backend (CustomerSchema).
+	const KEY_VALUE_KEY = /^[A-Za-z0-9_.-]{1,64}$/;
+	const KEY_VALUE_MAX_ENTRIES = 100;
+	const KEY_VALUE_MAX_LENGTH = 4096;
+	let editKeyValues = $state<{ key: string; value: string }[]>([]);
 
 	// Contact modal (add + edit share one) -----------------------------
 	let contactOpen = $state(false);
@@ -329,8 +335,33 @@
 		// Reset in place so the section's bound reference stays stable.
 		// The section will re-seed from `existing` on its own onMount.
 		for (const key of Object.keys(editCustomAttributes)) delete editCustomAttributes[key];
+		editKeyValues = Object.entries(selectedCustomer.customer_key_values ?? {}).map(
+			([key, value]) => ({ key, value })
+		);
 		editError = null;
 		editOpen = true;
+	};
+
+	// The key/value rows as an object, or an error message. Rows with
+	// neither a key nor a value are dropped.
+	const collectKeyValues = (): Record<string, string> | string => {
+		const result: Record<string, string> = {};
+		for (const row of editKeyValues) {
+			const key = row.key.trim();
+			if (!key && !row.value) continue;
+			if (!KEY_VALUE_KEY.test(key)) {
+				return `Invalid key "${key}": 1 to 64 letters, digits, "_", "." or "-"`;
+			}
+			if (key in result) return `Duplicate key ${key}`;
+			if (row.value.length > KEY_VALUE_MAX_LENGTH) {
+				return `The value of ${key} is longer than ${KEY_VALUE_MAX_LENGTH} characters`;
+			}
+			result[key] = row.value;
+		}
+		if (Object.keys(result).length > KEY_VALUE_MAX_ENTRIES) {
+			return `At most ${KEY_VALUE_MAX_ENTRIES} key/values`;
+		}
+		return result;
 	};
 
 	const submitEdit = async () => {
@@ -340,6 +371,11 @@
 			editError = 'Name must be at least 2 characters';
 			return;
 		}
+		const keyValues = collectKeyValues();
+		if (typeof keyValues === 'string') {
+			editError = keyValues;
+			return;
+		}
 		editBusy = true;
 		editError = null;
 		try {
@@ -347,7 +383,8 @@
 				customer_name: name,
 				customer_description: editForm.customer_description?.trim() || undefined,
 				customer_sla: editForm.customer_sla?.trim() || undefined,
-				custom_attributes: editCustomAttributes as Record<string, unknown>
+				custom_attributes: editCustomAttributes as Record<string, unknown>,
+				customer_key_values: keyValues
 			});
 			if (res.ok && res.data && typeof res.data !== 'string') {
 				const updated = res.data as Customer;
@@ -709,6 +746,25 @@
 								{selectedCustomer.customer_sla || '—'}
 							</dd>
 						</div>
+						<div class="sm:col-span-2">
+							<dt class="text-2xs uppercase tracking-wide text-muted-foreground">Key/values</dt>
+							{#if Object.keys(selectedCustomer.customer_key_values ?? {}).length === 0}
+								<dd>—</dd>
+							{:else}
+								<dd>
+									<dl
+										class="mt-1 grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-0.5 rounded-sm border bg-muted/20 px-2 py-1.5"
+									>
+										{#each Object.entries(selectedCustomer.customer_key_values ?? {}) as [key, value] (key)}
+											<dt class="truncate font-mono text-2xs text-muted-foreground" title={key}>
+												{key}
+											</dt>
+											<dd class="break-all font-mono text-2xs">{value || '—'}</dd>
+										{/each}
+									</dl>
+								</dd>
+							{/if}
+						</div>
 					</dl>
 
 					<!-- Contacts -->
@@ -884,14 +940,16 @@
 	<Dialog.Content
 		class={hasCustomAttributes.client === true
 			? 'flex max-h-[85vh] flex-col sm:max-w-2xl'
-			: 'sm:max-w-md'}
+			: 'flex max-h-[85vh] flex-col sm:max-w-lg'}
 	>
 		<Dialog.Header>
 			<Dialog.Title>Edit customer</Dialog.Title>
-			<Dialog.Description>Update the customer's name, description or SLA.</Dialog.Description>
+			<Dialog.Description>
+				Update the customer's name, description, SLA or key/values.
+			</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="flex flex-col gap-3 pt-2">
+		<div class="flex min-h-0 flex-col gap-3 overflow-y-auto pt-2">
 			<div class="flex flex-col gap-1">
 				<label
 					for="edit-customer-name"
@@ -928,6 +986,62 @@
 					bind:value={editForm.customer_sla}
 					disabled={editBusy}
 				/>
+			</div>
+
+			<!--
+			  Key/values: free per-customer settings read by workflows and
+			  the assistant through iris_customers_get (e.g. ENTRA_TENANT_ID).
+			  Every user with customers_read sees them, so no secrets here.
+			-->
+			<div class="flex flex-col gap-1">
+				<div class="flex items-center justify-between">
+					<span class="text-2xs uppercase tracking-wide text-muted-foreground">Key/values</span>
+					<Button
+						variant="ghost"
+						size="sm"
+						class="h-6 px-2 text-2xs"
+						onclick={() => (editKeyValues = [...editKeyValues, { key: '', value: '' }])}
+						disabled={editBusy || editKeyValues.length >= KEY_VALUE_MAX_ENTRIES}
+					>
+						<PlusIcon size={12} class="mr-1" />
+						Add
+					</Button>
+				</div>
+				<p class="text-2xs text-muted-foreground">
+					Per-customer settings such as a tenant ID, readable by workflows and the assistant. Not
+					for secrets: every user who can read customers sees them; keep credentials in the
+					keystore.
+				</p>
+				{#each editKeyValues as row, index (index)}
+					<div class="flex items-center gap-1.5">
+						<Input
+							class="h-8 w-2/5 font-mono text-xs"
+							placeholder="ENTRA_TENANT_ID"
+							aria-label="Key"
+							maxlength={64}
+							bind:value={row.key}
+							disabled={editBusy}
+						/>
+						<Input
+							class="h-8 flex-1 font-mono text-xs"
+							placeholder="Value"
+							aria-label="Value of {row.key || 'the key'}"
+							maxlength={KEY_VALUE_MAX_LENGTH}
+							bind:value={row.value}
+							disabled={editBusy}
+						/>
+						<Button
+							variant="ghost"
+							size="sm"
+							class="h-8 w-8 shrink-0 p-0"
+							aria-label="Remove {row.key || 'this key/value'}"
+							onclick={() => (editKeyValues = editKeyValues.filter((_, i) => i !== index))}
+							disabled={editBusy}
+						>
+							<XIcon size={12} />
+						</Button>
+					</div>
+				{/each}
 			</div>
 
 			<!--

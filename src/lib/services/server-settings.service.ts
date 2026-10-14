@@ -20,6 +20,8 @@ import type { ApiOptions, RequestResponse } from './api.service';
 export interface ServerSettings {
 	http_proxy: string | null;
 	https_proxy: string | null;
+	/** "No proxy for": hosts, domains and networks reached directly. */
+	no_proxy: string | null;
 	prevent_post_mod_repush: boolean;
 	prevent_post_objects_repush: boolean;
 	/** Set by the periodic update checker — surfaced read-only on the page. */

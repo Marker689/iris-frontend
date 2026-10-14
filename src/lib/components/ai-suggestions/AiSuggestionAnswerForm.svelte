@@ -1,6 +1,6 @@
 <!--
   Answer form for an `info_request` suggestion, rendered from its
-  `form_schema.fields` (text / textarea / number / boolean / select).
+  `form_schema.fields` (text / textarea / number / boolean / select / date).
 -->
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
@@ -87,7 +87,7 @@
 					<Input
 						id={idFor(field.name)}
 						class="h-8 text-sm"
-						type={field.type === 'number' ? 'number' : 'text'}
+						type={field.type === 'number' || field.type === 'date' ? field.type : 'text'}
 						value={values[field.name] == null ? '' : String(values[field.name])}
 						oninput={(e) => (values[field.name] = (e.currentTarget as HTMLInputElement).value)}
 						disabled={busy}

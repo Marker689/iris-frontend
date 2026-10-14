@@ -4,7 +4,7 @@
   Single-form layout (no master/detail — there's only one server) with
   sections for the legacy `manage_srv_settings.html` groups:
     • Versions     — read-only strip at the top.
-    • Proxy        — HTTP / HTTPS module proxies.
+    • Proxy        — HTTP / HTTPS module proxies and their exceptions.
     • Post-init    — whether the boot routine re-registers defaults.
     • Password policy.
     • Auth         — enforce MFA.
@@ -36,6 +36,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Switch } from '$lib/components/ui/switch';
+	import { Textarea } from '$lib/components/ui/textarea';
 	import { toast } from '$lib/components/ui/toast';
 	import ConfirmationDialog from '$lib/components/ui/dialog/ConfirmationDialog.svelte';
 	import {
@@ -183,13 +184,24 @@
 				showSuccess('Server settings updated');
 			} else {
 				const data = res.data as { message?: string; data?: unknown } | null;
-				saveError = data?.message ?? res.error?.message ?? 'Save failed';
+				saveError = [
+					data?.message ?? res.error?.message ?? 'Save failed',
+					...fieldErrors(data?.data)
+				].join('\n');
 			}
 		} catch (e) {
 			saveError = (e as Error).message;
 		} finally {
 			saving = false;
 		}
+	};
+
+	// `{field: [messages]}` of a refused save, one line per field
+	const fieldErrors = (errors: unknown): string[] => {
+		if (errors == null || typeof errors !== 'object' || Array.isArray(errors)) return [];
+		return Object.entries(errors as Record<string, unknown>).map(
+			([field, messages]) => `${field}: ${[messages].flat().join(' ')}`
+		);
 	};
 
 	const discard = () => {
@@ -421,6 +433,31 @@
 								oninput={(e) =>
 									(form.https_proxy = (e.currentTarget as HTMLInputElement).value || null)}
 							/>
+						</div>
+						<div class="flex flex-col gap-1 sm:col-span-2">
+							<label
+								for="srv-no-proxy"
+								class="text-2xs font-medium uppercase tracking-wide text-muted-foreground"
+							>
+								No proxy for
+							</label>
+							<Textarea
+								id="srv-no-proxy"
+								class="min-h-0 font-mono text-xs"
+								rows={3}
+								placeholder={'localhost, 127.0.0.1\n.corp.example, 10.0.0.0/8'}
+								value={String(form.no_proxy ?? '')}
+								disabled={saving}
+								oninput={(e) =>
+									(form.no_proxy = (e.currentTarget as HTMLTextAreaElement).value || null)}
+							/>
+							<p class="text-2xs text-muted-foreground">
+								Reached directly, without any proxy. Separate entries with commas or new lines:
+								<code>corp.example</code> matches the domain and its subdomains,
+								<code>.corp.example</code> the subdomains only, <code>10.0.0.0/8</code> IP addresses
+								written in the URL (host names are not resolved), <code>&lt;local&gt;</code> host
+								names without a dot, <code>*</code> everything. Add <code>:port</code> to match one port.
+							</p>
 						</div>
 						<p class="text-2xs text-muted-foreground sm:col-span-2">
 							Used by IRIS modules that fetch external resources. Empty leaves the system default in

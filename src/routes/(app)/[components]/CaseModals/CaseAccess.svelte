@@ -5,6 +5,7 @@
 	import { AccessLevel } from '$lib/services/access-control.service';
 	import {
 		CaseService,
+		type CaseAccessGroupRow,
 		type CaseAccessLevel,
 		type CaseAccessUserRow
 	} from '$lib/services/case.service';
@@ -29,6 +30,7 @@
 	let loading = $state(false);
 	let setAccessViaGroup = $state(false);
 	let groupIds = $state<string[]>([]);
+	let groups = $state<CaseAccessGroupRow[]>([]);
 	let groupAccess = $state<string>('');
 	// Until `/access/me` answers, assume read-only rather than offer
 	// controls that would 403.
@@ -143,14 +145,28 @@
 			)
 		);
 
-		const failed = results.filter(
-			(r) => r.status === 'rejected' || (r.status === 'fulfilled' && r.value?.error)
-		).length;
+		// Why each group was refused, e.g. a member without access to the
+		// case's customer: the backend's message, prefixed with the group
+		const failures = results.flatMap((r, i) => {
+			const error =
+				r.status === 'rejected'
+					? r.reason instanceof Error
+						? r.reason.message
+						: 'Request failed'
+					: r.value?.error
+						? r.value.error.message || 'Request failed'
+						: null;
+			if (error === null) return [];
+			const name = groups.find((g) => String(g.group_id) === groupIds[i])?.group_name;
+			return [`${name ?? `Group #${groupIds[i]}`}: ${error}`];
+		});
+		const failed = failures.length;
 
 		if (failed > 0) {
 			toast({
 				variant: 'destructive',
-				title: `Failed to update ${failed} group${failed === 1 ? '' : 's'}`
+				title: `Failed to update ${failed} group${failed === 1 ? '' : 's'}`,
+				description: failures.join(' · ')
 			});
 		} else {
 			toast({
@@ -188,7 +204,7 @@
 	</div>
 
 	{#if setAccessViaGroup}
-		<CaseAccessGroup caseId={currentCaseId} bind:groupIds bind:access={groupAccess} />
+		<CaseAccessGroup caseId={currentCaseId} bind:groupIds bind:groups bind:access={groupAccess} />
 		<div class="mt-4 flex items-center justify-end gap-2">
 			<Button variant="ghost" size="sm" onclick={() => (setAccessViaGroup = false)}>Cancel</Button>
 			<Button

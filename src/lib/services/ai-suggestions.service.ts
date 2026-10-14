@@ -25,7 +25,8 @@ export type AiSuggestionStatus = 'open' | 'accepted' | 'dismissed' | 'expired' |
 
 export type AiSuggestionSeverity = 'low' | 'medium' | 'high' | 'critical';
 
-export type AiSuggestionFieldType = 'text' | 'textarea' | 'number' | 'boolean' | 'select';
+/** `date` is answered as a `YYYY-MM-DD` string. */
+export type AiSuggestionFieldType = 'text' | 'textarea' | 'number' | 'boolean' | 'select' | 'date';
 
 export interface AiSuggestionFormField {
 	name: string;
