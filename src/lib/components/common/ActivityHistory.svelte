@@ -9,7 +9,8 @@
 		TagIcon,
 		ClockIcon
 	} from 'lucide-svelte';
-	import { fade, slide } from 'svelte/transition';
+	import { fade } from 'svelte/transition';
+	import { slideIfShown } from '$lib/utils/transitions';
 	import UserAvatar from '$lib/components/common/UserAvatar.svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { cn } from '$lib/utils';
@@ -194,7 +195,7 @@
 		<div class="space-y-4">
 			{#each historyEvents as event, index (event.timestamp)}
 				{@const IconComponent = getActionIcon(event.action)}
-				<div class="group relative" in:slide={{ duration: 300, delay: index * 50 }}>
+				<div class="group relative" in:slideIfShown={{ duration: 300, delay: index * 50 }}>
 					{#if index < historyEvents.length - 1}
 						<div class="absolute bottom-0 left-3 top-8 w-0.5 bg-border/50 group-last:hidden"></div>
 					{/if}

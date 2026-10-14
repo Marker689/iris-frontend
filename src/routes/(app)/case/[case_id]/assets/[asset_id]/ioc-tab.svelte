@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { fade, slide } from 'svelte/transition';
+	import { fade } from 'svelte/transition';
+	import { slideIfShown } from '$lib/utils/transitions';
 	import { getContext } from 'svelte';
 	import {
 		ShieldAlertIcon,
@@ -392,7 +393,7 @@
 
 		<div class="space-y-6">
 			{#each [...getGroupedIocs()] as [typeName, typeIocs]}
-				<section in:slide={{ duration: 300 }}>
+				<section in:slideIfShown={{ duration: 300 }}>
 					<h3
 						class="mb-3 flex items-center gap-2 border-b pb-1 text-sm font-medium text-muted-foreground"
 					>
