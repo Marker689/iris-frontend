@@ -83,6 +83,8 @@ export interface ChatConversation {
 	updated_at: string;
 	archived_at: string | null;
 	policy?: ChatConversationPolicy | null;
+	/** User turns sent while Yuki was running, waiting for its next step. */
+	queued_user_texts?: string[];
 }
 
 export interface PendingToolCall {
@@ -263,7 +265,8 @@ export type ChatSocketHandlers = {
 		stop_reason?: string;
 		usage?: ChatUsage;
 	}) => void;
-	onUserMessagePersisted?: (payload: { conversation_id: number }) => void;
+	onUserMessagePersisted?: (payload: { conversation_id: number; message_id?: number }) => void;
+	onUserMessageQueued?: (payload: { conversation_id: number; queued_user_texts: string[] }) => void;
 	onError?: (payload: { message: string }) => void;
 	onConnectFailure?: () => void;
 };
@@ -293,6 +296,7 @@ export class ChatSocketClient {
 		this.socket.on('assistant_tool_result', (p) => this.handlers.onAssistantToolResult?.(p));
 		this.socket.on('assistant_end', (p) => this.handlers.onAssistantEnd?.(p));
 		this.socket.on('user_message_persisted', (p) => this.handlers.onUserMessagePersisted?.(p));
+		this.socket.on('user_message_queued', (p) => this.handlers.onUserMessageQueued?.(p));
 		this.socket.on('error', (p) => this.handlers.onError?.(p ?? {}));
 		this.socket.on('connect_error', () => this.handlers.onConnectFailure?.());
 	}
@@ -318,6 +322,13 @@ export class ChatSocketClient {
 		this.socket?.emit('send', {
 			conversation_id: conversationId,
 			user_text: userText
+		});
+	}
+
+	/** Stop the running turn where it is. */
+	stop(conversationId: number): void {
+		this.socket?.emit('stop', {
+			conversation_id: conversationId
 		});
 	}
 

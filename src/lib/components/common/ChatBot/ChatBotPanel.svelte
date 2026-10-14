@@ -63,7 +63,10 @@
 	});
 
 	const streaming = $derived(chat.state.streamingConversationId != null);
-	const disabled = $derived(streaming || chat.state.pendingToolCalls.length > 0);
+	// Never locked by a run or by writes awaiting approval: a turn sent
+	// mid-run is queued for the run's next step, and one sent over
+	// pending writes denies them (the analyst has moved on).
+	const disabled = $derived(chat.state.loading);
 
 	// True in the initial-latency window: the user just sent and the
 	// stream is running but no text has arrived yet. Also true between
@@ -599,6 +602,18 @@
 						<ThinkingShimmer />
 					{/if}
 
+					{#each chat.state.queuedTexts as queued, i (i)}
+						<!-- Sent mid-run, waiting for the run's next step. -->
+						<div class="flex justify-end text-xs">
+							<div
+								class="max-w-[80%] rounded-md border border-dashed border-primary/50 px-3 py-2 text-muted-foreground"
+							>
+								<p class="whitespace-pre-wrap">{queued}</p>
+								<p class="mt-1 text-2xs">Queued — Yuki reads this at its next step</p>
+							</div>
+						</div>
+					{/each}
+
 					{#if chat.state.pendingToolCalls.length > 1}
 						<!-- Batch escape hatch: when the model proposes many
 						     writes at once (or is stuck in a retry loop
@@ -628,6 +643,8 @@
 
 			<ChatComposer
 				{disabled}
+				{streaming}
+				onStop={chat.stop}
 				onSend={(text) =>
 					chat.sendOrStart(text, {
 						caseId: currentCaseId,

@@ -85,6 +85,12 @@ export const createChatPanelContext = () => {
 		 * no conversation is open.
 		 */
 		usage: ChatUsage | null;
+		/**
+		 * User turns sent while the assistant was running. The backend
+		 * hands them to the model at its next step; shown under the
+		 * stream until then.
+		 */
+		queuedTexts: string[];
 	}>({
 		open: false,
 		streamingConversationId: null,
@@ -95,12 +101,25 @@ export const createChatPanelContext = () => {
 		error: null,
 		loading: false,
 		focusHint: null,
-		usage: null
+		usage: null,
+		queuedTexts: []
 	});
 
 	const mutation = $state<{ error: string | null }>({ error: null });
 
 	let socket: ChatSocketClient | null = null;
+
+	// A stop normally ends with the run's own `assistant_end`. If that
+	// never comes (the worker running it died), unlock the panel anyway.
+	const STOP_FALLBACK_MS = 5000;
+	let stopFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const _clearStopFallback = () => {
+		if (stopFallbackTimer != null) {
+			clearTimeout(stopFallbackTimer);
+			stopFallbackTimer = null;
+		}
+	};
 
 	// ---- Character-drip typing effect ----
 	// The socket delivers full-token SSE chunks (5-60 chars each). Painting
@@ -213,6 +232,7 @@ export const createChatPanelContext = () => {
 				};
 			},
 			onAssistantEnd: (payload) => {
+				_clearStopFallback();
 				// Flush any un-dripped characters so the final rendered
 				// message matches what the model actually sent (no lost
 				// tail if the socket closed while pending had data).
@@ -233,12 +253,23 @@ export const createChatPanelContext = () => {
 				state.streamingConversationId = null;
 			},
 			onUserMessagePersisted: () => {
-				// Refresh to pick up the newly-persisted user turn.
+				// The run is taking a user turn — the first one, or turns
+				// sent while it ran. What it streamed so far is persisted
+				// by now, so restart the staged message after the new turn.
+				_flushTyping();
 				if (state.currentConversation) {
+					state.streamingAssistant = { text: '', pending: '', toolUses: [] };
+					state.streamingConversationId = state.currentConversation.id;
 					void refresh(state.currentConversation.id);
 				}
 			},
+			onUserMessageQueued: (payload) => {
+				if (state.currentConversation?.id === payload.conversation_id) {
+					state.queuedTexts = payload.queued_user_texts ?? [];
+				}
+			},
 			onError: (payload) => {
+				_clearStopFallback();
 				_flushTyping();
 				state.error = payload.message || 'Chatbot error';
 				state.streamingAssistant = null;
@@ -272,6 +303,7 @@ export const createChatPanelContext = () => {
 			state.currentConversation = conv;
 			state.messages = conv.messages ?? [];
 			state.pendingToolCalls = conv.pending_tool_calls ?? [];
+			state.queuedTexts = conv.queued_user_texts ?? [];
 			// `usage` is absent on very old conversations that were
 			// persisted before the aggregate was added — keep the last
 			// known value in that case rather than blanking the footer.
@@ -359,6 +391,7 @@ export const createChatPanelContext = () => {
 			state.currentConversation = null;
 			state.messages = [];
 			state.pendingToolCalls = [];
+			state.queuedTexts = [];
 			state.usage = null;
 		}
 		return true;
@@ -380,6 +413,7 @@ export const createChatPanelContext = () => {
 				state.currentConversation = conv;
 				state.messages = [];
 				state.pendingToolCalls = [];
+				state.queuedTexts = [];
 				_ensureSocket().joinConversation(conv.id);
 				return conv.id;
 			}
@@ -403,6 +437,7 @@ export const createChatPanelContext = () => {
 				state.currentConversation = conv;
 				state.messages = [];
 				state.pendingToolCalls = [];
+				state.queuedTexts = [];
 				_ensureSocket().joinConversation(conv.id);
 				return conv.id;
 			}
@@ -435,6 +470,7 @@ export const createChatPanelContext = () => {
 				state.currentConversation = conv;
 				state.messages = [];
 				state.pendingToolCalls = [];
+				state.queuedTexts = [];
 				_ensureSocket().joinConversation(conv.id);
 				return conv.id;
 			}
@@ -448,6 +484,15 @@ export const createChatPanelContext = () => {
 	const send = (text: string) => {
 		if (!state.currentConversation) return;
 		state.error = null;
+		if (state.streamingConversationId === state.currentConversation.id) {
+			// Mid-run: the backend queues the turn for the run's next step.
+			state.queuedTexts = [...state.queuedTexts, text];
+			_ensureSocket().send(state.currentConversation.id, text);
+			return;
+		}
+		// Writes still waiting for approval are denied by the backend when
+		// a new turn comes in — the analyst has moved on.
+		state.pendingToolCalls = [];
 		state.streamingAssistant = { text: '', pending: '', toolUses: [] };
 		state.streamingConversationId = state.currentConversation.id;
 		// Prepend a one-line focus hint on the FIRST send of a
@@ -542,6 +587,22 @@ export const createChatPanelContext = () => {
 		return convId;
 	};
 
+	/** Stop the running turn. Partial output stays; tools not run yet don't run. */
+	const stop = () => {
+		const conversationId = state.streamingConversationId;
+		if (conversationId == null) return;
+		_ensureSocket().stop(conversationId);
+		_clearStopFallback();
+		stopFallbackTimer = setTimeout(() => {
+			stopFallbackTimer = null;
+			if (state.streamingConversationId !== conversationId) return;
+			_flushTyping();
+			state.streamingAssistant = null;
+			state.streamingConversationId = null;
+			void refresh(conversationId);
+		}, STOP_FALLBACK_MS);
+	};
+
 	const approveTool = (pendingToolCallId: number) => {
 		if (!state.currentConversation) return;
 		// Optimistically drop the row so the Approve card disappears the
@@ -597,6 +658,7 @@ export const createChatPanelContext = () => {
 		archiveConversation,
 		send,
 		sendOrStart,
+		stop,
 		startWithScope,
 		approveTool,
 		denyTool,
