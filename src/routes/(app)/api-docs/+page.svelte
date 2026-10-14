@@ -23,12 +23,16 @@
      elements at all.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import yaml from 'js-yaml';
 	import { ApiService } from '$lib/services/api.service';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 
-	const REDOC_CDN = 'https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js';
+	// Pinned, with an integrity hash: `latest` moved to Redoc 3, whose bundle
+	// declares its exports as a top-level `const` and never sets
+	// `window.Redoc`, so the page timed out waiting for it.
+	const REDOC_CDN = 'https://cdn.redoc.ly/redoc/v2.5.4/bundles/redoc.standalone.js';
+	const REDOC_INTEGRITY = 'sha384-w447zOpYfw/1Tv/5AK9NfHTlQIqE3RVR6KY62jCyy9zNDgO64cMwGGP1Fj0zJVf5';
 
 	let loading = $state(true);
 	let error = $state<string | null>(null);
@@ -66,7 +70,7 @@
 	}> =>
 		new Promise((resolve, reject) => {
 			const start = performance.now();
-			const tick = () => {
+			const poll = () => {
 				const g = (
 					window as unknown as {
 						Redoc?: { init?: (s: unknown, o: unknown, e: HTMLElement) => void };
@@ -76,18 +80,22 @@
 					return resolve(g as { init: (s: unknown, o: unknown, e: HTMLElement) => void });
 				if (performance.now() - start > 15000)
 					return reject(new Error('Redoc failed to load within 15s.'));
-				setTimeout(tick, 60);
+				setTimeout(poll, 60);
 			};
-			tick();
+			poll();
 		});
 
 	onMount(async () => {
 		await loadSpec();
+		// The mount point only renders once `loading` flips off.
+		await tick();
 		if (specObject == null || !mountEl) return;
 
 		if (!document.querySelector('script[data-redoc-cdn="1"]')) {
 			const s = document.createElement('script');
 			s.src = REDOC_CDN;
+			s.integrity = REDOC_INTEGRITY;
+			s.crossOrigin = 'anonymous';
 			s.async = true;
 			s.dataset.redocCdn = '1';
 			document.head.appendChild(s);
