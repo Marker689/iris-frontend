@@ -66,8 +66,14 @@
 		shares.openDialog({ kind: 'note', id: note.note_id, label: note.title || 'Untitled note' });
 	};
 
-	let draftContent = $state('');
+	// The saved content, as the server has it
 	let baseContent = $state('');
+	// The editor's content once it has reported any. Kept apart from the
+	// baseline, which the note load sets when it lands: the collaborative
+	// editor ignores `value`, so overwriting this would report unsaved
+	// edits as saved.
+	let editorContent = $state<string | null>(null);
+	const draftContent = $derived(editorContent ?? baseContent);
 	let saving = $state(false);
 	let lastError = $state<string | null>(null);
 	let savedAt = $state(0);
@@ -95,7 +101,7 @@
 
 		loadedForNoteId = id;
 		baseContent = '';
-		draftContent = '';
+		editorContent = null;
 		editedHere = false;
 		unsynced = false;
 		lastError = null;
@@ -106,25 +112,29 @@
 			if (!fresh) return;
 
 			baseContent = fresh.content ?? '';
-			draftContent = baseContent;
 		});
 	});
 
 	const saveNote = async () => {
 		if (!note) return;
 
+		const content = draftContent;
 		saving = true;
 		lastError = null;
 
 		try {
 			const result = await notes.patchNote(note.note_id, {
 				title: note.title,
-				content: draftContent
+				content
 			});
 
 			if (result) {
-				baseContent = draftContent;
-				editedHere = false;
+				baseContent = content;
+				// Edits made while saving are not part of this save
+				if (editorContent === content) {
+					editorContent = null;
+					editedHere = false;
+				}
 				savedAt = Date.now();
 			} else {
 				lastError = 'Failed to save note';
@@ -137,7 +147,7 @@
 	};
 
 	const handleRemoteSave = (content: string) => {
-		draftContent = content;
+		editorContent = content;
 		baseContent = content;
 		if (note) note.content = content;
 	};
@@ -171,7 +181,7 @@
 		// so what the user sees matches what was restored.
 		const next = fresh.content ?? '';
 		baseContent = next;
-		draftContent = next;
+		editorContent = null;
 		editedHere = false;
 	};
 </script>
@@ -203,7 +213,7 @@
 				<MarkDownEditor
 					value={draftContent}
 					onChange={(v) => {
-						draftContent = v;
+						editorContent = v;
 						note.content = v;
 					}}
 					onSave={saveNote}

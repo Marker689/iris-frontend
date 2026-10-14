@@ -29,8 +29,14 @@
 	const warRoomId = $derived(ctx.idGetter());
 	const room = $derived(ctx.room);
 
-	let description = $state('');
+	// The saved summary, as the server has it
 	let baseDescription = $state('');
+	// The editor's content once it has reported any. Kept apart from the
+	// baseline: the room is replaced on every room update (rename, state,
+	// refresh...) and the collaborative editor ignores `value`, so
+	// overwriting this would report unsaved edits as saved.
+	let editorDescription = $state<string | null>(null);
+	const description = $derived(editorDescription ?? baseDescription);
 
 	let loading = $state(false);
 	let saving = $state(false);
@@ -58,10 +64,11 @@
 		const id = warRoomId;
 		if (!Number.isFinite(id) || id === lastLoadedWarRoomId) return;
 		lastLoadedWarRoomId = id;
-		description = '';
+		editorDescription = null;
 		baseDescription = '';
 		editedHere = false;
 		unsynced = false;
+		lastError = null;
 	});
 
 	// Seed the editor from the war room the layout already loaded.
@@ -70,11 +77,7 @@
 	// local seed here means view-mode has something to render before
 	// sync-init arrives.
 	$effect(() => {
-		const value = room?.description ?? '';
-		if (value !== baseDescription) {
-			baseDescription = value;
-			description = value;
-		}
+		baseDescription = room?.description ?? '';
 	});
 
 	const refresh = async () => {
@@ -97,13 +100,17 @@
 	// the case summary and gives the user a "known good" moment.
 	const save = async () => {
 		if (!room) return;
+		const content = description;
 		saving = true;
 		lastError = null;
-		const res = await WarRoomsService.update(warRoomId, { description });
+		const res = await WarRoomsService.update(warRoomId, { description: content });
 		if (res.ok && res.data && typeof res.data !== 'string') {
 			ctx.setRoom(res.data);
-			baseDescription = description;
-			editedHere = false;
+			// Edits made while saving are not part of this save
+			if (editorDescription === content) {
+				editorDescription = null;
+				editedHere = false;
+			}
 			loadedTime = new Date();
 			savedAt = Date.now();
 		} else {
@@ -247,7 +254,7 @@
 				{#key warRoomId}
 					<MarkDownEditor
 						value={description}
-						onChange={(v) => (description = v)}
+						onChange={(v) => (editorDescription = v)}
 						onSave={() => save()}
 						collabMode="war-room-summary"
 						{warRoomId}
