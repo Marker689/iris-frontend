@@ -73,11 +73,11 @@ test.describe('War room · scope', () => {
 			await sourceRow.getByLabel(`Select ${assetName} in case #${caseA}`, { exact: true }).click();
 			const bulkbar = page.getByTestId('scope-assets-bulkbar');
 			await expect(bulkbar).toContainText('1 selected');
-			await bulkbar.getByRole('button', { name: 'Set flag' }).click();
+			await bulkbar.getByRole('button', { name: 'Set flags' }).click();
 
-			const flagDialog = page.getByRole('dialog', { name: 'Set flag' });
+			const flagDialog = page.getByRole('dialog', { name: 'Set flags' });
 			await expect(flagDialog).toBeVisible();
-			await flagDialog.getByRole('radio', { name: flagName }).click();
+			await flagDialog.getByRole('checkbox', { name: flagName }).click();
 			await flagDialog.getByRole('button', { name: 'Apply to 1 asset' }).click();
 			await expectToast(page, `${flagName} set`);
 

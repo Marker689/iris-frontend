@@ -1,6 +1,7 @@
 <!--
-  Set or remove one status flag on one or many assets (possibly across
-  several cases). Each change adds or updates an event on the case
+  Set or remove one or several status flags on one or many assets
+  (possibly across several cases); the reason and the decision apply to
+  every picked flag. Each change adds or updates an event on the case
   "Asset status" timeline. Flags with `requires_reason` /
   `requires_decision` cannot be set without a reason / a linked
   decision; the server enforces the same rule. Removing never needs
@@ -36,7 +37,7 @@
 		warRoomId: number;
 		flags: AssetFlag[];
 		assets: ScopeAsset[];
-		/** Pre-selected flag; defaults to the first one. */
+		/** Pre-picked flag (board drop); none by default. More can be picked. */
 		initialFlagId?: number | null;
 		initialAction?: ScopeFlagAction;
 		onDone?: () => void;
@@ -54,7 +55,7 @@
 
 	const MAX_REASON = 4000;
 
-	let flagId = $state<number | null>(null);
+	let flagIds = $state<number[]>([]);
 	let action = $state<ScopeFlagAction>('set');
 	let reason = $state('');
 	let decisionId = $state<number | null>(null);
@@ -73,11 +74,11 @@
 				: [];
 	};
 
-	// With a single asset already carrying the flag, start from its
-	// current reason / decision so "set" reads as an update.
+	// With a single asset already carrying the (single) picked flag, start
+	// from its current reason / decision so "set" reads as an update.
 	const prefill = () => {
-		const single = assets.length === 1 ? assets[0] : null;
-		const current = single?.flags?.find((f) => f.flag_id === flagId) ?? null;
+		const single = assets.length === 1 && flagIds.length === 1 ? assets[0] : null;
+		const current = single?.flags?.find((f) => f.flag_id === flagIds[0]) ?? null;
 		reason = action === 'set' && current ? (current.reason ?? '') : '';
 		decisionId = action === 'set' && current ? current.decision_id : null;
 	};
@@ -85,7 +86,7 @@
 	$effect(() => {
 		if (open) {
 			untrack(() => {
-				flagId = initialFlagId ?? flags[0]?.id ?? null;
+				flagIds = initialFlagId != null ? [initialFlagId] : [];
 				action = initialAction;
 				prefill();
 				outcomes = null;
@@ -95,8 +96,8 @@
 		}
 	});
 
-	const pickFlag = (id: number) => {
-		flagId = id;
+	const toggleFlag = (id: number) => {
+		flagIds = flagIds.includes(id) ? flagIds.filter((f) => f !== id) : [...flagIds, id];
 		prefill();
 	};
 
@@ -105,14 +106,21 @@
 		prefill();
 	};
 
-	const flag = $derived(flags.find((f) => f.id === flagId) ?? null);
+	// In the taxonomy order, whatever the click order.
+	const picked = $derived(flags.filter((f) => flagIds.includes(f.id)));
+	const single = $derived(picked.length === 1 ? picked[0] : null);
 	const removing = $derived(action === 'clear');
 	const caseCount = $derived(new Set(assets.map((a) => a.case_id)).size);
-	const reasonMissing = $derived(!removing && !!flag?.requires_reason && !reason.trim());
-	const decisionMissing = $derived(!removing && !!flag?.requires_decision && decisionId == null);
+	const needsReason = $derived(picked.some((f) => f.requires_reason));
+	const needsDecision = $derived(picked.some((f) => f.requires_decision));
+	const reasonMissing = $derived(!removing && needsReason && !reason.trim());
+	const decisionMissing = $derived(!removing && needsDecision && decisionId == null);
+	const pickedLabel = $derived(
+		picked.length <= 3 ? picked.map((f) => f.name).join(', ') : `${picked.length} flags`
+	);
 	const canSubmit = $derived(
 		assets.length > 0 &&
-			flag !== null &&
+			picked.length > 0 &&
 			!reasonMissing &&
 			!decisionMissing &&
 			reason.length <= MAX_REASON
@@ -120,12 +128,12 @@
 	const caseNames = $derived(Object.fromEntries(assets.map((a) => [a.case_id, a.case_name])));
 
 	const submit = async () => {
-		if (!canSubmit || submitting || !flag) return;
+		if (!canSubmit || submitting) return;
 		submitting = true;
 		const trimmed = reason.trim();
 		const res = await WarRoomScopeService.bulkFlag(warRoomId, {
 			asset_ids: assets.map((a) => a.asset_id),
-			flag_id: flag.id,
+			...(single ? { flag_id: single.id } : { flag_ids: picked.map((f) => f.id) }),
 			action,
 			reason: trimmed || undefined,
 			decision_id: removing ? undefined : decisionId
@@ -134,7 +142,7 @@
 
 		if (!res.ok || !res.data || typeof res.data === 'string') {
 			toast({
-				title: removing ? 'Could not remove the flag' : 'Could not set the flag',
+				title: removing ? 'Could not remove the flags' : 'Could not set the flags',
 				description: errorMessage(res, 'The server refused the change.'),
 				variant: 'destructive'
 			});
@@ -153,7 +161,7 @@
 
 		if (!outcomesFailed(rows)) {
 			toast({
-				title: removing ? `${flag.name} removed` : `${flag.name} set`,
+				title: removing ? `${pickedLabel} removed` : `${pickedLabel} set`,
 				description: summariseOutcomes(rows),
 				variant: 'success'
 			});
@@ -181,7 +189,7 @@
 		<DialogHeader class="border-b px-6 py-4">
 			<DialogTitle class="flex items-center gap-2">
 				<Flag class="h-4 w-4 text-primary" aria-hidden="true" />
-				{removing ? 'Remove flag' : 'Set flag'}
+				{removing ? 'Remove flags' : 'Set flags'}
 			</DialogTitle>
 			<DialogDescription>
 				{#if assets.length === 1}
@@ -218,18 +226,20 @@
 				</div>
 
 				<fieldset>
-					<legend class="text-xs font-medium text-muted-foreground">Flag</legend>
+					<legend class="text-xs font-medium text-muted-foreground">
+						Flags <span class="font-normal">(pick one or more)</span>
+					</legend>
 					{#if flags.length === 0}
 						<p class="mt-1.5 text-2xs text-muted-foreground">
 							No asset flag is configured. An administrator can add them in Settings → Asset flags.
 						</p>
 					{/if}
-					<div class="mt-1.5 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Flag">
+					<div class="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="Flags">
 						{#each flags as f (f.id)}
-							{@const active = f.id === flagId}
+							{@const active = flagIds.includes(f.id)}
 							<button
 								type="button"
-								role="radio"
+								role="checkbox"
 								aria-checked={active}
 								class={[
 									'inline-flex items-center gap-1 rounded-lg border p-1 transition-colors',
@@ -237,7 +247,7 @@
 										? 'border-primary bg-primary/10 ring-1 ring-primary/40'
 										: 'border-transparent hover:bg-muted'
 								]}
-								onclick={() => pickFlag(f.id)}
+								onclick={() => toggleFlag(f.id)}
 							>
 								<AssetFlagChip flag={f} size="sm" />
 								{#if f.requires_decision}
@@ -246,14 +256,14 @@
 							</button>
 						{/each}
 					</div>
-					{#if flag?.description}
-						<p class="mt-1.5 text-2xs text-muted-foreground">{flag.description}</p>
+					{#if single?.description}
+						<p class="mt-1.5 text-2xs text-muted-foreground">{single.description}</p>
 					{/if}
 				</fieldset>
 
 				<div>
 					<label class="text-xs font-medium text-muted-foreground" for="scope-flag-reason">
-						Reason {!removing && flag?.requires_reason ? '(required)' : '(optional)'}
+						Reason {!removing && needsReason ? '(required)' : '(optional)'}
 					</label>
 					<Textarea
 						id="scope-flag-reason"
@@ -262,23 +272,27 @@
 						rows={3}
 						maxlength={MAX_REASON}
 						placeholder={removing
-							? 'Why is the flag removed?'
-							: flag?.kind === 'exception'
+							? single
+								? 'Why is the flag removed?'
+								: 'Why are the flags removed?'
+							: picked.some((f) => f.kind === 'exception')
 								? 'Why is this asset an exception?'
 								: 'Context for the timeline event'}
 						class="mt-1"
 						aria-invalid={reasonMissing}
-						aria-required={!removing && (flag?.requires_reason ?? false)}
+						aria-required={!removing && needsReason}
 					/>
 					{#if reasonMissing}
-						<p class="mt-1 text-2xs text-destructive">This flag requires a reason.</p>
+						<p class="mt-1 text-2xs text-destructive">
+							{single ? 'This flag requires' : 'A picked flag requires'} a reason.
+						</p>
 					{/if}
 				</div>
 
 				{#if !removing}
 					<div>
 						<label class="text-xs font-medium text-muted-foreground" for="scope-flag-decision">
-							Decision {flag?.requires_decision ? '(required)' : '(optional)'}
+							Decision {needsDecision ? '(required)' : '(optional)'}
 						</label>
 						<select
 							id="scope-flag-decision"
@@ -297,7 +311,7 @@
 						</select>
 						{#if decisionMissing}
 							<p class="mt-1 text-2xs text-destructive">
-								This flag requires a decision from the register.
+								{single ? 'This flag requires' : 'A picked flag requires'} a decision from the register.
 							</p>
 						{/if}
 					</div>

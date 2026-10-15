@@ -1284,7 +1284,7 @@
 							class="h-7 gap-1.5 text-xs"
 							onclick={() => openFlag(selectedAssetRows)}
 						>
-							<Flag class="h-3.5 w-3.5" /> Set flag
+							<Flag class="h-3.5 w-3.5" /> Set flags
 						</Button>
 						<ScopeStatusMenu
 							kind="compromise"

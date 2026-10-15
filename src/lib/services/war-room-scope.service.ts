@@ -245,9 +245,11 @@ export interface ScopeCreateIocBody {
 
 export type ScopeFlagAction = 'set' | 'clear';
 
+/** One flag (`flag_id`) or several (`flag_ids`), never both. */
 export interface ScopeBulkFlagBody {
 	asset_ids: number[];
-	flag_id: number;
+	flag_id?: number;
+	flag_ids?: number[];
 	action: ScopeFlagAction;
 	reason?: string;
 	/** Ignored when removing. */
