@@ -5,7 +5,7 @@
   Secret values are never shown.
 -->
 <script lang="ts">
-	import { getContext, onMount } from 'svelte';
+	import { getContext, untrack } from 'svelte';
 	import {
 		KeyRoundIcon,
 		LockIcon,
@@ -72,9 +72,15 @@
 		}));
 	}
 
-	onMount(() => {
-		if (!runtimeConfig.aiWorkflowsEnabled) return;
-		load();
+	// Not onMount: on a hard load the runtime config may still be in
+	// flight, and the page would never load once it turns the feature on.
+	let started = false;
+	$effect(() => {
+		if (started || !runtimeConfig.aiWorkflowsEnabled) return;
+		started = true;
+		untrack(() => {
+			load();
+		});
 	});
 
 	$effect(() => {

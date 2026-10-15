@@ -4,7 +4,7 @@
   accepted or rejected).
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, RefreshCwIcon } from 'lucide-svelte';
@@ -151,10 +151,16 @@
 		loadRuns();
 	}
 
-	onMount(() => {
-		if (!runtimeConfig.aiWorkflowsEnabled) return;
-		loadWorkflows();
-		refresh();
+	// Not onMount: on a hard load the runtime config may still be in
+	// flight, and the page would never load once it turns the feature on.
+	let started = false;
+	$effect(() => {
+		if (started || !runtimeConfig.aiWorkflowsEnabled) return;
+		started = true;
+		untrack(() => {
+			loadWorkflows();
+			refresh();
+		});
 	});
 
 	const TAB_CLASS = 'border-b-2 px-3 py-1.5 text-xs font-medium';

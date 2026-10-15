@@ -6,7 +6,7 @@
   lives at `./[id]` (`./new` to create), runs at `./runs`.
 -->
 <script lang="ts">
-	import { getContext, onMount } from 'svelte';
+	import { getContext, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
 		BookOpenIcon,
@@ -185,11 +185,16 @@
 		);
 	}
 
-	onMount(() => {
-		if (runtimeConfig.aiWorkflowsEnabled) {
+	// Not onMount: on a hard load the runtime config may still be in
+	// flight, and the page would never load once it turns the feature on.
+	let started = false;
+	$effect(() => {
+		if (started || !runtimeConfig.aiWorkflowsEnabled) return;
+		started = true;
+		untrack(() => {
 			load();
 			categories.load();
-		}
+		});
 	});
 
 	async function toggleActive(workflow: AiWorkflowSummary, value: boolean) {
