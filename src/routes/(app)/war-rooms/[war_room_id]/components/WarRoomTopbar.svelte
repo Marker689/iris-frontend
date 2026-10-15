@@ -3,10 +3,11 @@
   icon badge, monospaced ID, title row, inline metadata, status chip,
   trailing action cluster (Datastore toggle).
 
-  Three things are editable in place from this bar — same affordances
+  Four things are editable in place from this bar — same affordances
   the IC would otherwise reach for via slash commands:
 
     * Title — click the room name → inline input → Save / Cancel.
+    * Accent color — click the dot left of the name → swatch popover.
     * State — state chip is a dropdown (Open / Active / Standby / Closed).
     * Severity (criticality) — a small skull-style chip next to the
       state, also a dropdown over the live severities list.
@@ -43,7 +44,9 @@
 		DropdownMenuSeparator,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
+	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { toast } from '$lib/components/ui/toast';
+	import WarRoomColorPicker from '$lib/components/war-room/WarRoomColorPicker.svelte';
 	import { WAR_ROOM_CTX, type WarRoomContext } from '$lib/contexts/war-room.context.svelte';
 	import {
 		WAR_ROOM_DATASTORE_PANEL_CTX,
@@ -170,6 +173,33 @@
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			cancelNameEdit();
+		}
+	};
+
+	// --- Accent color ---------------------------------------------------
+	let colorOpen = $state(false);
+	let colorSaving = $state(false);
+
+	const setColor = async (next: string | null) => {
+		if (!room || colorSaving) return;
+		if ((next ?? null) === (room.color ?? null)) {
+			colorOpen = false;
+			return;
+		}
+		colorSaving = true;
+		// The backend treats a missing / null `color` as "unchanged";
+		// an empty string is what clears it.
+		const res = await WarRoomsService.update(room.war_room_id, { color: next ?? '' });
+		colorSaving = false;
+		if (res.ok && res.data && typeof res.data !== 'string') {
+			ctx.setRoom(res.data as WarRoom);
+			colorOpen = false;
+		} else {
+			toast({
+				title: 'Could not change color',
+				description: typeof res.data === 'string' ? res.data : (res.error?.message ?? undefined),
+				variant: 'destructive'
+			});
 		}
 	};
 
@@ -377,13 +407,32 @@
 					<XIcon size={14} />
 				</button>
 			{:else}
-				{#if safeAccent}
-					<span
-						class="h-2.5 w-2.5 shrink-0 rounded-full"
-						style:background-color={safeAccent}
-						aria-hidden="true"
-					></span>
-				{/if}
+				<Popover bind:open={colorOpen}>
+					<PopoverTrigger>
+						<span
+							class={[
+								'flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full transition-transform hover:scale-125',
+								!safeAccent && 'border border-dashed border-muted-foreground/60'
+							]}
+							aria-label="Change accent color"
+							title="Change accent color"
+						>
+							<span
+								class="h-2.5 w-2.5 rounded-full"
+								style:background-color={safeAccent ?? 'transparent'}
+							></span>
+						</span>
+					</PopoverTrigger>
+					<PopoverContent align="start" class="w-auto p-3">
+						<div class="mb-2 text-xs font-medium text-muted-foreground">Accent color</div>
+						<WarRoomColorPicker
+							value={room.color}
+							onchange={setColor}
+							allowNone
+							disabled={colorSaving}
+						/>
+					</PopoverContent>
+				</Popover>
 				<!--
 				  Title behaves like a button: clicking opens the inline
 				  editor. We render an <h2> for semantics + a sibling
@@ -393,10 +442,10 @@
 					type="button"
 					class="group flex min-w-0 items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-muted/60"
 					onclick={startNameEdit}
-					title="Rename war room"
+					title={`${room.name} — click to rename`}
 				>
 					<h2
-						class="min-w-0 truncate text-[15px] font-semibold leading-tight tracking-tight text-foreground"
+						class="line-clamp-2 min-w-0 break-words text-left text-[15px] font-semibold leading-tight tracking-tight text-foreground"
 					>
 						{room.name}
 					</h2>
