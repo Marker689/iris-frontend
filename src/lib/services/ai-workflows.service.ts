@@ -169,6 +169,8 @@ export interface AiWorkflowSummary {
 	inbound_url?: string | null;
 	created_by_id?: number | null;
 	last_fired_at?: string | null;
+	/** AI-workflow category (`CategoriesService`), null when in none. */
+	category_id?: number | null;
 	created_at?: string | null;
 	updated_at?: string | null;
 }
@@ -702,6 +704,19 @@ export class AiWorkflowsService {
 
 	static async remove(id: number, options: ApiOptions = {}): Promise<RequestResponse<null>> {
 		return ApiService.delete<null>(`${BASE}/${id}`, options);
+	}
+
+	/** File the workflow under a category, or none (`null`); not a new version. */
+	static async setCategory(
+		id: number,
+		categoryId: number | null,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<AiWorkflow>> {
+		return ApiService.put<AiWorkflow>(
+			`${BASE}/${id}/category`,
+			{ category_id: categoryId },
+			options
+		);
 	}
 
 	static async catalogue(options: ApiOptions = {}): Promise<RequestResponse<AiWorkflowCatalogue>> {

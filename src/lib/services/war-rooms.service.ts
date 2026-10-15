@@ -33,6 +33,8 @@ export interface WarRoom {
 	archived_at: string | null;
 	archived_by_id: number | null;
 	custom_attributes: Record<string, unknown> | null;
+	/** War-room category (`CategoriesService`), null when in none. */
+	category_id?: number | null;
 }
 
 export interface WarRoomMember {
@@ -88,6 +90,7 @@ export interface CreateWarRoomBody {
 	severity_id?: number | null;
 	color?: string | null;
 	custom_attributes?: Record<string, unknown> | null;
+	category_id?: number | null;
 }
 
 export interface UpdateWarRoomBody {
@@ -166,6 +169,19 @@ export class WarRoomsService {
 
 	static remove(id: number, options: ApiOptions = {}): Promise<RequestResponse<null>> {
 		return ApiService.delete<null>(`/war-rooms/${id}`, options);
+	}
+
+	/** File the room under a category, or none (`null`). Needs write access to the room. */
+	static setCategory(
+		id: number,
+		categoryId: number | null,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<WarRoom>> {
+		return ApiService.put<WarRoom>(
+			`/war-rooms/${id}/category`,
+			{ category_id: categoryId },
+			options
+		);
 	}
 
 	// --- Members ----

@@ -5,6 +5,7 @@
 	import {
 		ChevronDown,
 		ChevronRight,
+		Folder,
 		Plus,
 		ShieldAlert,
 		Search,
@@ -26,12 +27,18 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { toast } from '$lib/components/ui/toast';
 	import WarRoomColorPicker from '$lib/components/war-room/WarRoomColorPicker.svelte';
+	import CategoryMoveMenu from '$lib/components/common/categories/CategoryMoveMenu.svelte';
+	import CategorySidebar, {
+		CATEGORY_DRAG_TYPE
+	} from '$lib/components/common/categories/CategorySidebar.svelte';
+	import { CategoryState } from '$lib/components/common/categories/category-state.svelte';
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
 	import {
 		WarRoomsService,
 		type WarRoom,
 		type WarRoomState
 	} from '$lib/services/war-rooms.service';
+	import { categoryMatches, countByCategory } from '$lib/services/categories.service';
 	import { safeHexColor } from '$lib/utils/color';
 	import { toPlainSnippet } from '$lib/utils/text';
 
@@ -67,8 +74,13 @@
 	let newName = $state('');
 	let newDescription = $state('');
 	let newColor = $state<string | null>('#dc2626');
+	let newCategoryId = $state<number | null>(null);
 
 	const canCreate = $derived(userCtx.can('war_rooms_create'));
+	// Managing the shared categories needs war_rooms_write; moving a room
+	// also needs write access to that room, which the server checks.
+	const canFile = $derived(userCtx.can('war_rooms_write'));
+	const categories = new CategoryState('war-rooms');
 
 	const STATES: { value: WarRoomState; label: string }[] = [
 		{ value: 'active', label: 'Active' },
@@ -86,9 +98,17 @@
 		const needle = search.trim().toLowerCase();
 		return rooms.filter((r) => matchesSearch(r, needle));
 	});
-	const liveRooms = $derived(searched.filter((r) => r.archived_at == null));
+	// Category counts follow the search, not the category, like the chips.
+	const searchedLive = $derived(searched.filter((r) => r.archived_at == null));
+	const categoryCounts = $derived(countByCategory(searchedLive, categories.categories));
+	const inCategory = $derived(
+		searched.filter((r) => categoryMatches(categories.filter, r.category_id, categories.categories))
+	);
+	const liveRooms = $derived(inCategory.filter((r) => r.archived_at == null));
 	const archivedRooms = $derived(
-		searched.filter((r) => r.archived_at != null && (stateFilter === '' || r.state === stateFilter))
+		inCategory.filter(
+			(r) => r.archived_at != null && (stateFilter === '' || r.state === stateFilter)
+		)
 	);
 	// Chip counts follow the search but not the state filter, so they
 	// always say what clicking each chip would show.
@@ -118,6 +138,39 @@
 	};
 
 	const open = (room: WarRoom) => goto(`/war-rooms/${room.war_room_id}`);
+
+	const moveRoom = async (roomId: number, categoryId: number | null) => {
+		const room = rooms.find((r) => r.war_room_id === roomId);
+		if (!room || (room.category_id ?? null) === categoryId) return;
+		const res = await WarRoomsService.setCategory(roomId, categoryId);
+		if (res.ok && res.data && typeof res.data !== 'string') {
+			const moved = res.data as WarRoom;
+			rooms = rooms.map((r) => (r.war_room_id === roomId ? moved : r));
+			const target = categories.name(categoryId);
+			toast({
+				title: target ? `Moved "${room.name}" to ${target}` : `"${room.name}" uncategorised`
+			});
+		} else {
+			toast({
+				title: 'Could not move war room',
+				description:
+					typeof res.data === 'string' ? res.data : (res.error?.message ?? 'Unknown error'),
+				variant: 'destructive'
+			});
+		}
+	};
+
+	const dragRoom = (room: WarRoom, e: DragEvent) => {
+		if (!canFile || !e.dataTransfer) return;
+		e.dataTransfer.setData(CATEGORY_DRAG_TYPE, String(room.war_room_id));
+		e.dataTransfer.effectAllowed = 'move';
+	};
+
+	const openCreate = () => {
+		// A room created while a category is selected lands in it.
+		newCategoryId = typeof categories.filter === 'number' ? categories.filter : null;
+		createOpen = true;
+	};
 
 	const doArchive = async (room: WarRoom, e: MouseEvent) => {
 		// The card is an <a> / the row navigates on click; block that
@@ -158,6 +211,7 @@
 		const stored = localStorage.getItem(VIEW_STORAGE_KEY);
 		if (stored === 'cards' || stored === 'list') view = stored;
 		load();
+		categories.load();
 	});
 
 	const submitCreate = async () => {
@@ -167,7 +221,8 @@
 		const res = await WarRoomsService.create({
 			name,
 			description: newDescription.trim() || null,
-			color: newColor
+			color: newColor,
+			category_id: newCategoryId
 		});
 		creating = false;
 		if (res.ok && res.data && typeof res.data !== 'string') {
@@ -228,6 +283,29 @@
 	</span>
 {/snippet}
 
+{#snippet moveAction(room: WarRoom)}
+	{#if canFile}
+		<span class="invisible group-focus-within:visible group-hover:visible">
+			<CategoryMoveMenu
+				categories={categories.categories}
+				value={room.category_id}
+				itemName={room.name}
+				onSelect={(id) => moveRoom(room.war_room_id, id)}
+			/>
+		</span>
+	{/if}
+{/snippet}
+
+{#snippet categoryLabel(room: WarRoom)}
+	{@const name = categories.filter === 'all' ? categories.name(room.category_id) : null}
+	{#if name}
+		<span class="opacity-40">·</span>
+		<span class="inline-flex min-w-0 items-center gap-1 truncate" title={`Category: ${name}`}>
+			<Folder class="h-3 w-3 shrink-0" />{name}
+		</span>
+	{/if}
+{/snippet}
+
 {#snippet archiveAction(room: WarRoom, isArchived: boolean)}
 	<!--
 	  Archive / restore lives on the card / row so the operator doesn't
@@ -265,6 +343,7 @@
 			'group relative flex flex-col gap-1.5 overflow-hidden rounded-lg border bg-card/50 py-3 pl-4 pr-3 transition-colors hover:bg-card hover:shadow-sm',
 			isArchived && 'opacity-70 hover:opacity-100'
 		]}
+		ondragstart={(e) => dragRoom(room, e)}
 	>
 		<!-- Accent bar: the room's color, if it has one. -->
 		<span
@@ -288,16 +367,22 @@
 		<div
 			class="mt-auto flex items-center justify-between gap-3 pt-1 text-2xs text-muted-foreground"
 		>
-			<span class="flex items-center gap-2">
+			<span class="flex min-w-0 items-center gap-2">
 				<span class="font-mono">WR#{room.war_room_id}</span>
 				<span class="opacity-40">·</span>
-				{#if isArchived && room.archived_at}
-					Archived {formatDate(room.archived_at)}
-				{:else if room.created_at}
-					Created {formatDate(room.created_at)}
-				{/if}
+				<span class="shrink-0">
+					{#if isArchived && room.archived_at}
+						Archived {formatDate(room.archived_at)}
+					{:else if room.created_at}
+						Created {formatDate(room.created_at)}
+					{/if}
+				</span>
+				{@render categoryLabel(room)}
 			</span>
-			{@render archiveAction(room, isArchived)}
+			<span class="flex shrink-0 items-center gap-1">
+				{@render moveAction(room)}
+				{@render archiveAction(room, isArchived)}
+			</span>
 		</div>
 	</a>
 {/snippet}
@@ -311,7 +396,7 @@
 				<col />
 				<col class="w-24" />
 				<col class="w-28" />
-				<col class="w-24" />
+				<col class="w-32" />
 			</colgroup>
 			<tbody class="divide-y">
 				{#each list as room (room.war_room_id)}
@@ -322,6 +407,8 @@
 							isArchived && 'opacity-70 hover:opacity-100'
 						]}
 						onclick={() => open(room)}
+						draggable={canFile}
+						ondragstart={(e) => dragRoom(room, e)}
 					>
 						<td class="py-2.5 pl-3">
 							<span
@@ -342,7 +429,10 @@
 							>
 								{room.name}
 							</a>
-							<div class="font-mono text-2xs text-muted-foreground">WR#{room.war_room_id}</div>
+							<div class="flex items-center gap-2 text-2xs text-muted-foreground">
+								<span class="font-mono">WR#{room.war_room_id}</span>
+								{@render categoryLabel(room)}
+							</div>
 						</td>
 						<td class="py-2.5 pr-3">
 							{#if room.description}
@@ -360,7 +450,12 @@
 								{formatDate(room.created_at)}
 							{/if}
 						</td>
-						<td class="py-2 pr-3 text-right">{@render archiveAction(room, isArchived)}</td>
+						<td class="py-2 pr-3">
+							<div class="flex items-center justify-end gap-1">
+								{@render moveAction(room)}
+								{@render archiveAction(room, isArchived)}
+							</div>
+						</td>
 					</tr>
 				{/each}
 			</tbody>
@@ -402,166 +497,184 @@
 				/>
 			</div>
 			{#if canCreate}
-				<Button class="h-9" onclick={() => (createOpen = true)} data-tour="war-room-new">
+				<Button class="h-9" onclick={openCreate} data-tour="war-room-new">
 					<Plus class="mr-1 h-4 w-4" /> New war room
 				</Button>
 			{/if}
 		</div>
 	</header>
 
-	<div class="flex flex-wrap items-center justify-between gap-2">
-		<div class="flex flex-wrap items-center gap-1.5">
-			<button
-				type="button"
-				class={[
-					'flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors',
-					stateFilter === ''
-						? 'border-primary bg-primary/10 text-primary'
-						: 'border-border bg-card/40 text-muted-foreground hover:bg-muted/50'
-				]}
-				onclick={() => (stateFilter = '')}
-			>
-				<Layers class="h-3 w-3" />
-				All
-				<span class="tabular-nums opacity-70">{liveRooms.length}</span>
-			</button>
-			{#each STATES as chip (chip.value)}
-				{@const active = stateFilter === chip.value}
-				<button
-					type="button"
-					class={[
-						'flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors',
-						active
-							? 'border-primary bg-primary/10 text-primary'
-							: 'border-border bg-card/40 text-muted-foreground hover:bg-muted/50',
-						!active && counts[chip.value] === 0 && 'opacity-50'
-					]}
-					onclick={() => (stateFilter = active ? '' : chip.value)}
+	<div class="flex min-h-0 flex-1 gap-6">
+		{#if !loading && rooms.length > 0}
+			<aside class="w-52 shrink-0 overflow-y-auto" data-testid="war-room-categories">
+				<CategorySidebar
+					store={categories}
+					total={searchedLive.length}
+					counts={categoryCounts}
+					canManage={canFile}
+					itemLabel="war rooms"
+					onDropItem={canFile ? moveRoom : undefined}
+				/>
+			</aside>
+		{/if}
+		<div class="flex min-w-0 flex-1 flex-col gap-4">
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<div class="flex flex-wrap items-center gap-1.5">
+					<button
+						type="button"
+						class={[
+							'flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors',
+							stateFilter === ''
+								? 'border-primary bg-primary/10 text-primary'
+								: 'border-border bg-card/40 text-muted-foreground hover:bg-muted/50'
+						]}
+						onclick={() => (stateFilter = '')}
+					>
+						<Layers class="h-3 w-3" />
+						All
+						<span class="tabular-nums opacity-70">{liveRooms.length}</span>
+					</button>
+					{#each STATES as chip (chip.value)}
+						{@const active = stateFilter === chip.value}
+						<button
+							type="button"
+							class={[
+								'flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors',
+								active
+									? 'border-primary bg-primary/10 text-primary'
+									: 'border-border bg-card/40 text-muted-foreground hover:bg-muted/50',
+								!active && counts[chip.value] === 0 && 'opacity-50'
+							]}
+							onclick={() => (stateFilter = active ? '' : chip.value)}
+						>
+							<span class={['h-1.5 w-1.5 rounded-full', stateDot(chip.value)]}></span>
+							{chip.label}
+							<span class="tabular-nums opacity-70">{counts[chip.value]}</span>
+						</button>
+					{/each}
+				</div>
+
+				<div
+					class="flex items-center rounded-md border bg-card/40 p-0.5"
+					role="group"
+					aria-label="View"
 				>
-					<span class={['h-1.5 w-1.5 rounded-full', stateDot(chip.value)]}></span>
-					{chip.label}
-					<span class="tabular-nums opacity-70">{counts[chip.value]}</span>
-				</button>
-			{/each}
-		</div>
-
-		<div
-			class="flex items-center rounded-md border bg-card/40 p-0.5"
-			role="group"
-			aria-label="View"
-		>
-			<button
-				type="button"
-				class={[
-					'flex h-6 items-center gap-1 rounded px-2 text-xs transition-colors',
-					view === 'cards'
-						? 'bg-muted text-foreground'
-						: 'text-muted-foreground hover:text-foreground'
-				]}
-				onclick={() => setView('cards')}
-				aria-pressed={view === 'cards'}
-				title="Card view"
-			>
-				<LayoutGrid class="h-3.5 w-3.5" /> Cards
-			</button>
-			<button
-				type="button"
-				class={[
-					'flex h-6 items-center gap-1 rounded px-2 text-xs transition-colors',
-					view === 'list'
-						? 'bg-muted text-foreground'
-						: 'text-muted-foreground hover:text-foreground'
-				]}
-				onclick={() => setView('list')}
-				aria-pressed={view === 'list'}
-				title="Compact list view"
-			>
-				<List class="h-3.5 w-3.5" /> List
-			</button>
-		</div>
-	</div>
-
-	<div class="flex-1 overflow-y-auto">
-		{#if loading}
-			<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-				{#each Array(4) as _}
-					<Skeleton class="h-28 w-full" />
-				{/each}
+					<button
+						type="button"
+						class={[
+							'flex h-6 items-center gap-1 rounded px-2 text-xs transition-colors',
+							view === 'cards'
+								? 'bg-muted text-foreground'
+								: 'text-muted-foreground hover:text-foreground'
+						]}
+						onclick={() => setView('cards')}
+						aria-pressed={view === 'cards'}
+						title="Card view"
+					>
+						<LayoutGrid class="h-3.5 w-3.5" /> Cards
+					</button>
+					<button
+						type="button"
+						class={[
+							'flex h-6 items-center gap-1 rounded px-2 text-xs transition-colors',
+							view === 'list'
+								? 'bg-muted text-foreground'
+								: 'text-muted-foreground hover:text-foreground'
+						]}
+						onclick={() => setView('list')}
+						aria-pressed={view === 'list'}
+						title="Compact list view"
+					>
+						<List class="h-3.5 w-3.5" /> List
+					</button>
+				</div>
 			</div>
-		{:else if rooms.length === 0}
-			<div class="flex h-full flex-col items-center justify-center gap-2 text-center">
-				<ShieldAlert class="h-10 w-10 text-muted-foreground/50" />
-				<p class="text-sm text-muted-foreground">No war rooms yet.</p>
-				{#if canCreate}
-					<Button variant="outline" onclick={() => (createOpen = true)} data-tour="war-room-new">
-						<Plus class="mr-1 h-4 w-4" /> Create your first war room
-					</Button>
-				{/if}
-			</div>
-		{:else}
-			<div class="flex flex-col gap-6">
-				{#if groups.length === 0}
-					<p class="text-sm text-muted-foreground">No live war rooms match the current filters.</p>
-				{/if}
 
-				<!--
+			<div class="flex-1 overflow-y-auto">
+				{#if loading}
+					<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+						{#each Array(4) as _}
+							<Skeleton class="h-28 w-full" />
+						{/each}
+					</div>
+				{:else if rooms.length === 0}
+					<div class="flex h-full flex-col items-center justify-center gap-2 text-center">
+						<ShieldAlert class="h-10 w-10 text-muted-foreground/50" />
+						<p class="text-sm text-muted-foreground">No war rooms yet.</p>
+						{#if canCreate}
+							<Button variant="outline" onclick={openCreate} data-tour="war-room-new">
+								<Plus class="mr-1 h-4 w-4" /> Create your first war room
+							</Button>
+						{/if}
+					</div>
+				{:else}
+					<div class="flex flex-col gap-6">
+						{#if groups.length === 0}
+							<p class="text-sm text-muted-foreground">
+								No live war rooms match the current filters.
+							</p>
+						{/if}
+
+						<!--
 				  One section per state, in operational-priority order.
 				  When a single state is filtered the section is forced
 				  open — the operator asked for exactly those rooms.
 				-->
-				{#each groups as group (group.value)}
-					{@const isCollapsed = stateFilter === '' && collapsed[group.value]}
-					<section class="flex flex-col gap-2">
-						<button
-							type="button"
-							class="flex items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
-							onclick={() => (collapsed[group.value] = !collapsed[group.value])}
-							aria-expanded={!isCollapsed}
-						>
-							{#if isCollapsed}
-								<ChevronRight class="h-3 w-3" />
-							{:else}
-								<ChevronDown class="h-3 w-3" />
-							{/if}
-							<span class={['h-2 w-2 rounded-full', stateDot(group.value)]}></span>
-							{group.label}
-							<span class="font-normal tabular-nums">({group.rooms.length})</span>
-						</button>
-						{#if !isCollapsed}
-							{@render roomList(group.rooms, false)}
-						{/if}
-					</section>
-				{/each}
+						{#each groups as group (group.value)}
+							{@const isCollapsed = stateFilter === '' && collapsed[group.value]}
+							<section class="flex flex-col gap-2">
+								<button
+									type="button"
+									class="flex items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+									onclick={() => (collapsed[group.value] = !collapsed[group.value])}
+									aria-expanded={!isCollapsed}
+								>
+									{#if isCollapsed}
+										<ChevronRight class="h-3 w-3" />
+									{:else}
+										<ChevronDown class="h-3 w-3" />
+									{/if}
+									<span class={['h-2 w-2 rounded-full', stateDot(group.value)]}></span>
+									{group.label}
+									<span class="font-normal tabular-nums">({group.rooms.length})</span>
+								</button>
+								{#if !isCollapsed}
+									{@render roomList(group.rooms, false)}
+								{/if}
+							</section>
+						{/each}
 
-				<!--
+						<!--
 				  Archived section: collapsed by default. Rooms live here
 				  after an operator files them away; state is preserved
 				  so they can be restored to exactly where they were.
 				-->
-				{#if archivedRooms.length > 0}
-					<section class="flex flex-col gap-2 border-t pt-4">
-						<button
-							type="button"
-							class="flex items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
-							onclick={() => (archivedOpen = !archivedOpen)}
-							aria-expanded={archivedOpen}
-						>
-							{#if archivedOpen}
-								<ChevronDown class="h-3 w-3" />
-							{:else}
-								<ChevronRight class="h-3 w-3" />
-							{/if}
-							<Archive class="h-3.5 w-3.5" />
-							Archived
-							<span class="font-normal tabular-nums">({archivedRooms.length})</span>
-						</button>
-						{#if archivedOpen}
-							{@render roomList(archivedRooms, true)}
+						{#if archivedRooms.length > 0}
+							<section class="flex flex-col gap-2 border-t pt-4">
+								<button
+									type="button"
+									class="flex items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+									onclick={() => (archivedOpen = !archivedOpen)}
+									aria-expanded={archivedOpen}
+								>
+									{#if archivedOpen}
+										<ChevronDown class="h-3 w-3" />
+									{:else}
+										<ChevronRight class="h-3 w-3" />
+									{/if}
+									<Archive class="h-3.5 w-3.5" />
+									Archived
+									<span class="font-normal tabular-nums">({archivedRooms.length})</span>
+								</button>
+								{#if archivedOpen}
+									{@render roomList(archivedRooms, true)}
+								{/if}
+							</section>
 						{/if}
-					</section>
+					</div>
 				{/if}
 			</div>
-		{/if}
+		</div>
 	</div>
 </div>
 
@@ -607,6 +720,27 @@
 				</p>
 				<WarRoomColorPicker value={newColor} onchange={(c) => (newColor = c)} allowNone />
 			</div>
+			{#if categories.categories.length > 0}
+				<div>
+					<label class="text-xs font-medium text-muted-foreground" for="war-room-category">
+						Category (optional)
+					</label>
+					<select
+						id="war-room-category"
+						class="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm"
+						value={newCategoryId === null ? '' : String(newCategoryId)}
+						onchange={(e) => {
+							const v = (e.target as HTMLSelectElement).value;
+							newCategoryId = v === '' ? null : Number(v);
+						}}
+					>
+						<option value="">No category</option>
+						{#each categories.categories as category (category.id)}
+							<option value={String(category.id)}>{category.name}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
 		</div>
 
 		<DialogFooter>

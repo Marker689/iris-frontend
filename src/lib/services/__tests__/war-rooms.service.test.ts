@@ -144,6 +144,26 @@ describe('WarRoomsService', () => {
 		});
 	});
 
+	// ---- setCategory() -----------------------------------------------------
+
+	describe('setCategory()', () => {
+		it('PUTs the category id to /war-rooms/:id/category', async () => {
+			mock('put').mockResolvedValueOnce({ ok: true, data: { war_room_id: 4 } });
+			await WarRoomsService.setCategory(4, 7);
+			expect(ApiService.put).toHaveBeenCalledWith('/war-rooms/4/category', { category_id: 7 }, {});
+		});
+
+		it('sends null to clear the category', async () => {
+			mock('put').mockResolvedValueOnce({ ok: true, data: { war_room_id: 4 } });
+			await WarRoomsService.setCategory(4, null);
+			expect(ApiService.put).toHaveBeenCalledWith(
+				'/war-rooms/4/category',
+				{ category_id: null },
+				{}
+			);
+		});
+	});
+
 	// ---- archive / unarchive -----------------------------------------------
 
 	describe('archive()', () => {

@@ -158,6 +158,13 @@ describe('AiWorkflowsService', () => {
 		expect(mockGet).toHaveBeenCalledWith('/ai-workflows/inbound-events?workflow_id=9', {});
 	});
 
+	it('moves a workflow to a category, or out of any', async () => {
+		await AiWorkflowsService.setCategory(3, 8);
+		expect(mockPut).toHaveBeenCalledWith('/ai-workflows/3/category', { category_id: 8 }, {});
+		await AiWorkflowsService.setCategory(3, null);
+		expect(mockPut).toHaveBeenCalledWith('/ai-workflows/3/category', { category_id: null }, {});
+	});
+
 	it('forwards options', async () => {
 		const options = { skipAuthRedirect: true };
 		await AiWorkflowsService.list(options);

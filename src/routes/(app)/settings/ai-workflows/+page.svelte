@@ -1,7 +1,8 @@
 <!--
   AI workflows: list with trigger, active toggle, owner, version and
   last-24h run counts; new / import / edit / export / publish / delete / run
-  actions, the workflow library and the JSON authoring guide. The editor
+  / move to category actions, the category column (drop a row on a
+  category to move it), the workflow library and the JSON authoring guide. The editor
   lives at `./[id]` (`./new` to create), runs at `./runs`.
 -->
 <script lang="ts">
@@ -11,6 +12,7 @@
 		BookOpenIcon,
 		BookUpIcon,
 		DownloadIcon,
+		FolderIcon,
 		LibraryIcon,
 		ListIcon,
 		PencilIcon,
@@ -26,6 +28,12 @@
 	import { toast } from '$lib/components/ui/toast';
 	import ApiError from '$lib/components/ui/api-error.svelte';
 	import ConfirmationDialog from '$lib/components/ui/dialog/ConfirmationDialog.svelte';
+	import CategoryMoveMenu from '$lib/components/common/categories/CategoryMoveMenu.svelte';
+	import CategorySidebar, {
+		CATEGORY_DRAG_TYPE
+	} from '$lib/components/common/categories/CategorySidebar.svelte';
+	import { CategoryState } from '$lib/components/common/categories/category-state.svelte';
+	import { categoryMatches, countByCategory } from '$lib/services/categories.service';
 	import { formatDateTime } from '$lib/utils/time-formatter';
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
 	import { runtimeConfig } from '$lib/stores/runtime-config.store.svelte';
@@ -73,6 +81,40 @@
 	let publishTarget = $state<AiWorkflowSummary | null>(null);
 	let publishOpen = $state(false);
 	let importing = $state(false);
+
+	const categories = new CategoryState('ai-workflows');
+	const categoryCounts = $derived(countByCategory(workflows, categories.categories));
+	const shown = $derived(
+		workflows.filter((w) =>
+			categoryMatches(categories.filter, w.category_id, categories.categories)
+		)
+	);
+
+	async function moveWorkflow(workflowId: number, categoryId: number | null) {
+		const workflow = workflows.find((w) => w.id === workflowId);
+		if (!workflow || (workflow.category_id ?? null) === categoryId) return;
+		const res = await AiWorkflowsService.setCategory(workflowId, categoryId);
+		if (!res.ok) {
+			toast({
+				title: 'Could not move the workflow',
+				description: describeApiError(res.data, res.error?.message ?? 'Request failed'),
+				variant: 'destructive'
+			});
+			return;
+		}
+		workflows = workflows.map((w) => (w.id === workflowId ? { ...w, category_id: categoryId } : w));
+		const target = categories.name(categoryId);
+		toast({
+			title: target ? `Moved “${workflow.name}” to ${target}` : `“${workflow.name}” uncategorised`,
+			variant: 'success'
+		});
+	}
+
+	function dragWorkflow(workflow: AiWorkflowSummary, e: DragEvent) {
+		if (!canWrite || !e.dataTransfer) return;
+		e.dataTransfer.setData(CATEGORY_DRAG_TYPE, String(workflow.id));
+		e.dataTransfer.effectAllowed = 'move';
+	}
 
 	async function importWorkflow() {
 		let picked;
@@ -144,7 +186,10 @@
 	}
 
 	onMount(() => {
-		if (runtimeConfig.aiWorkflowsEnabled) load();
+		if (runtimeConfig.aiWorkflowsEnabled) {
+			load();
+			categories.load();
+		}
 	});
 
 	async function toggleActive(workflow: AiWorkflowSummary, value: boolean) {
@@ -292,173 +337,220 @@
 					{/if}
 				</div>
 			{:else if workflows.length > 0}
-				<div class="overflow-hidden rounded-md border">
-					<table class="w-full text-xs" data-testid="wf-table">
-						<thead
-							class="bg-muted/40 text-left text-2xs uppercase tracking-wide text-muted-foreground"
-						>
-							<tr>
-								<th class="w-16 px-3 py-2">Active</th>
-								<th class="px-3 py-2">Name</th>
-								<th class="w-48 px-3 py-2">Trigger</th>
-								<th class="w-40 px-3 py-2">Owner</th>
-								<th class="w-16 px-3 py-2">Version</th>
-								<th class="w-48 px-3 py-2" title="Runs started in the last 24 hours">24h runs</th>
-								<th class="w-28 px-3 py-2"></th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each workflows as workflow (workflow.id)}
-								{@const counts = workflow.run_counts_24h ?? {}}
-								<tr class="border-t hover:bg-muted/20" data-testid={`wf-row-${workflow.id}`}>
-									<td class="px-3 py-2">
-										<Switch
-											checked={workflow.is_active}
-											disabled={!canWrite || toggling[workflow.id]}
-											onCheckedChange={(v: boolean) => toggleActive(workflow, v)}
-											aria-label={`Activate ${workflow.name}`}
-										/>
-									</td>
-									<td class="max-w-0 px-3 py-2">
-										<a
-											class="block max-w-full truncate font-medium underline-offset-2 hover:underline"
-											href={`/settings/ai-workflows/${workflow.id}`}
-										>
-											{workflow.name}
-										</a>
-										{#if workflow.description}
-											<div class="truncate text-2xs text-muted-foreground">
-												{workflow.description}
-											</div>
-										{/if}
-									</td>
-									<td class="max-w-0 px-3 py-2">
-										<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-											{#each aiWorkflowTriggers(workflow) as trigger, i (i)}
-												{@const detail = triggerDetail(trigger.type, trigger.config)}
-												<span class="flex min-w-0 items-center">
-													<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
-														{TRIGGER_LABELS[trigger.type] ?? trigger.type}
-													</span>
-													{#if detail}
-														<span
-															class="ml-1 truncate font-mono text-2xs text-muted-foreground"
-															title={detail}
-														>
-															{detail}
-														</span>
+				<div class="flex gap-5">
+					<aside class="w-48 shrink-0" data-testid="wf-categories">
+						<CategorySidebar
+							store={categories}
+							total={workflows.length}
+							counts={categoryCounts}
+							canManage={canWrite}
+							itemLabel="workflows"
+							onDropItem={canWrite ? moveWorkflow : undefined}
+						/>
+					</aside>
+					<div class="min-w-0 flex-1">
+						{#if shown.length === 0}
+							<p
+								class="py-10 text-center text-xs text-muted-foreground"
+								data-testid="wf-category-empty"
+							>
+								No workflow in this category.
+							</p>
+						{:else}
+							<div class="overflow-hidden rounded-md border">
+								<table class="w-full text-xs" data-testid="wf-table">
+									<thead
+										class="bg-muted/40 text-left text-2xs uppercase tracking-wide text-muted-foreground"
+									>
+										<tr>
+											<th class="w-16 px-3 py-2">Active</th>
+											<th class="px-3 py-2">Name</th>
+											<th class="w-48 px-3 py-2">Trigger</th>
+											<th class="w-40 px-3 py-2">Owner</th>
+											<th class="w-16 px-3 py-2">Version</th>
+											<th class="w-48 px-3 py-2" title="Runs started in the last 24 hours"
+												>24h runs</th
+											>
+											<th class="w-36 px-3 py-2"></th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each shown as workflow (workflow.id)}
+											{@const counts = workflow.run_counts_24h ?? {}}
+											{@const categoryName =
+												categories.filter === 'all' ? categories.name(workflow.category_id) : null}
+											<tr
+												class="border-t hover:bg-muted/20"
+												data-testid={`wf-row-${workflow.id}`}
+												draggable={canWrite}
+												ondragstart={(e) => dragWorkflow(workflow, e)}
+											>
+												<td class="px-3 py-2">
+													<Switch
+														checked={workflow.is_active}
+														disabled={!canWrite || toggling[workflow.id]}
+														onCheckedChange={(v: boolean) => toggleActive(workflow, v)}
+														aria-label={`Activate ${workflow.name}`}
+													/>
+												</td>
+												<td class="max-w-0 px-3 py-2">
+													<a
+														class="block max-w-full truncate font-medium underline-offset-2 hover:underline"
+														href={`/settings/ai-workflows/${workflow.id}`}
+													>
+														{workflow.name}
+													</a>
+													{#if workflow.description}
+														<div class="truncate text-2xs text-muted-foreground">
+															{workflow.description}
+														</div>
 													{/if}
-												</span>
-											{/each}
-										</div>
-										{#if workflow.last_fired_at}
-											<div class="text-2xs text-muted-foreground">
-												Last fired {formatDateTime(workflow.last_fired_at)}
-											</div>
-										{/if}
-									</td>
-									<td class="truncate px-3 py-2">{userLabel(workflow.owner)}</td>
-									<td class="px-3 py-2 font-mono">v{workflow.version}</td>
-									<td class="px-3 py-2">
-										<a
-											class="flex flex-wrap gap-1"
-											href={`/settings/ai-workflows/runs?workflow_id=${workflow.id}`}
-											title="Open the runs of this workflow"
-										>
-											{#each COUNT_ORDER as status (status)}
-												{#if counts[status]}
-													<span class={`rounded px-1 text-2xs ${RUN_STATUS_TONES[status]}`}>
-														{counts[status]}
-														{status}
-													</span>
-												{/if}
-											{/each}
-											{#if !COUNT_ORDER.some((s) => counts[s])}
-												<span class="text-muted-foreground">—</span>
-											{/if}
-										</a>
-										{#if workflow.skipped_count}
-											<div
-												class="mt-0.5 text-2xs text-muted-foreground"
-												title={workflow.last_skipped_at
-													? `Last skipped ${formatDateTime(workflow.last_skipped_at)}`
-													: undefined}
-												data-testid={`wf-skipped-${workflow.id}`}
-											>
-												{workflow.skipped_count} skipped{workflow.last_skip_reason
-													? ` (last: ${workflow.last_skip_reason})`
-													: ''}
-											</div>
-										{/if}
-									</td>
-									<td class="px-3 py-2">
-										<div class="flex justify-end gap-1">
-											{#if canWrite}
-												<Button
-													variant="ghost"
-													size="icon"
-													class="h-7 w-7"
-													title="Run"
-													aria-label={`Run ${workflow.name}`}
-													onclick={() => openRun(workflow)}
-												>
-													<PlayIcon size={13} />
-												</Button>
-											{/if}
-											<Button
-												variant="ghost"
-												size="icon"
-												class="h-7 w-7"
-												title={canWrite ? 'Edit' : 'View'}
-												href={`/settings/ai-workflows/${workflow.id}`}
-											>
-												<PencilIcon size={13} />
-											</Button>
-											<Button
-												variant="ghost"
-												size="icon"
-												class="h-7 w-7"
-												title="Export (JSON, without secrets)"
-												aria-label={`Export ${workflow.name}`}
-												onclick={() => exportWorkflow(workflow)}
-											>
-												<DownloadIcon size={13} />
-											</Button>
-											{#if canWrite}
-												<Button
-													variant="ghost"
-													size="icon"
-													class="h-7 w-7"
-													title="Publish to the library"
-													aria-label={`Publish ${workflow.name} to the library`}
-													onclick={() => {
-														publishTarget = workflow;
-														publishOpen = true;
-													}}
-													data-testid={`wf-publish-${workflow.id}`}
-												>
-													<BookUpIcon size={13} />
-												</Button>
-												<Button
-													variant="ghost"
-													size="icon"
-													class="h-7 w-7 text-muted-foreground hover:text-destructive"
-													title="Delete"
-													aria-label={`Delete ${workflow.name}`}
-													onclick={() => {
-														pendingDelete = workflow;
-														confirmDeleteOpen = true;
-													}}
-												>
-													<Trash2Icon size={13} />
-												</Button>
-											{/if}
-										</div>
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
+													{#if categoryName}
+														<div
+															class="flex items-center gap-1 truncate text-2xs text-muted-foreground"
+															title={`Category: ${categoryName}`}
+														>
+															<FolderIcon size={10} class="shrink-0" />{categoryName}
+														</div>
+													{/if}
+												</td>
+												<td class="max-w-0 px-3 py-2">
+													<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+														{#each aiWorkflowTriggers(workflow) as trigger, i (i)}
+															{@const detail = triggerDetail(trigger.type, trigger.config)}
+															<span class="flex min-w-0 items-center">
+																<span class="rounded bg-muted px-1.5 py-0.5 text-2xs">
+																	{TRIGGER_LABELS[trigger.type] ?? trigger.type}
+																</span>
+																{#if detail}
+																	<span
+																		class="ml-1 truncate font-mono text-2xs text-muted-foreground"
+																		title={detail}
+																	>
+																		{detail}
+																	</span>
+																{/if}
+															</span>
+														{/each}
+													</div>
+													{#if workflow.last_fired_at}
+														<div class="text-2xs text-muted-foreground">
+															Last fired {formatDateTime(workflow.last_fired_at)}
+														</div>
+													{/if}
+												</td>
+												<td class="truncate px-3 py-2">{userLabel(workflow.owner)}</td>
+												<td class="px-3 py-2 font-mono">v{workflow.version}</td>
+												<td class="px-3 py-2">
+													<a
+														class="flex flex-wrap gap-1"
+														href={`/settings/ai-workflows/runs?workflow_id=${workflow.id}`}
+														title="Open the runs of this workflow"
+													>
+														{#each COUNT_ORDER as status (status)}
+															{#if counts[status]}
+																<span class={`rounded px-1 text-2xs ${RUN_STATUS_TONES[status]}`}>
+																	{counts[status]}
+																	{status}
+																</span>
+															{/if}
+														{/each}
+														{#if !COUNT_ORDER.some((s) => counts[s])}
+															<span class="text-muted-foreground">—</span>
+														{/if}
+													</a>
+													{#if workflow.skipped_count}
+														<div
+															class="mt-0.5 text-2xs text-muted-foreground"
+															title={workflow.last_skipped_at
+																? `Last skipped ${formatDateTime(workflow.last_skipped_at)}`
+																: undefined}
+															data-testid={`wf-skipped-${workflow.id}`}
+														>
+															{workflow.skipped_count} skipped{workflow.last_skip_reason
+																? ` (last: ${workflow.last_skip_reason})`
+																: ''}
+														</div>
+													{/if}
+												</td>
+												<td class="px-3 py-2">
+													<div class="flex justify-end gap-1">
+														{#if canWrite}
+															<Button
+																variant="ghost"
+																size="icon"
+																class="h-7 w-7"
+																title="Run"
+																aria-label={`Run ${workflow.name}`}
+																onclick={() => openRun(workflow)}
+															>
+																<PlayIcon size={13} />
+															</Button>
+														{/if}
+														<Button
+															variant="ghost"
+															size="icon"
+															class="h-7 w-7"
+															title={canWrite ? 'Edit' : 'View'}
+															href={`/settings/ai-workflows/${workflow.id}`}
+														>
+															<PencilIcon size={13} />
+														</Button>
+														<Button
+															variant="ghost"
+															size="icon"
+															class="h-7 w-7"
+															title="Export (JSON, without secrets)"
+															aria-label={`Export ${workflow.name}`}
+															onclick={() => exportWorkflow(workflow)}
+														>
+															<DownloadIcon size={13} />
+														</Button>
+														{#if canWrite}
+															<CategoryMoveMenu
+																categories={categories.categories}
+																value={workflow.category_id}
+																itemName={workflow.name}
+																onSelect={(id) => moveWorkflow(workflow.id, id)}
+																triggerClass="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+															/>
+															<Button
+																variant="ghost"
+																size="icon"
+																class="h-7 w-7"
+																title="Publish to the library"
+																aria-label={`Publish ${workflow.name} to the library`}
+																onclick={() => {
+																	publishTarget = workflow;
+																	publishOpen = true;
+																}}
+																data-testid={`wf-publish-${workflow.id}`}
+															>
+																<BookUpIcon size={13} />
+															</Button>
+															<Button
+																variant="ghost"
+																size="icon"
+																class="h-7 w-7 text-muted-foreground hover:text-destructive"
+																title="Delete"
+																aria-label={`Delete ${workflow.name}`}
+																onclick={() => {
+																	pendingDelete = workflow;
+																	confirmDeleteOpen = true;
+																}}
+															>
+																<Trash2Icon size={13} />
+															</Button>
+														{/if}
+													</div>
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{/if}
+					</div>
 				</div>
 			{/if}
 		</FeatureGate>
