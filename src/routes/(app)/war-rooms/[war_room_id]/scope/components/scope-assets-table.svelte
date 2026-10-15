@@ -11,6 +11,7 @@
   are listed in the same groups, after the case assets: under their
   linked case, else in a "Not in a case" group. They have no customer,
   flag, compromise or IOC data, and are edited / detached, not selected.
+  With write access, the Compromise and Analysis cells open a status menu.
 -->
 <script lang="ts">
 	import {
@@ -34,13 +35,16 @@
 	import AssetFlagChips from '$lib/components/common/assets/AssetFlagChips.svelte';
 	import { COMPROMISE_STATUS } from '$lib/constants/compromise_status';
 	import { formatDateTime } from '$lib/utils/time-formatter';
+	import type { AnalysisStatusItem } from '$lib/services/analysis-status.service';
 	import type { AssetFlag } from '$lib/services/asset-flags.service';
 	import type {
 		ScopeAsset,
 		ScopeAssetCaseTotals,
 		ScopeCase,
-		ScopeRegistryAsset
+		ScopeRegistryAsset,
+		ScopeStatusChange
 	} from '$lib/services/war-room-scope.service';
+	import ScopeStatusMenu from './scope-status-menu.svelte';
 	import { SEVERITY_CLASSES, SEVERITY_LABELS } from '$lib/components/vulnerabilities/labels';
 	import { SELECT_CHECKBOX_CLASS, caseLabel, limitedList } from './helpers';
 	import {
@@ -72,6 +76,9 @@
 		canWrite: boolean;
 		onFlag: (asset: ScopeAsset) => void;
 		onPush: (asset: ScopeAsset) => void;
+		/** Change the compromise / analysis status; the cells are read-only when unset. */
+		onSetStatus?: (asset: ScopeAsset, change: ScopeStatusChange) => void;
+		analysisStatuses?: AnalysisStatusItem[];
 		/** Record a finding on this asset; the "+" is hidden when unset. */
 		onRecordVulnerability?: (asset: ScopeAsset) => void;
 		/** Filter the scope on a vulnerability identifier (tag click). */
@@ -100,6 +107,8 @@
 		canWrite,
 		onFlag,
 		onPush,
+		onSetStatus,
+		analysisStatuses = [],
 		onRecordVulnerability,
 		onFilterVulnerability,
 		activeVulnerability = null,
@@ -112,6 +121,8 @@
 
 	const TH = 'h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground';
 	const TD = 'px-2 py-1.5 align-middle';
+	const STATUS_TRIGGER =
+		'-mx-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 	const flagById = $derived(new Map(flags.map((f) => [f.id, f])));
 	const selectedSet = $derived(new Set(selected));
@@ -283,6 +294,19 @@
 			.join('\n');
 	};
 </script>
+
+{#snippet compromise(a: ScopeAsset)}
+	<span class="inline-flex items-center gap-1">
+		{#if a.asset_compromise_status_id === 1}
+			<ShieldAlert class="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+		{:else if a.asset_compromise_status_id === 2}
+			<ShieldCheck class="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+		{:else}
+			<ShieldQuestion class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+		{/if}
+		{compromiseLabel(a.asset_compromise_status_id)}
+	</span>
+{/snippet}
 
 <div class="max-h-[70vh] overflow-auto rounded-md border">
 	<table class="w-full caption-bottom text-sm" data-testid="scope-assets-table">
@@ -486,20 +510,39 @@
 							</td>
 						{/if}
 						<td class={`${TD} text-xs text-muted-foreground`}>{a.customer_name ?? '—'}</td>
-						<td class={`${TD} text-xs`}>
-							<span class="inline-flex items-center gap-1">
-								{#if a.asset_compromise_status_id === 1}
-									<ShieldAlert class="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
-								{:else if a.asset_compromise_status_id === 2}
-									<ShieldCheck class="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
-								{:else}
-									<ShieldQuestion class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-								{/if}
-								{compromiseLabel(a.asset_compromise_status_id)}
-							</span>
+						<td class={`${TD} whitespace-nowrap text-xs`} data-testid="scope-asset-compromise">
+							{#if canWrite && onSetStatus}
+								<ScopeStatusMenu
+									kind="compromise"
+									value={a.asset_compromise_status_id}
+									onSelect={(id) => onSetStatus(a, { asset_compromise_status_id: id })}
+									label={`Change the compromise status of ${a.asset_name}`}
+									triggerClass={STATUS_TRIGGER}
+								>
+									{@render compromise(a)}
+								</ScopeStatusMenu>
+							{:else}
+								{@render compromise(a)}
+							{/if}
 						</td>
-						<td class={`${TD} whitespace-nowrap text-xs text-muted-foreground`}>
-							{a.analysis_status_name ?? '—'}
+						<td
+							class={`${TD} whitespace-nowrap text-xs text-muted-foreground`}
+							data-testid="scope-asset-analysis"
+						>
+							{#if canWrite && onSetStatus}
+								<ScopeStatusMenu
+									kind="analysis"
+									value={a.analysis_status_id}
+									{analysisStatuses}
+									onSelect={(id) => onSetStatus(a, { analysis_status_id: id })}
+									label={`Change the analysis status of ${a.asset_name}`}
+									triggerClass={STATUS_TRIGGER}
+								>
+									{a.analysis_status_name ?? '—'}
+								</ScopeStatusMenu>
+							{:else}
+								{a.analysis_status_name ?? '—'}
+							{/if}
 						</td>
 						<td class={TD}>
 							<div class="flex items-center gap-1" data-testid="scope-asset-flags">

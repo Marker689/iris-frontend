@@ -268,6 +268,16 @@ export interface ScopeBulkFlagResponse {
 	results: ScopeFlagResult[];
 }
 
+/** At least one of the two statuses must be set. */
+export interface ScopeStatusChange {
+	asset_compromise_status_id?: number;
+	analysis_status_id?: number;
+}
+
+export interface ScopeBulkStatusBody extends ScopeStatusChange {
+	asset_ids: number[];
+}
+
 export type StagedObjectType = 'asset' | 'ioc';
 
 export interface StagedObject {
@@ -582,6 +592,15 @@ export class WarRoomScopeService {
 		options: ApiOptions = {}
 	): Promise<RequestResponse<ScopeBulkFlagResponse>> {
 		return ApiService.post(`${base(warRoomId)}/assets/flags`, body, options);
+	}
+
+	/** Set the compromise and / or analysis status of many assets; one result row per asset. */
+	static bulkStatus(
+		warRoomId: number,
+		body: ScopeBulkStatusBody,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<ScopeBulkFlagResponse>> {
+		return ApiService.post(`${base(warRoomId)}/assets/status`, body, options);
 	}
 
 	static listStaging(

@@ -46,14 +46,14 @@ export const OUTCOME_CLASS: Record<string, string> = {
 	error: 'border-destructive/30 bg-destructive/10 text-destructive'
 };
 
-export const countOutcomes = (rows: ScopeOutcome[]): Record<string, number> => {
+export const countOutcomes = (rows: Pick<ScopeOutcome, 'status'>[]): Record<string, number> => {
 	const out: Record<string, number> = {};
 	for (const r of rows) out[r.status] = (out[r.status] ?? 0) + 1;
 	return out;
 };
 
 /** "2 created · 1 already there · 1 denied" */
-export const summariseOutcomes = (rows: ScopeOutcome[]): string => {
+export const summariseOutcomes = (rows: Pick<ScopeOutcome, 'status'>[]): string => {
 	const counts = countOutcomes(rows);
 	const parts = OUTCOME_ORDER.filter((k) => counts[k]).map(
 		(k) => `${counts[k]} ${OUTCOME_LABEL[k]}`
@@ -61,7 +61,7 @@ export const summariseOutcomes = (rows: ScopeOutcome[]): string => {
 	return parts.join(' · ') || 'Nothing to do';
 };
 
-export const outcomesFailed = (rows: ScopeOutcome[]): boolean =>
+export const outcomesFailed = (rows: Pick<ScopeOutcome, 'status'>[]): boolean =>
 	rows.some((r) => r.status === 'denied' || r.status === 'error');
 
 /** The server message of a failed call, or a generic fallback. */

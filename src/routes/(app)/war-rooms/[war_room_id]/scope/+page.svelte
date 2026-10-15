@@ -26,6 +26,7 @@
 		Download,
 		Flag,
 		Inbox,
+		ListChecks,
 		Loader2,
 		Paperclip,
 		Pin,
@@ -38,7 +39,7 @@
 		ShieldAlert,
 		XIcon
 	} from 'lucide-svelte';
-	import { Button } from '$lib/components/ui/button';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
@@ -65,6 +66,7 @@
 		type ScopeFlagAction,
 		type ScopeIocPage,
 		type ScopeRegistryAsset,
+		type ScopeStatusChange,
 		type StagedObject
 	} from '$lib/services/war-room-scope.service';
 	import ScopeAssetsTable from './components/scope-assets-table.svelte';
@@ -72,6 +74,7 @@
 	import ScopeIocsMatrix from './components/scope-iocs-matrix.svelte';
 	import ScopeStaging from './components/scope-staging.svelte';
 	import ScopeFlagDialog from './components/scope-flag-dialog.svelte';
+	import ScopeStatusMenu from './components/scope-status-menu.svelte';
 	import ScopePushDialog from './components/scope-push-dialog.svelte';
 	import ScopeAddDialog from './components/scope-add-dialog.svelte';
 	import ScopePager from './components/scope-pager.svelte';
@@ -105,6 +108,7 @@
 		buildIocRows,
 		errorMessage,
 		groupSightings,
+		outcomesFailed,
 		summariseOutcomes,
 		type IocRow,
 		type ScopeOutcome
@@ -647,6 +651,46 @@
 			});
 		} else {
 			toast({ title: `${asset.asset_name}: ${flag.name} set`, variant: 'success' });
+		}
+		void loadAssets();
+	};
+
+	// --- Compromise / analysis status -----------------------------------
+	const STATUS_BUTTON = `${buttonVariants({ variant: 'outline', size: 'sm' })} h-7 gap-1.5 text-xs`;
+	// One asset from its table cell, or the whole selection from the bar.
+	const setStatus = async (rows: ScopeAsset[], change: ScopeStatusChange) => {
+		if (rows.length === 0) return;
+		const res = await WarRoomScopeService.bulkStatus(warRoomId, {
+			asset_ids: rows.map((a) => a.asset_id),
+			...change
+		});
+		if (!res.ok || !res.data || typeof res.data === 'string') {
+			toast({
+				title: 'Could not change the status',
+				description: errorMessage(res, 'The server refused the change.'),
+				variant: 'destructive'
+			});
+			return;
+		}
+		const results = res.data.results;
+		if (rows.length === 1) {
+			const result = results[0];
+			if (result && (result.status === 'denied' || result.status === 'error')) {
+				toast({
+					title: 'Could not change the status',
+					description:
+						result.message ?? `Status change ${result.status} for ${rows[0].asset_name}.`,
+					variant: 'destructive'
+				});
+			}
+		} else {
+			const failed = outcomesFailed(results);
+			toast({
+				title: failed ? 'Status partly changed' : 'Status changed',
+				description: summariseOutcomes(results),
+				variant: failed ? 'destructive' : 'success'
+			});
+			selectedAssets = [];
 		}
 		void loadAssets();
 	};
@@ -1242,6 +1286,23 @@
 						>
 							<Flag class="h-3.5 w-3.5" /> Set flag
 						</Button>
+						<ScopeStatusMenu
+							kind="compromise"
+							onSelect={(id) => setStatus(selectedAssetRows, { asset_compromise_status_id: id })}
+							label="Set the compromise status of the selected assets"
+							triggerClass={STATUS_BUTTON}
+						>
+							<ShieldAlert class="h-3.5 w-3.5" /> Compromise
+						</ScopeStatusMenu>
+						<ScopeStatusMenu
+							kind="analysis"
+							{analysisStatuses}
+							onSelect={(id) => setStatus(selectedAssetRows, { analysis_status_id: id })}
+							label="Set the analysis status of the selected assets"
+							triggerClass={STATUS_BUTTON}
+						>
+							<ListChecks class="h-3.5 w-3.5" /> Analysis
+						</ScopeStatusMenu>
 						<Button
 							variant="outline"
 							size="sm"
@@ -1309,6 +1370,8 @@
 				{canWrite}
 				onFlag={(a) => openFlag([a])}
 				onPush={(a) => openAssetPush([a])}
+				onSetStatus={(a, change) => setStatus([a], change)}
+				{analysisStatuses}
 				onRecordVulnerability={canRecord && canReadVulns ? (a) => openRecord([a]) : undefined}
 				onFilterVulnerability={(identifier) =>
 					applyVulnerabilityFilter(vulnerabilityFilter === identifier ? null : identifier)}
