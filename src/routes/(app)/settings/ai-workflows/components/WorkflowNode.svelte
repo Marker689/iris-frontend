@@ -10,6 +10,8 @@
   Handle ids: the port / `in` on the default side, `<port>@<side>` /
   `in@<side>` elsewhere (see ai-workflow-graph).
   While a run goes through it, a glow and an icon show its live state.
+  The other editors configuring it outline it in their colour, with
+  their names.
 -->
 <script lang="ts">
 	import { getContext } from 'svelte';
@@ -74,6 +76,8 @@
 			: ''
 	);
 	const Icon = $derived(nodeIcon(type));
+	const peers = $derived(editor?.editors[id] ?? []);
+	const peerNames = $derived([...new Set(peers.map((p) => p.name))]);
 
 	const liveState = $derived(editor?.live[id]);
 	// A soft glow around the card (pulsing while it runs or waits) and a
@@ -172,7 +176,7 @@
 	class={`group relative w-56 rounded-md border bg-card text-card-foreground shadow-sm transition-shadow ${
 		selected ? 'ring-2 ring-primary' : ''
 	} ${errors.length ? 'border-destructive' : ''}`}
-	style={`min-height: ${minHeight}px`}
+	style={`min-height: ${minHeight}px${peers.length ? `; outline: 2px solid ${peers[0].color}; outline-offset: 2px` : ''}`}
 	data-testid={`wf-node-${id}`}
 	data-live={liveState}
 >
@@ -258,6 +262,17 @@
 			data-testid={`wf-node-events-${id}`}
 		>
 			{stats.total}{failed ? ` · ${failed} failed` : ''}
+		</span>
+	{/if}
+
+	{#if peerNames.length}
+		<span
+			class="pointer-events-none absolute -bottom-2.5 right-2 flex h-4 max-w-[85%] items-center truncate rounded-full px-1.5 text-[9px] font-medium text-white"
+			style={`background-color: ${peers[0].color}`}
+			title={`Being configured by ${peerNames.join(', ')}`}
+			data-testid={`wf-node-editors-${id}`}
+		>
+			{peerNames.join(', ')}
 		</span>
 	{/if}
 

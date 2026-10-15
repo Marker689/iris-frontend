@@ -7,6 +7,9 @@
   Links can leave and enter a node on any side: dropped on a connector
   they use it, dropped anywhere on a node they enter on its side facing
   the link's start.
+  Ctrl/Cmd + C, X, V copy, cut and paste the selected nodes through the
+  system clipboard (as JSON), Ctrl/Cmd + D duplicates them; outside the
+  text fields and dialogs only.
 -->
 <script lang="ts">
 	import '@xyflow/svelte/dist/style.css';
@@ -28,8 +31,12 @@
 		ArrowDownIcon,
 		ArrowRightIcon,
 		BlocksIcon,
+		ClipboardPasteIcon,
+		CopyIcon,
+		CopyPlusIcon,
 		DownloadIcon,
 		PackagePlusIcon,
+		ScissorsIcon,
 		Trash2Icon,
 		UploadIcon
 	} from 'lucide-svelte';
@@ -47,11 +54,13 @@
 		type FlowNode
 	} from '$lib/utils/ai-workflow-graph';
 	import type { AiBlock, AiWorkflowCatalogue } from '$lib/services/ai-workflows.service';
+	import { toast } from '$lib/components/ui/toast';
 	import WorkflowNode from './WorkflowNode.svelte';
 	import RoutedEdge from './RoutedEdge.svelte';
 	import PanelResizer from './PanelResizer.svelte';
 	import { WORKFLOW_EDITOR_CTX, nodeIcon, nodeTone } from '../helpers/ui';
 	import type { WorkflowEditorCtx } from '../helpers/editor';
+	import { clipboardDecode } from '../helpers/clipboard';
 
 	type Props = {
 		nodes: FlowNode[];
@@ -71,6 +80,15 @@
 		/** The way most connectors read; the toggle is hidden without `onSetDirection`. */
 		direction?: FlowDirection;
 		onSetDirection?: (direction: FlowDirection) => void;
+		/** Clipboard text of the selected nodes, null for none; the clipboard section is hidden without it. */
+		onCopy?: () => string | null;
+		/** Removes the selected nodes, once copied. */
+		onCut?: () => void;
+		/** Adds the nodes of clipboard text, top-left corner at `position`. */
+		onPaste?: (text: string, position: { x: number; y: number }) => void;
+		onDuplicate?: () => void;
+		/** Someone else is editing the node: it is not deleted. */
+		isLocked?: (id: string) => boolean;
 	};
 
 	let {
@@ -88,7 +106,12 @@
 		onExportBlock,
 		onDeleteBlock,
 		direction = 'horizontal',
-		onSetDirection
+		onSetDirection,
+		onCopy,
+		onCut,
+		onPaste,
+		onDuplicate,
+		isLocked
 	}: Props = $props();
 
 	const PALETTE_WIDTH = 192;
@@ -213,6 +236,91 @@
 		onAddNode(type, centerPosition());
 	}
 
+	// ---- Clipboard. The pointer over the canvas is where a paste lands.
+	let pointer: { x: number; y: number } | null = null;
+	const isMac = typeof navigator !== 'undefined' && /Mac|iP(hone|ad|od)/.test(navigator.platform);
+	const mod = isMac ? '⌘' : 'Ctrl+';
+
+	function pastePosition() {
+		return pointer ? screenToFlowPosition(pointer) : centerPosition();
+	}
+
+	/** Shortcuts typed in a field or a dialog are theirs, not the canvas'. */
+	function forCanvas(event: Event): boolean {
+		const target = event.target instanceof HTMLElement ? event.target : null;
+		if (target?.isContentEditable) return false;
+		return !target?.closest('input, textarea, select, .cm-editor, [role="dialog"]');
+	}
+
+	function onClipboardCopy(event: ClipboardEvent, cut: boolean) {
+		if (!onCopy || !event.clipboardData || !forCanvas(event)) return;
+		// Text selected on the page: that is what is copied
+		if (window.getSelection()?.toString()) return;
+		if (cut && (readOnly || !onCut)) return;
+		const text = onCopy();
+		if (text === null) return;
+		event.clipboardData.setData('text/plain', text);
+		event.preventDefault();
+		if (cut) onCut?.();
+	}
+
+	function onClipboardPaste(event: ClipboardEvent) {
+		if (readOnly || !onPaste || !forCanvas(event)) return;
+		const text = event.clipboardData?.getData('text/plain') ?? '';
+		// Anything else is left to the page
+		if (!clipboardDecode(text)) return;
+		event.preventDefault();
+		onPaste(text, pastePosition());
+	}
+
+	function onKeydown(event: KeyboardEvent) {
+		if (readOnly || !onDuplicate || !selectedCount) return;
+		if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+		if (event.key.toLowerCase() !== 'd' || !forCanvas(event)) return;
+		event.preventDefault();
+		onDuplicate();
+	}
+
+	async function copyButton(cut: boolean) {
+		const text = onCopy?.();
+		if (!text) return;
+		try {
+			await navigator.clipboard.writeText(text);
+		} catch {
+			toast({
+				title: 'The browser kept the clipboard closed',
+				description: `Select the nodes and press ${mod}${cut ? 'X' : 'C'} instead.`,
+				variant: 'warning'
+			});
+			return;
+		}
+		if (cut) onCut?.();
+		toast({
+			title: `${selectedCount} node${selectedCount === 1 ? '' : 's'} ${cut ? 'cut' : 'copied'}`,
+			description: 'Paste them in this workflow or another one.',
+			variant: 'success'
+		});
+	}
+
+	async function pasteButton() {
+		let text: string;
+		try {
+			text = await navigator.clipboard.readText();
+		} catch {
+			toast({
+				title: 'The browser kept the clipboard closed',
+				description: `Press ${mod}V on the canvas instead.`,
+				variant: 'warning'
+			});
+			return;
+		}
+		if (!clipboardDecode(text)) {
+			toast({ title: 'No workflow nodes in the clipboard', variant: 'warning' });
+			return;
+		}
+		onPaste?.(text, centerPosition());
+	}
+
 	function onBeforeConnect(connection: Connection): false {
 		// Edges are built here (stable ids, port label, dedupe); xyflow's own add is skipped.
 		if (!isConnectionAllowed(connection, nodes)) return false;
@@ -262,24 +370,29 @@
 		edges: FlowEdge[];
 	}) {
 		if (readOnly) return false;
+		// Nodes someone else is editing stay
+		const deleting = new Set(deletingNodes.filter((n) => !isLocked?.(n.id)).map((n) => n.id));
 		// A workflow keeps at least one trigger: the first one stays when they all go.
 		const triggers = nodes.filter((n) => n.data.nodeType === 'trigger');
-		const deleting = new Set(deletingNodes.map((n) => n.id));
-		if (!triggers.every((n) => deleting.has(n.id))) return true;
-		const kept = triggers[0].id;
-		deleting.delete(kept);
+		if (triggers.length && triggers.every((n) => deleting.has(n.id)))
+			deleting.delete(triggers[0].id);
+		if (deleting.size === deletingNodes.length) return true;
 		return {
-			nodes: deletingNodes.filter((n) => n.id !== kept),
-			// Its links go only when selected or when their other end goes
+			nodes: deletingNodes.filter((n) => deleting.has(n.id)),
+			// The links of a node that stays go only when selected or when their other end goes
 			edges: deletingEdges.filter(
-				(e) =>
-					e.selected ||
-					(e.source !== kept && e.target !== kept) ||
-					deleting.has(e.source === kept ? e.target : e.source)
+				(e) => e.selected || deleting.has(e.source) || deleting.has(e.target)
 			)
 		};
 	}
 </script>
+
+<svelte:window
+	oncopy={(e) => onClipboardCopy(e, false)}
+	oncut={(e) => onClipboardCopy(e, true)}
+	onpaste={onClipboardPaste}
+	onkeydown={onKeydown}
+/>
 
 <div class="flex h-full min-h-0">
 	{#if !readOnly}
@@ -418,6 +531,8 @@
 		bind:this={wrapper}
 		ondragover={onDragOver}
 		ondrop={onDrop}
+		onpointermove={(e) => (pointer = { x: e.clientX, y: e.clientY })}
+		onpointerleave={() => (pointer = null)}
 		role="application"
 		data-testid="wf-canvas"
 	>
@@ -445,6 +560,63 @@
 			onnodedragstop={() => onChange?.()}
 		>
 			<Background />
+			{#if onCopy}
+				<Panel position="top-left">
+					<div
+						class="flex items-center gap-0.5 rounded-md border bg-card p-0.5 shadow-sm"
+						role="group"
+						aria-label="Clipboard"
+						data-testid="wf-clipboard"
+					>
+						<button
+							type="button"
+							class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+							disabled={!selectedCount}
+							title={`Copy the selected nodes (${mod}C)`}
+							aria-label="Copy the selected nodes"
+							onclick={() => copyButton(false)}
+							data-testid="wf-copy"
+						>
+							<CopyIcon size={12} />
+						</button>
+						{#if !readOnly}
+							<button
+								type="button"
+								class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+								disabled={!selectedCount || !onCut}
+								title={`Cut the selected nodes (${mod}X)`}
+								aria-label="Cut the selected nodes"
+								onclick={() => copyButton(true)}
+								data-testid="wf-cut"
+							>
+								<ScissorsIcon size={12} />
+							</button>
+							<button
+								type="button"
+								class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+								disabled={!selectedCount || !onDuplicate}
+								title={`Duplicate the selected nodes (${mod}D)`}
+								aria-label="Duplicate the selected nodes"
+								onclick={() => onDuplicate?.()}
+								data-testid="wf-duplicate"
+							>
+								<CopyPlusIcon size={12} />
+							</button>
+							<button
+								type="button"
+								class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+								disabled={!onPaste}
+								title={`Paste nodes (${mod}V on the canvas pastes under the pointer)`}
+								aria-label="Paste nodes"
+								onclick={pasteButton}
+								data-testid="wf-paste"
+							>
+								<ClipboardPasteIcon size={12} />
+							</button>
+						{/if}
+					</div>
+				</Panel>
+			{/if}
 			{#if !readOnly && onSetDirection}
 				<Panel position="top-right">
 					<div

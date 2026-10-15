@@ -53,20 +53,38 @@ function createNotificationsStore() {
 	// Rooms other features follow on the same connection (e.g. a run's
 	// live progress): `join` is emitted on every (re)connect, since the
 	// server forgets the rooms of a dropped connection.
-	const watches = new Set<{ join: string; payload: unknown }>();
+	type Payload = unknown | (() => unknown);
+	type Ack = (ack: unknown) => void;
+	const watches = new Set<{ join: string; payload: Payload; onAck?: Ack }>();
+
+	const resolve = (payload: Payload) => (typeof payload === 'function' ? payload() : payload);
+
+	function send(event: string, payload: Payload, onAck?: Ack) {
+		if (onAck) socket?.emit(event, resolve(payload), onAck);
+		else socket?.emit(event, resolve(payload));
+	}
 
 	/**
 	 * Emit `join` with `payload` now and after every reconnect, until the
 	 * returned function emits `leave`. The server checks access on join.
+	 * A function `payload` is called at each emit, so a rejoin carries
+	 * the current state; `onAck` receives the server's answer to each join.
 	 */
-	function watchRoom(join: string, leave: string, payload: unknown): () => void {
-		const entry = { join, payload };
+	function watchRoom(join: string, leave: string, payload: Payload, onAck?: Ack): () => void {
+		const entry = { join, payload, onAck };
 		watches.add(entry);
-		if (socket?.connected) socket.emit(join, payload);
+		if (socket?.connected) send(join, payload, onAck);
 		return () => {
 			if (!watches.delete(entry)) return;
-			if (socket?.connected) socket.emit(leave, payload);
+			if (socket?.connected) send(leave, payload);
 		};
+	}
+
+	/** Emit an event on the connection if it is up; whether it was sent. */
+	function emit(event: string, payload: unknown, onAck?: Ack): boolean {
+		if (!socket?.connected) return false;
+		send(event, payload, onAck);
+		return true;
 	}
 
 	function bindExtraListener(event: string, handler: (payload: unknown) => void) {
@@ -208,7 +226,7 @@ function createNotificationsStore() {
 
 		socket.on('connect', () => {
 			socket?.emit('join');
-			for (const w of watches) socket?.emit(w.join, w.payload);
+			for (const w of watches) send(w.join, w.payload, w.onAck);
 			update((s) => ({ ...s, error: null }));
 		});
 
@@ -295,6 +313,7 @@ function createNotificationsStore() {
 		receive,
 		onSocketEvent,
 		watchRoom,
+		emit,
 		markRead,
 		markAllRead,
 		clear,

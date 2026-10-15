@@ -10,6 +10,11 @@
   Right drawer: the selected node's config, and its events (browse them
   one by one, replay one).
 
+  Several people may have the editor open: their avatars show in the
+  header and on the nodes they configure, a node someone else configures
+  is read-only here, a save made elsewhere reloads a clean editor (or
+  says so on an edited one), and a save over someone else's asks first.
+
   Canvas nodes / edges are raw arrays bound to xyflow; each node's
   label and config live in the deep-reactive `meta` map, shared with the
   node components through context. `flowToGraph` folds them back into
@@ -30,6 +35,7 @@
 		DownloadIcon,
 		HistoryIcon,
 		ListIcon,
+		LockIcon,
 		PanelLeftIcon,
 		PlayIcon,
 		SaveIcon,
@@ -63,7 +69,9 @@
 		type AiValidateResult,
 		type AiValidationError,
 		type AiWorkflow,
-		type AiWorkflowCatalogue
+		type AiWorkflowBody,
+		type AiWorkflowCatalogue,
+		type AiWorkflowSavedEvent
 	} from '$lib/services/ai-workflows.service';
 	import {
 		applyDirection,
@@ -119,6 +127,8 @@
 		exportFilename,
 		LABEL_CLASS,
 		blockReview,
+		definitionReview,
+		keyReferences,
 		pickJsonFile,
 		SELECT_CLASS,
 		TEXTAREA_CLASS,
@@ -126,6 +136,15 @@
 		SUGGESTION_AUDIENCE_LABELS,
 		WORKFLOW_EDITOR_CTX
 	} from '../helpers/ui';
+	import {
+		clipboardDecode,
+		clipboardEncode,
+		clipboardIsOwn,
+		clipboardRemember,
+		PASTE_OFFSET
+	} from '../helpers/clipboard';
+	import { EditorPresence } from '../helpers/presence.svelte';
+	import { presenceInitials } from '../helpers/presence';
 
 	const userCtx = getContext<UserCtx>(USER_CTX);
 	const canWrite = $derived(userCtx?.can('ai_workflows_write') ?? false);
@@ -187,6 +206,20 @@
 	} | null>(null);
 	let savingBlock = $state(false);
 
+	// ---- Other editors
+	/** This tab, in its saves: their broadcast is not news to it. */
+	const EDITOR_CLIENT_ID =
+		typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+			? crypto.randomUUID()
+			: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+	let presence = $state<EditorPresence | null>(null);
+	/** Saved elsewhere while this editor had changes. */
+	let remoteSave = $state<AiWorkflowSavedEvent | null>(null);
+	let remoteDeleted = $state<AiWorkflowSavedEvent | null>(null);
+	/** A save refused because the workflow changed since it was loaded. */
+	let conflict = $state<{ revision: string | null; version: number | null } | null>(null);
+	let conflictOpen = $state(false);
+
 	let customerItems = $state<MultiSelectItem[]>([]);
 	let ownerOptions = $state<{ id: number; label: string }[]>([]);
 
@@ -214,6 +247,9 @@
 		},
 		get suggestionAudience() {
 			return form.suggestion_audience;
+		},
+		get editors() {
+			return presence?.byNode ?? {};
 		}
 	};
 	setContext(WORKFLOW_EDITOR_CTX, ctx);
@@ -282,6 +318,9 @@
 		selectedId = null;
 		applyErrors([]);
 		validated = null;
+		remoteSave = null;
+		remoteDeleted = null;
+		conflict = null;
 		const [cat, wf] = await Promise.all([
 			AiWorkflowsService.catalogue(),
 			id === 'new' ? Promise.resolve(null) : AiWorkflowsService.get(Number(id))
@@ -403,32 +442,45 @@
 		if (selectedId === from) selectedId = to;
 	}
 
+	function removeNodes(ids: string[]) {
+		if (!ids.length) return;
+		const gone = new Set(ids);
+		nodes = nodes.filter((n) => !gone.has(n.id));
+		edges = edges.filter((e) => !gone.has(e.source) && !gone.has(e.target));
+		for (const id of ids) {
+			delete meta[id];
+			delete errorsByNode[id];
+		}
+		if (selectedId && gone.has(selectedId)) selectedId = null;
+	}
+
 	function deleteSelected() {
 		const id = selectedId;
 		// A workflow keeps at least one trigger
 		if (!id || (selectedType === 'trigger' && triggerIds.length < 2)) return;
-		nodes = nodes.filter((n) => n.id !== id);
-		edges = edges.filter((e) => e.source !== id && e.target !== id);
-		delete meta[id];
-		delete errorsByNode[id];
-		selectedId = null;
+		removeNodes([id]);
 	}
 
-	function insertSavedBlock(block: AiBlock, position: { x: number; y: number }) {
-		if (readOnly) return;
-		// Someone else's shared block: say what it does before it joins the workflow
-		const review = block.can_edit ? [] : blockReview(block);
-		if (
-			review.length &&
-			!confirm(
-				`Insert “${block.name}” by ${block.owner?.name ?? 'another user'}?\n\n${review.join('\n')}`
-			)
-		)
-			return;
-		const inserted = insertBlock(block.definition, position, nodes, edges);
-		if (!inserted.nodes.length) return;
+	/**
+	 * Adds nodes (a saved block, pasted or duplicated nodes) with their top-left
+	 * corner at `position`: what someone else wrote is reviewed first (`review`,
+	 * asked as `question`), clashing ids are renamed, and the added nodes come
+	 * selected, to move them together.
+	 */
+	function addDefinition(
+		definition: AiBlockDefinition,
+		position: { x: number; y: number },
+		opts: { title: string; review?: string[]; question?: string; keys?: string[]; hint?: string }
+	): boolean {
+		if (readOnly) return false;
+		const review = opts.review ?? [];
+		if (review.length && !confirm(`${opts.question}\n\n${review.join('\n')}`)) return false;
+		const inserted = insertBlock(definition, position, nodes, edges);
+		if (!inserted.nodes.length) {
+			toast({ title: 'Nothing to add: triggers are never copied', variant: 'warning' });
+			return false;
+		}
 		for (const [id, m] of Object.entries(inserted.meta)) meta[id] = m;
-		// The inserted nodes come selected, to move them together
 		nodes = [
 			...nodes.map((n) => (n.selected ? { ...n, selected: false } : n)),
 			...inserted.nodes.map((n) => ({ ...n, selected: true }))
@@ -436,24 +488,95 @@
 		edges = [...edges, ...inserted.edges];
 		selectedId = null;
 		const renamed = Object.entries(inserted.renames).filter(([from, to]) => from !== to);
-		const keys = block.requirements?.keystore ?? [];
+		const keys = opts.keys ?? [];
 		toast({
-			title: `Block “${block.name}” added`,
+			title: opts.title,
 			description: [
 				renamed.length
 					? `Renamed to avoid clashes: ${renamed.map(([from, to]) => `${from} → ${to}`).join(', ')}`
 					: '',
 				keys.length ? `Needs keystore entries: ${keys.join(', ')}` : '',
-				'Connect it to the rest of the workflow.'
+				opts.hint ?? ''
 			]
 				.filter(Boolean)
 				.join(' · '),
 			variant: 'success'
 		});
+		return true;
+	}
+
+	function insertSavedBlock(block: AiBlock, position: { x: number; y: number }) {
+		addDefinition(block.definition, position, {
+			title: `Block “${block.name}” added`,
+			// Someone else's shared block: say what it does before it joins the workflow
+			review: block.can_edit ? [] : blockReview(block),
+			question: `Insert “${block.name}” by ${block.owner?.name ?? 'another user'}?`,
+			keys: block.requirements?.keystore ?? [],
+			hint: 'Connect it to the rest of the workflow.'
+		});
+	}
+
+	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+	/** The selected nodes, triggers aside (a workflow has its own). */
+	function selectedNodeIds(): string[] {
+		return nodes.filter((n) => n.selected && n.data.nodeType !== 'trigger').map((n) => n.id);
+	}
+
+	/** Clipboard text of the selected nodes, remembered as this browser's. */
+	function copySelection(): string | null {
+		const ids = selectedNodeIds();
+		if (!ids.length) return null;
+		const text = clipboardEncode(selectionToBlock(nodes, edges, meta, ids));
+		clipboardRemember(text);
+		return text;
+	}
+
+	function cutSelection() {
+		if (readOnly) return;
+		const ids = selectedNodeIds();
+		// A node someone else configures stays
+		const locked = ids.filter((id) => presence?.lockHolder(id));
+		removeNodes(ids.filter((id) => !locked.includes(id)));
+		if (locked.length) {
+			toast({
+				title: `${plural(locked.length, 'node')} kept`,
+				description: `Someone else is configuring ${locked.join(', ')}.`,
+				variant: 'warning'
+			});
+		}
+	}
+
+	function pasteNodes(text: string, position: { x: number; y: number }) {
+		const definition = clipboardDecode(text);
+		if (!definition) return;
+		const count = definition.nodes.filter((n) => n.type !== 'trigger').length;
+		// Copied elsewhere (another browser, a chat, a file): reviewed like someone else's block
+		const own = clipboardIsOwn(text);
+		addDefinition(definition, position, {
+			title: `${plural(count, 'node')} pasted`,
+			review: own ? [] : definitionReview(definition),
+			question: `Paste ${plural(count, 'node')} copied outside this browser?`,
+			keys: own ? [] : keyReferences(definition.nodes)
+		});
+	}
+
+	function duplicateSelection() {
+		const ids = selectedNodeIds();
+		if (readOnly || !ids.length) return;
+		const picked = nodes.filter((n) => ids.includes(n.id));
+		addDefinition(
+			selectionToBlock(nodes, edges, meta, ids),
+			{
+				x: Math.min(...picked.map((n) => n.position.x)) + PASTE_OFFSET,
+				y: Math.min(...picked.map((n) => n.position.y)) + PASTE_OFFSET
+			},
+			{ title: `${plural(ids.length, 'node')} duplicated` }
+		);
 	}
 
 	function startSaveSelection() {
-		const ids = nodes.filter((n) => n.selected && n.data.nodeType !== 'trigger').map((n) => n.id);
+		const ids = selectedNodeIds();
 		if (!ids.length) {
 			toast({ title: 'Select the nodes to save first', variant: 'warning' });
 			return;
@@ -625,18 +748,34 @@
 		return result.valid;
 	}
 
-	async function save() {
+	/**
+	 * Creates or saves the workflow. A save names the revision it started
+	 * from and is refused when someone else saved since; `overwrite` is the
+	 * revision to replace anyway.
+	 */
+	async function save(overwrite?: string | null) {
 		if (!form.name.trim()) {
 			toast({ title: 'The workflow needs a name', variant: 'destructive' });
 			return;
 		}
 		saving = true;
-		const body = bodyFromForm(form, currentGraph(), { includeOwner: isAdmin });
+		const body: AiWorkflowBody = bodyFromForm(form, currentGraph(), { includeOwner: isAdmin });
+		if (!isNew && workflow) {
+			body.editor_client_id = EDITOR_CLIENT_ID;
+			const expected = overwrite === undefined ? workflow.revision : overwrite;
+			if (expected) body.expected_revision = expected;
+		}
 		const res =
 			isNew || !workflow
 				? await AiWorkflowsService.create(body)
 				: await AiWorkflowsService.update(workflow.id, body);
 		saving = false;
+		if (!res.ok && res.status === 409) {
+			const current = (res.data as { data?: { revision?: string; version?: number } } | null)?.data;
+			conflict = { revision: current?.revision ?? null, version: current?.version ?? null };
+			conflictOpen = true;
+			return;
+		}
 		if (!res.ok) {
 			const structured = workflowErrorsFrom(res.data);
 			if (structured.length) {
@@ -662,6 +801,9 @@
 		applyErrors([]);
 		validated = true;
 		savedSnapshot = snapshot;
+		remoteSave = null;
+		conflict = null;
+		conflictOpen = false;
 		toast({
 			title: wasNew ? 'Workflow created' : 'Workflow saved',
 			description: `${workflow.name} · v${workflow.version}`,
@@ -765,6 +907,86 @@
 	});
 	onDestroy(stopLive);
 
+	// ---- The other editors of this workflow (saved workflows only)
+	$effect(() => {
+		const id = liveWorkflowId;
+		untrack(() => {
+			presence?.stop();
+			presence = id ? new EditorPresence(id, onSavedElsewhere) : null;
+			presence?.start();
+		});
+	});
+	onDestroy(() => presence?.stop());
+
+	// The node configured here; a read-only viewer never holds one
+	$effect(() => {
+		const nodeId = readOnly ? null : selectedId;
+		const current = presence;
+		untrack(() => current?.focus(nodeId));
+	});
+
+	/** Who else configures the selected node, first: it is read-only here. */
+	const nodeLock = $derived(presence && selectedId ? presence.lockHolder(selectedId) : null);
+	const editorUsers = $derived(presence?.users ?? []);
+	const MAX_AVATARS = 5;
+
+	const peerName = (event: { user_name?: string | null; user_id?: number } | null) =>
+		event?.user_name || (event?.user_id ? `User #${event.user_id}` : 'Someone');
+
+	function onSavedElsewhere(event: AiWorkflowSavedEvent) {
+		// This tab's own save
+		if (event.editor_client_id && event.editor_client_id === EDITOR_CLIENT_ID) return;
+		if (event.deleted) {
+			remoteDeleted = event;
+			remoteSave = null;
+			return;
+		}
+		if (!workflow || (event.revision && event.revision === workflow.revision)) return;
+		if (dirty || saving) remoteSave = event;
+		else reloadWorkflow(event);
+	}
+
+	/**
+	 * The saved workflow, in place of what the editor shows (its changes are
+	 * dropped). After `event`, a save elsewhere: an editor changed meanwhile
+	 * is left alone, with the banner.
+	 */
+	async function reloadWorkflow(event: AiWorkflowSavedEvent | null) {
+		if (!workflow) return;
+		const id = workflow.id;
+		const res = await AiWorkflowsService.get(id);
+		if (workflow?.id !== id) return;
+		if (!res.ok) {
+			toast({
+				title: 'Reload failed',
+				description: describeApiError(res.data, res.error?.message ?? 'Request failed'),
+				variant: 'destructive'
+			});
+			return;
+		}
+		if (event && dirty) {
+			remoteSave = event;
+			return;
+		}
+		workflow = res.data as AiWorkflow;
+		form = formFromWorkflow(workflow);
+		loadGraph(graphFromWorkflow(workflow));
+		if (selectedId && !meta[selectedId]) selectedId = null;
+		applyErrors([]);
+		validated = null;
+		remoteSave = null;
+		conflict = null;
+		conflictOpen = false;
+		savedSnapshot = snapshot;
+		loadStats();
+		if (event) {
+			toast({
+				title: `${peerName(event)} saved v${workflow.version}`,
+				description: 'The editor shows their version.'
+			});
+		}
+	}
+
 	function onRunStarted(run: AiRunSummary) {
 		// Stay on the canvas and follow it there
 		applyLive(
@@ -816,6 +1038,30 @@
 		{/if}
 		{#if dirty}
 			<span class="text-2xs text-amber-600" data-testid="wf-dirty">Unsaved changes</span>
+		{/if}
+		{#if editorUsers.length}
+			<div class="flex items-center -space-x-1.5" data-testid="wf-editors">
+				{#each editorUsers.slice(0, MAX_AVATARS) as peer (peer.userId)}
+					<span
+						class="flex size-6 items-center justify-center rounded-full border-2 border-background text-[9px] font-semibold text-white"
+						style={`background-color: ${peer.color}`}
+						title={`${peer.name}: ${peer.nodeId ? `configuring ${meta[peer.nodeId]?.label || peer.nodeId}` : 'viewing'}`}
+					>
+						{presenceInitials(peer.name)}
+					</span>
+				{/each}
+				{#if editorUsers.length > MAX_AVATARS}
+					<span
+						class="flex size-6 items-center justify-center rounded-full border-2 border-background bg-muted text-[9px] font-semibold"
+						title={editorUsers
+							.slice(MAX_AVATARS)
+							.map((p) => p.name)
+							.join(', ')}
+					>
+						+{editorUsers.length - MAX_AVATARS}
+					</span>
+				{/if}
+			</div>
 		{/if}
 		<label class="ml-2 flex items-center gap-1.5 text-xs">
 			<Switch
@@ -924,8 +1170,8 @@
 				<Button
 					size="sm"
 					class="h-7"
-					onclick={save}
-					disabled={saving || loading || (!dirty && !isNew)}
+					onclick={() => save()}
+					disabled={saving || loading || !!remoteDeleted || (!dirty && !isNew)}
 					data-testid="wf-save"
 				>
 					<SaveIcon size={12} class="mr-1" />
@@ -956,6 +1202,45 @@
 					<p class="border-b bg-muted/30 px-4 py-1.5 text-2xs text-muted-foreground">
 						Read-only: editing needs the “Workflows write” permission.
 					</p>
+				{/if}
+				{#if remoteDeleted}
+					<p
+						class="flex items-center gap-1.5 border-b border-destructive/40 bg-destructive/10 px-4 py-1.5 text-2xs text-destructive"
+						data-testid="wf-remote-deleted"
+					>
+						<TriangleAlertIcon size={12} class="shrink-0" />
+						{peerName(remoteDeleted)} deleted this workflow: it can no longer be saved. Copy what you
+						need from the JSON view before leaving.
+					</p>
+				{:else if remoteSave}
+					<div
+						class="flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-4 py-1.5 text-2xs"
+						data-testid="wf-remote-saved"
+					>
+						<TriangleAlertIcon size={12} class="shrink-0 text-amber-600" />
+						<span>
+							{peerName(remoteSave)} saved
+							{remoteSave.version ? `version ${remoteSave.version}` : 'this workflow'} while you were
+							editing. Saving yours asks before replacing it.
+						</span>
+						<Button
+							variant="outline"
+							size="sm"
+							class="h-6 text-2xs"
+							onclick={() => reloadWorkflow(null)}
+							data-testid="wf-remote-reload"
+						>
+							Load theirs, drop my changes
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							class="h-6 text-2xs"
+							onclick={() => (remoteSave = null)}
+						>
+							Keep editing
+						</Button>
+					</div>
 				{/if}
 				<div class="flex min-h-0 flex-1">
 					{#if settingsOpen}
@@ -1116,6 +1401,11 @@
 								onDeleteBlock={deleteBlock}
 								{direction}
 								onSetDirection={setDirection}
+								onCopy={copySelection}
+								onCut={readOnly ? undefined : cutSelection}
+								onPaste={readOnly ? undefined : pasteNodes}
+								onDuplicate={readOnly ? undefined : duplicateSelection}
+								isLocked={(id) => !!presence?.lockHolder(id)}
 							/>
 						</SvelteFlowProvider>
 					</div>
@@ -1193,6 +1483,17 @@
 										})}
 									/>
 								{:else}
+									{#if nodeLock && !readOnly}
+										<p
+											class="flex shrink-0 items-start gap-1.5 border-b border-l-4 bg-muted/40 px-3 py-1.5 text-2xs"
+											style={`border-left-color: ${nodeLock.color}`}
+											data-testid="wf-node-locked"
+										>
+											<LockIcon size={11} class="mt-0.5 shrink-0" />
+											{nodeLock.name} is configuring this node: read-only here until they leave it. Their
+											changes show once they save.
+										</p>
+									{/if}
 									<div class="min-h-0 flex-1 overflow-y-auto">
 										<NodeConfigForm
 											nodeId={sid}
@@ -1202,7 +1503,7 @@
 											writeAllowlist={form.write_tool_allowlist}
 											errors={errorsByNode[sid] ?? []}
 											{otherNodes}
-											{readOnly}
+											readOnly={readOnly || !!nodeLock}
 											onClose={() => (selectedId = null)}
 											onDelete={deleteSelected}
 											onRename={(id) => renameNode(sid, id)}
@@ -1212,7 +1513,7 @@
 												bind:config={meta[sid].config}
 												otherTypes={otherTriggerTypes}
 												{catalogue}
-												{readOnly}
+												readOnly={readOnly || !!nodeLock}
 												workflowId={workflow?.id ?? null}
 												savedTriggerTypes={savedTriggers.map((t) => t.type)}
 												hasInboundToken={workflow?.has_inbound_token ?? false}
@@ -1307,6 +1608,39 @@
 				</Dialog.Footer>
 			</form>
 		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={conflictOpen}>
+	<Dialog.Content class="sm:max-w-[460px]" data-testid="wf-conflict">
+		<Dialog.Header>
+			<Dialog.Title class="text-sm">Saved by someone else meanwhile</Dialog.Title>
+			<Dialog.Description class="text-xs">
+				{remoteSave ? peerName(remoteSave) : 'Someone'} saved
+				{conflict?.version ? `version ${conflict.version}` : 'this workflow'} after you opened it. Saving
+				yours replaces their changes; loading theirs drops yours.
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button variant="outline" size="sm" onclick={() => (conflictOpen = false)}>Cancel</Button>
+			<Button
+				variant="outline"
+				size="sm"
+				onclick={() => reloadWorkflow(null)}
+				data-testid="wf-conflict-reload"
+			>
+				Load theirs
+			</Button>
+			<Button
+				variant="destructive"
+				size="sm"
+				disabled={saving}
+				onclick={() => save(conflict?.revision ?? null)}
+				data-testid="wf-conflict-overwrite"
+			>
+				Replace with mine
+			</Button>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
 

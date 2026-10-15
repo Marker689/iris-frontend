@@ -19,8 +19,10 @@ import {
 import type { Icon } from 'lucide-svelte';
 import type {
 	AiBlock,
+	AiBlockDefinition,
 	AiEntityType,
 	AiExecutionMode,
+	AiGraphNode,
 	AiRunStatus,
 	AiStepStatus,
 	AiSuggestionAudience,
@@ -300,13 +302,49 @@ export const LABEL_CLASS = 'text-2xs font-medium text-muted-foreground';
 export const TEXTAREA_CLASS =
 	'min-h-[72px] w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs outline-none focus:ring-1 focus:ring-ring';
 
+const KEY_CALL = /\bkey\(\s*(['"])([^'"]{1,128})\1\s*\)/g;
+
+/** Keystore names referenced with `key("NAME")` anywhere in `value`. */
+export function keyReferences(value: unknown): string[] {
+	const names = new Set<string>();
+	const walk = (item: unknown) => {
+		if (typeof item === 'string') {
+			for (const match of item.matchAll(KEY_CALL)) names.add(match[2]);
+		} else if (Array.isArray(item)) item.forEach(walk);
+		else if (item && typeof item === 'object') Object.values(item).forEach(walk);
+	};
+	walk(value);
+	return [...names].sort();
+}
+
+/** Tool names the nodes call or propose. */
+export function toolReferences(nodes: AiGraphNode[]): string[] {
+	const tools = new Set<string>();
+	for (const node of nodes) {
+		const config = (node.config ?? {}) as Record<string, unknown>;
+		if (node.type === 'action' && typeof config.tool === 'string') tools.add(config.tool);
+		else if (node.type === 'ai_agent' && Array.isArray(config.tools)) {
+			for (const tool of config.tools) if (typeof tool === 'string') tools.add(tool);
+		} else if (node.type === 'suggest') {
+			const tool = (config.proposed_action as Record<string, unknown> | undefined)?.tool;
+			if (typeof tool === 'string') tools.add(tool);
+		}
+	}
+	return [...tools].sort();
+}
+
 /**
- * What a block someone else wrote would do once inserted, for a review
- * before it lands in the workflow: the hosts it calls, the keystore
- * entries it sends, the tools it runs and its Python scripts.
+ * What nodes someone else wrote would do once inserted, for a review
+ * before they land in the workflow: the hosts they call, the keystore
+ * entries they send, the tools they run, their Python scripts and the
+ * workflows they start. `requirements` (computed by the server for a
+ * saved block) wins over what is read here.
  */
-export function blockReview(block: AiBlock): string[] {
-	const nodes = block.definition.nodes ?? [];
+export function definitionReview(
+	definition: AiBlockDefinition,
+	requirements?: { keystore?: string[]; tools?: string[] } | null
+): string[] {
+	const nodes = definition.nodes ?? [];
 	const hosts = new Set<string>();
 	for (const node of nodes) {
 		if (node.type !== 'http_request') continue;
@@ -315,12 +353,19 @@ export function blockReview(block: AiBlock): string[] {
 		hosts.add(host ? host.replace(/^.*@/, '') : url || '(no URL)');
 	}
 	const python = nodes.filter((n) => n.type === 'python').length;
-	const keys = block.requirements?.keystore ?? [];
-	const tools = block.requirements?.tools ?? [];
+	const workflows = nodes.filter((n) => n.type === 'run_workflow').length;
+	const keys = requirements?.keystore ?? keyReferences(nodes);
+	const tools = requirements?.tools ?? toolReferences(nodes);
 	return [
 		hosts.size ? `Calls: ${[...hosts].join(', ')}` : '',
 		keys.length ? `Sends keystore entries: ${keys.join(', ')}` : '',
 		tools.length ? `Runs tools: ${tools.join(', ')}` : '',
-		python ? `Runs ${python} Python script${python === 1 ? '' : 's'}` : ''
+		python ? `Runs ${python} Python script${python === 1 ? '' : 's'}` : '',
+		workflows ? `Starts ${workflows} other workflow${workflows === 1 ? '' : 's'}` : ''
 	].filter(Boolean);
+}
+
+/** `definitionReview` of a saved block. */
+export function blockReview(block: AiBlock): string[] {
+	return definitionReview(block.definition, block.requirements);
 }

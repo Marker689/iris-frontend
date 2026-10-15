@@ -150,6 +150,11 @@ export interface AiWorkflowSummary {
 	owner_id: number;
 	owner: AiUserRef | null;
 	version: number;
+	/**
+	 * Fingerprint of the definition (name and switch included): send it
+	 * back as `expected_revision` to refuse a save over someone else's.
+	 */
+	revision?: string;
 	customer_scope: number[] | null;
 	suggestion_audience: AiSuggestionAudience;
 	max_runs_per_hour: number;
@@ -195,6 +200,10 @@ export interface AiWorkflowBody {
 	owner_id?: number;
 	/** PUT only: note stored with the new version. */
 	version_note?: string;
+	/** PUT only: the `revision` the edit started from; 409 when it is stale. */
+	expected_revision?: string;
+	/** PUT only: the editor tab saving, echoed in `ai_workflow_saved`. */
+	editor_client_id?: string;
 }
 
 export interface AiWorkflowVersionSummary {
@@ -644,6 +653,50 @@ export interface AiRunLiveEvent {
 export const AI_RUN_LIVE_EVENT = 'ai_workflow_run';
 export const AI_RUN_WATCH = 'ai_workflow_watch';
 export const AI_RUN_UNWATCH = 'ai_workflow_unwatch';
+
+/**
+ * Presence in a workflow's editor (`/notifications`): join with
+ * `{workflow_id, node_id}`, then send `node_id` changes and a heartbeat
+ * with UPDATE. Each tab of the room receives the others' `hello` (just
+ * joined: announce yourself), `here` (state or heartbeat) and `gone`.
+ * Identity, peer id and `focused_at` (epoch seconds the node was
+ * focused, the earliest holds the lock) are set by the server.
+ */
+export interface AiEditorPresenceEvent {
+	type: 'hello' | 'here' | 'gone';
+	workflow_id: number;
+	peer_id: string;
+	user_id: number;
+	user_name: string;
+	node_id: string | null;
+	focused_at: number | null;
+}
+
+/** Ack of an editor join / update. */
+export interface AiEditorPresenceAck {
+	ok: boolean;
+	peer_id?: string;
+	node_id?: string | null;
+	focused_at?: number | null;
+}
+
+/** A workflow was saved (or deleted) — sent to its editors' room. */
+export interface AiWorkflowSavedEvent {
+	workflow_id: number;
+	user_id: number;
+	user_name: string | null;
+	version?: number;
+	revision?: string;
+	/** The `editor_client_id` of the save, null when it came from elsewhere. */
+	editor_client_id?: string | null;
+	deleted?: boolean;
+}
+
+export const AI_EDITOR_EVENT = 'ai_workflow_editor';
+export const AI_EDITOR_JOIN = 'ai_workflow_editor_join';
+export const AI_EDITOR_UPDATE = 'ai_workflow_editor_update';
+export const AI_EDITOR_LEAVE = 'ai_workflow_editor_leave';
+export const AI_WORKFLOW_SAVED_EVENT = 'ai_workflow_saved';
 
 // ---- Node events --------------------------------------------------------------------
 

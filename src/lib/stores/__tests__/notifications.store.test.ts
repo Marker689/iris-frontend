@@ -235,4 +235,57 @@ describe('notifications store', () => {
 		expect(socket.emit.mock.calls.filter(([event]) => event === 'room_watch')).toHaveLength(2);
 		notifications.reset();
 	});
+
+	it('watchRoom() resolves a function payload at each join and passes the ack', async () => {
+		let node = 'a';
+		const onAck = vi.fn();
+		const off = notifications.watchRoom('room_join', 'room_leave', () => ({ node }), onAck);
+		(NotificationsService.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			ok: true,
+			status: 200,
+			data: { data: [], unread_count: 0 }
+		});
+		await notifications.initialize();
+		const ioMock = io as unknown as ReturnType<typeof vi.fn>;
+		const socket = ioMock.mock.results[ioMock.mock.results.length - 1].value as {
+			on: ReturnType<typeof vi.fn>;
+			emit: ReturnType<typeof vi.fn>;
+			connected?: boolean;
+		};
+		const onConnect = socket.on.mock.calls.find(([event]) => event === 'connect')![1];
+		onConnect();
+		node = 'b';
+		onConnect();
+		const joins = socket.emit.mock.calls.filter(([event]) => event === 'room_join');
+		expect(joins.map(([, payload]) => payload)).toEqual([{ node: 'a' }, { node: 'b' }]);
+		joins[1][2]({ ok: true });
+		expect(onAck).toHaveBeenCalledWith({ ok: true });
+		socket.connected = true;
+		off();
+		expect(socket.emit.mock.calls.filter(([event]) => event === 'room_leave')).toEqual([
+			['room_leave', { node: 'b' }]
+		]);
+		notifications.reset();
+	});
+
+	it('emit() only sends on a live connection', async () => {
+		expect(notifications.emit('ping', { a: 1 })).toBe(false);
+		(NotificationsService.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			ok: true,
+			status: 200,
+			data: { data: [], unread_count: 0 }
+		});
+		await notifications.initialize();
+		const ioMock = io as unknown as ReturnType<typeof vi.fn>;
+		const socket = ioMock.mock.results[ioMock.mock.results.length - 1].value as {
+			emit: ReturnType<typeof vi.fn>;
+			connected?: boolean;
+		};
+		expect(notifications.emit('ping', { a: 1 })).toBe(false);
+		socket.connected = true;
+		const onAck = vi.fn();
+		expect(notifications.emit('ping', { a: 1 }, onAck)).toBe(true);
+		expect(socket.emit).toHaveBeenCalledWith('ping', { a: 1 }, onAck);
+		notifications.reset();
+	});
 });

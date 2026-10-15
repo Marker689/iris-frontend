@@ -11,6 +11,7 @@ import type {
 import { aiWorkflowTriggers } from '$lib/services/ai-workflows.service';
 import { upgradeTriggerNodes, type NodeMetaMap } from '$lib/utils/ai-workflow-graph';
 import type { AiLiveNodeState } from './live';
+import type { AiEditorPeer } from './presence';
 
 /**
  * Editor top-bar state. The triggers are not here: each trigger node of
@@ -289,6 +290,8 @@ export interface WorkflowEditorCtx {
 	readonly workflowId: number | null;
 	/** The workflow's default suggestion audience, which nodes may override. */
 	readonly suggestionAudience: AiSuggestionAudience;
+	/** The other editors configuring each node, per node id. */
+	readonly editors: Record<string, AiEditorPeer[]>;
 }
 
 /** Set by the node config form for the template fields it renders. */
