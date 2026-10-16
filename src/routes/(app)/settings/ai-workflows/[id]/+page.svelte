@@ -86,6 +86,7 @@
 		groupErrors,
 		insertBlock,
 		labelFor,
+		NOTE_TYPE,
 		selectionToBlock,
 		readHandles,
 		type FlowDirection,
@@ -186,6 +187,7 @@
 	/** Why a node cannot be tested on its own (it parks or starts the run). */
 	function testBlocked(type: string, config: Record<string, unknown>): string | null {
 		if (type === 'trigger') return 'A trigger is tested by running the workflow.';
+		if (type === NOTE_TYPE) return 'A note documents the workflow: it never runs.';
 		if (type === 'ask_analyst' || (type === 'http_request' && config.mode === 'async'))
 			return 'A node that waits for an answer is tested by running the workflow.';
 		if (type === 'delay' && Number(config.minutes ?? 5) > 0)
@@ -250,6 +252,9 @@
 		},
 		get editors() {
 			return presence?.byNode ?? {};
+		},
+		get readOnly() {
+			return readOnly;
 		}
 	};
 	setContext(WORKFLOW_EDITOR_CTX, ctx);
@@ -287,7 +292,9 @@
 
 	const otherNodes = $derived(
 		nodes
-			.filter((n) => n.id !== selectedId && n.data.nodeType !== 'trigger')
+			.filter(
+				(n) => n.id !== selectedId && n.data.nodeType !== 'trigger' && n.data.nodeType !== NOTE_TYPE
+			)
 			.map((n) => ({
 				id: n.id,
 				label: meta[n.id]?.label || labelFor(n.data.nodeType, catalogue?.node_types)

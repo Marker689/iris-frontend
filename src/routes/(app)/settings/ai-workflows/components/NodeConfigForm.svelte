@@ -17,7 +17,14 @@
 		type AiWorkflowCatalogue,
 		type AiWorkflowSummary
 	} from '$lib/services/ai-workflows.service';
-	import { labelFor, nodeIdError, type NodeMeta } from '$lib/utils/ai-workflow-graph';
+	import {
+		labelFor,
+		nodeIdError,
+		NOTE_COLORS,
+		NOTE_TYPE,
+		type NodeMeta
+	} from '$lib/utils/ai-workflow-graph';
+	import { Textarea } from '$lib/components/ui/textarea';
 	import MultiSelect, { type MultiSelectItem } from './MultiSelect.svelte';
 	import JsonField from './JsonField.svelte';
 	import PairsEditor from './PairsEditor.svelte';
@@ -36,6 +43,7 @@
 		LABEL_CLASS,
 		nodeIcon,
 		nodeTone,
+		noteTone,
 		SELECT_CLASS,
 		SUGGESTION_AUDIENCE_LABELS,
 		TEMPLATE_FIELD_CTX,
@@ -1304,6 +1312,43 @@
 				{@render num('timeout_seconds', 'Timeout (seconds)', 1)}
 				{@render num('max_steps', 'Max steps', 1000)}
 			</div>
+		{:else if nodeType === NOTE_TYPE}
+			<label class="flex flex-col gap-1">
+				<span class={LABEL_CLASS}>Note (plain text)</span>
+				<Textarea
+					rows={10}
+					class="text-xs"
+					disabled={readOnly}
+					placeholder="What this part of the workflow does, and why…"
+					value={str(c.text)}
+					oninput={(e) => set('text', (e.currentTarget as HTMLTextAreaElement).value)}
+					data-testid="wf-cfg-text"
+				/>
+			</label>
+			<div class="flex flex-col gap-1">
+				<span class={LABEL_CLASS}>Colour</span>
+				<div class="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Note colour">
+					{#each NOTE_COLORS as color (color)}
+						<button
+							type="button"
+							role="radio"
+							aria-checked={(c.color ?? 'yellow') === color}
+							aria-label={color}
+							title={color}
+							disabled={readOnly}
+							class={`size-6 rounded-full border-2 ${noteTone(color)} ${
+								(c.color ?? 'yellow') === color ? '!border-primary' : ''
+							}`}
+							onclick={() => set('color', color)}
+							data-testid={`wf-cfg-color-${color}`}
+						></button>
+					{/each}
+				</div>
+			</div>
+			<p class="text-2xs text-muted-foreground">
+				A note is never connected nor run. Select it on the canvas and drag its corners to resize
+				it; it stays behind the other nodes.
+			</p>
 		{:else if nodeType === 'stop'}
 			{@render choice('status', 'End the run as', [
 				['succeeded', 'Succeeded'],
@@ -1325,7 +1370,7 @@
 			</div>
 		{/if}
 
-		{#if nodeType !== 'trigger'}
+		{#if nodeType !== 'trigger' && nodeType !== NOTE_TYPE}
 			<TemplateHelp
 				keystore={catalogue?.keystore ?? []}
 				nodes={otherNodes}

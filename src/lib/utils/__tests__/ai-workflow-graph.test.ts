@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { AiNodeTypeInfo, AiWorkflowGraph } from '$lib/services/ai-workflows.service';
 import {
 	FLOW_NODE_TYPE,
+	NOTE_FLOW_NODE_TYPE,
 	addConnection,
 	applyDirection,
 	createFlowNode,
@@ -17,6 +18,7 @@ import {
 	nextEdgeId,
 	nextNodeId,
 	nodeIdError,
+	noteSize,
 	parseHandle,
 	portsFor,
 	reattachEdges,
@@ -175,6 +177,61 @@ describe('ids and creation', () => {
 		expect(createFlowNode('trigger', { x: 0, y: 0 }, []).meta.config).toEqual({
 			trigger_type: 'manual'
 		});
+	});
+});
+
+describe('notes', () => {
+	const withNote: AiWorkflowGraph = {
+		nodes: [
+			...graph.nodes,
+			{
+				id: 'doc',
+				type: 'note',
+				label: 'Why',
+				position: { x: 0, y: 200 },
+				config: { text: 'Triage', color: 'blue', width: 320.6, height: 90 }
+			}
+		],
+		edges: graph.edges
+	};
+
+	it('draws notes with their own component, under the nodes, at their size', () => {
+		const { nodes } = graphToFlow(withNote);
+		expect(nodes[3]).toMatchObject({
+			type: NOTE_FLOW_NODE_TYPE,
+			zIndex: -1,
+			width: 321,
+			height: 90,
+			data: { nodeType: 'note' }
+		});
+		expect(nodes[0].type).toBe(FLOW_NODE_TYPE);
+		expect(nodes[0].zIndex).toBeUndefined();
+	});
+
+	it('keeps notes and their config through a round trip', () => {
+		const { nodes, edges, meta } = graphToFlow(withNote);
+		expect(flowToGraph(nodes, edges, meta).nodes[3]).toEqual(withNote.nodes[3]);
+	});
+
+	it('creates notes with a default text, colour and size', () => {
+		const { node, meta } = createFlowNode('note', { x: 0, y: 0 }, []);
+		expect(node).toMatchObject({ type: NOTE_FLOW_NODE_TYPE, width: 260, height: 160 });
+		expect(meta).toEqual({
+			label: 'Note',
+			config: { text: '', color: 'yellow', width: 260, height: 160 }
+		});
+		expect(portsFor('note')).toEqual([]);
+	});
+
+	it('bounds the size of a note', () => {
+		expect(noteSize({ width: 10, height: 99999 })).toEqual({ width: 80, height: 4000 });
+		expect(noteSize({ width: 'wide' })).toEqual({ width: 260, height: 160 });
+		expect(noteSize(undefined)).toEqual({ width: 260, height: 160 });
+	});
+
+	it('refuses links into a note', () => {
+		const { nodes } = graphToFlow(withNote);
+		expect(isConnectionAllowed({ source: 'n2', target: 'doc' }, nodes)).toBe(false);
 	});
 });
 

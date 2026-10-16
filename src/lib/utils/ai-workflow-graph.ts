@@ -161,7 +161,8 @@ export const DEFAULT_PORTS: Record<string, string[]> = {
 	delay: ['out'],
 	set_variables: ['out'],
 	python: ['out', 'error'],
-	stop: []
+	stop: [],
+	note: []
 };
 
 /** Config defaults when the catalogue is not loaded (spec table). */
@@ -226,8 +227,43 @@ export const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
 	delay: { minutes: 5 },
 	set_variables: { variables: [] },
 	python: { code: 'result = {}', inputs: [], timeout_seconds: 5, max_steps: 200000 },
-	stop: { status: 'succeeded', reason: '' }
+	stop: { status: 'succeeded', reason: '' },
+	note: { text: '', color: 'yellow', width: 260, height: 160 }
 };
+
+/** A canvas annotation: never connected, never run. */
+export const NOTE_TYPE = 'note';
+export const NOTE_COLORS = ['yellow', 'blue', 'green', 'pink', 'purple', 'gray'] as const;
+export type NoteColor = (typeof NOTE_COLORS)[number];
+/** Size bounds of a note, as the backend checks them. */
+export const NOTE_MIN_SIZE = 80;
+export const NOTE_MAX_SIZE = 4000;
+
+/** The size a note is drawn at, from its config (bounded, rounded). */
+export function noteSize(config: Record<string, unknown> | undefined): {
+	width: number;
+	height: number;
+} {
+	const size = (value: unknown, fallback: number) =>
+		typeof value === 'number' && Number.isFinite(value)
+			? Math.min(NOTE_MAX_SIZE, Math.max(NOTE_MIN_SIZE, Math.round(value)))
+			: fallback;
+	return {
+		width: size(config?.width, DEFAULT_CONFIGS.note.width as number),
+		height: size(config?.height, DEFAULT_CONFIGS.note.height as number)
+	};
+}
+
+/** Canvas component drawing notes; every other type is a FLOW_NODE_TYPE. */
+export const NOTE_FLOW_NODE_TYPE = 'workflow_note';
+/** Notes sit under the other nodes they document. */
+const NOTE_Z_INDEX = -1;
+
+/** What a note node adds to a canvas node: its component, layer and size. */
+function flowNodeExtras(type: string, config?: Record<string, unknown>): Partial<FlowNode> {
+	if (type !== NOTE_TYPE) return {};
+	return { type: NOTE_FLOW_NODE_TYPE, zIndex: NOTE_Z_INDEX, ...noteSize(config) };
+}
 
 const deepClone = <T>(value: T): T =>
 	value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
@@ -273,7 +309,8 @@ export function graphToFlow(graph: AiWorkflowGraph | null | undefined): {
 			id: n.id,
 			type: FLOW_NODE_TYPE,
 			position: { x: n.position?.x ?? 0, y: n.position?.y ?? 0 },
-			data: { nodeType: n.type }
+			data: { nodeType: n.type },
+			...flowNodeExtras(n.type, n.config)
 		};
 	});
 	const edges: FlowEdge[] = (graph?.edges ?? []).map((e) => toFlowEdge(e, meta));
@@ -391,14 +428,16 @@ export function createFlowNode(
 	catalogue?: AiNodeTypeInfo[] | null
 ): { node: FlowNode; meta: NodeMeta } {
 	const id = nextNodeId(existing);
+	const config = defaultConfigFor(type, catalogue);
 	return {
 		node: {
 			id,
 			type: FLOW_NODE_TYPE,
 			position: { x: Math.round(position.x), y: Math.round(position.y) },
-			data: { nodeType: type }
+			data: { nodeType: type },
+			...flowNodeExtras(type, config)
 		},
-		meta: { label: labelFor(type, catalogue), config: defaultConfigFor(type, catalogue) }
+		meta: { label: labelFor(type, catalogue), config }
 	};
 }
 
@@ -474,7 +513,7 @@ export function upgradeTriggerNodes(
 
 /**
  * A connection is acceptable when it does not loop onto its own node
- * and does not enter the trigger. Cycles through other nodes are left
+ * and does not enter the trigger or a note. Cycles through other nodes are left
  * to the backend validator (they are allowed; the step limit of a run
  * stops a loop that never exits).
  */
@@ -485,7 +524,7 @@ export function isConnectionAllowed(
 	if (connection.source === connection.target) return false;
 	const target = nodes.find((n) => n.id === connection.target);
 	if (!target) return false;
-	return target.data.nodeType !== 'trigger';
+	return target.data.nodeType !== 'trigger' && target.data.nodeType !== NOTE_TYPE;
 }
 
 /**
@@ -672,7 +711,8 @@ export function insertBlock(
 				y: Math.round(position.y + (n.position?.y ?? 0) - minY)
 			},
 			data: { nodeType: n.type },
-			deletable: true
+			deletable: true,
+			...flowNodeExtras(n.type, n.config)
 		};
 	});
 	const edges: FlowEdge[] = [];

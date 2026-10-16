@@ -292,6 +292,8 @@ export interface WorkflowEditorCtx {
 	readonly suggestionAudience: AiSuggestionAudience;
 	/** The other editors configuring each node, per node id. */
 	readonly editors: Record<string, AiEditorPeer[]>;
+	/** The workflow cannot be changed here (notes are not resizable). */
+	readonly readOnly?: boolean;
 }
 
 /** Set by the node config form for the template fields it renders. */

@@ -12,6 +12,7 @@ import {
 	PlayIcon,
 	SearchIcon,
 	SquareArrowOutUpRightIcon,
+	StickyNoteIcon,
 	TimerIcon,
 	VariableIcon,
 	ZapIcon
@@ -31,6 +32,7 @@ import type {
 	AiValidationError,
 	AiWaitStatus
 } from '$lib/services/ai-workflows.service';
+import type { NoteColor } from '$lib/utils/ai-workflow-graph';
 
 export const NODE_ICONS: Record<string, typeof Icon> = {
 	trigger: ZapIcon,
@@ -47,7 +49,8 @@ export const NODE_ICONS: Record<string, typeof Icon> = {
 	run_workflow: SquareArrowOutUpRightIcon,
 	set_variables: VariableIcon,
 	python: BracesIcon,
-	stop: OctagonXIcon
+	stop: OctagonXIcon,
+	note: StickyNoteIcon
 };
 
 export const nodeIcon = (type: string): typeof Icon => NODE_ICONS[type] ?? CircleIcon;
@@ -63,8 +66,25 @@ export const NODE_TONES: Record<string, string> = {
 	action: 'bg-red-500/15 text-red-700 dark:text-red-300',
 	run_workflow: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300',
 	python: 'bg-orange-500/15 text-orange-700 dark:text-orange-300',
-	stop: 'bg-muted text-muted-foreground'
+	stop: 'bg-muted text-muted-foreground',
+	note: 'bg-yellow-400/25 text-yellow-800 dark:text-yellow-200'
 };
+
+/** Paper and border of a note on the canvas, per note colour. */
+export const NOTE_TONES: Record<NoteColor, string> = {
+	yellow:
+		'border-yellow-300 bg-yellow-100 text-yellow-950 dark:border-yellow-700 dark:bg-yellow-950/70 dark:text-yellow-50',
+	blue: 'border-sky-300 bg-sky-100 text-sky-950 dark:border-sky-700 dark:bg-sky-950/70 dark:text-sky-50',
+	green:
+		'border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-50',
+	pink: 'border-pink-300 bg-pink-100 text-pink-950 dark:border-pink-700 dark:bg-pink-950/70 dark:text-pink-50',
+	purple:
+		'border-violet-300 bg-violet-100 text-violet-950 dark:border-violet-700 dark:bg-violet-950/70 dark:text-violet-50',
+	gray: 'border-zinc-300 bg-zinc-100 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-800/80 dark:text-zinc-50'
+};
+
+export const noteTone = (color: unknown): string =>
+	NOTE_TONES[color as NoteColor] ?? NOTE_TONES.yellow;
 
 export const nodeTone = (type: string): string => NODE_TONES[type] ?? 'bg-muted text-foreground/80';
 

@@ -58,6 +58,7 @@
 	import WorkflowNode from './WorkflowNode.svelte';
 	import RoutedEdge from './RoutedEdge.svelte';
 	import PanelResizer from './PanelResizer.svelte';
+	import NoteNode from './NoteNode.svelte';
 	import { WORKFLOW_EDITOR_CTX, nodeIcon, nodeTone } from '../helpers/ui';
 	import type { WorkflowEditorCtx } from '../helpers/editor';
 	import { clipboardDecode } from '../helpers/clipboard';
@@ -123,7 +124,7 @@
 
 	const DRAG_MIME = 'application/x-iris-workflow-node';
 	const DRAG_BLOCK_MIME = 'application/x-iris-workflow-block';
-	const nodeTypes: NodeTypes = { workflow: WorkflowNode };
+	const nodeTypes: NodeTypes = { workflow: WorkflowNode, workflow_note: NoteNode };
 	// Every edge goes around the nodes in its way
 	const edgeTypes: EdgeTypes = { default: RoutedEdge };
 	const { screenToFlowPosition, getInternalNode } = useSvelteFlow();
