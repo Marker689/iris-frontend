@@ -16,6 +16,7 @@ export type ChatMessageKind =
 	| 'case_attached'
 	| 'case_detached'
 	| 'case_activity'
+	| 'war_room_activity'
 	| 'sitrep_published'
 	| 'note'
 	| 'pin'
@@ -92,10 +93,11 @@ export interface ChatMessage {
 	ref_id: number | null;
 	ref_case_id: number | null;
 	/**
-	 * Fine-grained classifier for case-activity rows: `note.created`,
-	 * `ioc.updated`, `asset.deleted`, etc. NULL for chat-author messages
-	 * and for system rows that don't map to a tracked-activity verb. The
-	 * Stream tab uses this to drive per-case, per-type filter checkboxes.
+	 * Fine-grained classifier for activity rows: `note.created`,
+	 * `ioc.updated`, `asset.deleted`, etc. for case activity,
+	 * `member.added`, `folder.renamed`, etc. for the war room's own
+	 * activity. NULL for chat-author messages and for system rows. The
+	 * Stream tab uses this to drive its per-type filter checkboxes.
 	 */
 	activity_type: string | null;
 	/**

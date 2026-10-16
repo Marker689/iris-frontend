@@ -10,6 +10,12 @@
 	import { formatDate, formatDateTime, parseServerDate } from '$lib/utils/time-formatter';
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
+	import { WAR_ROOM_LIVE_TOPICS } from '$lib/utils/war-room-live';
+	import {
+		WAR_ROOM_ACTIVITY_FAMILIES,
+		mergeSavedStreamLanes,
+		warRoomActivityFamily
+	} from '$lib/utils/war-room-stream';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import {
@@ -19,10 +25,14 @@
 		ArchiveRestore,
 		BarChart3,
 		Bell,
+		Clock,
+		Crosshair,
+		Database,
 		ChevronDown,
 		ChevronRight,
 		FileText,
 		Filter,
+		Folder,
 		Gavel,
 		Hash,
 		Loader2,
@@ -35,10 +45,15 @@
 		Plus,
 		Search,
 		Send,
+		Settings2,
+		Share2,
+		ShieldAlert,
 		Slash,
 		SmilePlus,
 		StickyNote,
 		Trash2,
+		Users,
+		UsersRound,
 		Waypoints,
 		WaypointsIcon,
 		X
@@ -196,14 +211,20 @@
 			key: 'case_link',
 			label: 'Case attached / detached',
 			kinds: ['case_attached', 'case_detached'] as const
-		}
+		},
+		{ key: 'room_activity', label: 'War-room activity', kinds: ['war_room_activity'] as const }
 	];
+	const GLOBAL_FILTER_KEYS = GLOBAL_FILTERS.map((f) => f.key);
+	// Lanes preferences saved before `knownGlobalFilters` existed knew
+	const LEGACY_GLOBAL_FILTER_KEYS = ['message', 'tasks', 'sitreps', 'notes', 'system', 'case_link'];
 
 	let globalFilters = $state<Set<string>>(new Set(GLOBAL_FILTERS.map((f) => f.key)));
 
 	// Per-case exclusions. Empty by default — operator opts out.
 	let excludedCases = $state<Set<number>>(new Set());
 	let excludedCaseActivities = $state<Record<number, Set<string>>>({});
+	// War-room activity families the operator muted (`member`, `folder`, ...)
+	let excludedRoomActivities = $state<Set<string>>(new Set());
 
 	// --- Persistent filter preferences ----------------------------------
 	//
@@ -217,8 +238,11 @@
 	// preference back to defaults.
 	type StreamPrefs = {
 		globalFilters: string[];
+		// Every lane that existed at save time, so one added later starts on
+		knownGlobalFilters?: string[];
 		excludedCases: number[];
 		excludedCaseActivities: Record<string, string[]>;
+		excludedRoomActivities?: string[];
 	};
 	const STREAM_PREF_KEY = 'war_room_stream';
 	let filtersHydrated = $state(false);
@@ -231,7 +255,15 @@
 				const value = (res.data as { value: StreamPrefs | null }).value;
 				if (value && typeof value === 'object') {
 					if (Array.isArray(value.globalFilters)) {
-						globalFilters = new Set(value.globalFilters);
+						globalFilters = mergeSavedStreamLanes(
+							value.globalFilters,
+							value.knownGlobalFilters,
+							GLOBAL_FILTER_KEYS,
+							LEGACY_GLOBAL_FILTER_KEYS
+						);
+					}
+					if (Array.isArray(value.excludedRoomActivities)) {
+						excludedRoomActivities = new Set(value.excludedRoomActivities);
 					}
 					if (Array.isArray(value.excludedCases)) {
 						excludedCases = new Set(value.excludedCases);
@@ -256,10 +288,12 @@
 	const saveFilterPrefsNow = async () => {
 		const payload: StreamPrefs = {
 			globalFilters: Array.from(globalFilters),
+			knownGlobalFilters: GLOBAL_FILTER_KEYS,
 			excludedCases: Array.from(excludedCases),
 			excludedCaseActivities: Object.fromEntries(
 				Object.entries(excludedCaseActivities).map(([k, v]) => [k, Array.from(v)])
-			)
+			),
+			excludedRoomActivities: Array.from(excludedRoomActivities)
 		};
 		await UsersService.setMyPreference(STREAM_PREF_KEY, payload);
 	};
@@ -267,12 +301,13 @@
 	// Every relevant state change schedules a save 500ms later. That
 	// coalesces bursts (e.g. toggling several checkboxes in a row) into
 	// a single PUT while still feeling responsive if the operator moves
-	// on. The `$effect` reads all three states so any of them changing
+	// on. The `$effect` reads every filter state so any of them changing
 	// arms the timer.
 	$effect(() => {
 		void globalFilters;
 		void excludedCases;
 		void excludedCaseActivities;
+		void excludedRoomActivities;
 		if (!filtersHydrated) return;
 		if (savePrefTimer) clearTimeout(savePrefTimer);
 		savePrefTimer = setTimeout(() => {
@@ -392,6 +427,12 @@
 				return true;
 			}
 
+			// War-room activity: the lane, then the muted families.
+			if (m.kind === 'war_room_activity') {
+				if (!globalFilters.has('room_activity')) return false;
+				return !excludedRoomActivities.has(warRoomActivityFamily(m.activity_type));
+			}
+
 			// Case attached / detached are case-scoped too — let the
 			// operator mute a specific case across all event types.
 			if (m.kind === 'case_attached' || m.kind === 'case_detached') {
@@ -434,10 +475,18 @@
 
 	const isCaseOn = (caseId: number) => !excludedCases.has(caseId);
 
+	const toggleRoomActivity = (family: string) => {
+		const next = new Set(excludedRoomActivities);
+		if (next.has(family)) next.delete(family);
+		else next.add(family);
+		excludedRoomActivities = next;
+	};
+
 	const selectAll = () => {
 		globalFilters = new Set(GLOBAL_FILTERS.map((f) => f.key));
 		excludedCases = new Set();
 		excludedCaseActivities = {};
+		excludedRoomActivities = new Set();
 	};
 
 	const selectNone = () => {
@@ -738,6 +787,11 @@
 	useWarRoomLive(['chat'], async () => {
 		await Promise.all([pollNewer(), loadThreads(), loadTopics()]);
 	});
+	// Any other change of the room lands in the stream as an activity row
+	useWarRoomLive(
+		WAR_ROOM_LIVE_TOPICS.filter((topic) => topic !== 'chat'),
+		() => pollNewer()
+	);
 
 	// Used by the per-bubble delete affordance to decide whether to render
 	// the Trash button. Server-side enforcement is the source of truth
@@ -1743,8 +1797,39 @@
 		}
 	};
 
-	const systemIcon = (k: ChatMessageKind) => {
+	const ROOM_ACTIVITY_ICONS: Record<string, typeof Users> = {
+		room: Settings2,
+		member: Users,
+		team: UsersRound,
+		note: StickyNote,
+		folder: Folder,
+		share: Share2,
+		task: ListChecks,
+		timeline: Clock,
+		event: Clock,
+		decision: Gavel,
+		sitrep: FileText,
+		scope: Crosshair,
+		vulnerability: ShieldAlert,
+		datastore: Database
+	};
+
+	const ROOM_ACTIVITY_COLORS: Record<string, string> = {
+		member: 'text-violet-600 dark:text-violet-400',
+		team: 'text-violet-600 dark:text-violet-400',
+		note: 'text-amber-600 dark:text-amber-400',
+		folder: 'text-amber-600 dark:text-amber-400',
+		share: 'text-amber-600 dark:text-amber-400',
+		task: 'text-emerald-600 dark:text-emerald-400',
+		decision: 'text-indigo-600 dark:text-indigo-400',
+		sitrep: 'text-amber-600 dark:text-amber-400',
+		vulnerability: 'text-red-600 dark:text-red-400'
+	};
+
+	const systemIcon = (k: ChatMessageKind, activityType: string | null = null) => {
 		switch (k) {
+			case 'war_room_activity':
+				return ROOM_ACTIVITY_ICONS[warRoomActivityFamily(activityType)] ?? Settings2;
 			case 'task_assigned':
 			case 'task_completed':
 				return ListChecks;
@@ -1769,8 +1854,13 @@
 		}
 	};
 
-	const systemColor = (k: ChatMessageKind) => {
+	const systemColor = (k: ChatMessageKind, activityType: string | null = null) => {
 		switch (k) {
+			case 'war_room_activity':
+				return (
+					ROOM_ACTIVITY_COLORS[warRoomActivityFamily(activityType)] ??
+					'text-sky-600 dark:text-sky-400'
+				);
 			case 'task_assigned':
 			case 'task_completed':
 				return 'text-emerald-600 dark:text-emerald-400';
@@ -1833,6 +1923,7 @@
 	const anyExclusion = $derived(
 		excludedCases.size > 0 ||
 			Object.values(excludedCaseActivities).some((s) => s.size > 0) ||
+			excludedRoomActivities.size > 0 ||
 			activeGlobalFilters < totalGlobalFilters
 	);
 </script>
@@ -2275,6 +2366,30 @@
 									aria-label={`Toggle ${f.label}`}
 								/>
 							</label>
+							{#if f.key === 'room_activity' && on}
+								<ul class="ml-3 flex flex-col border-l pl-1">
+									{#each WAR_ROOM_ACTIVITY_FAMILIES as family (family.key)}
+										{@const familyOn = !excludedRoomActivities.has(family.key)}
+										<li>
+											<label
+												class={[
+													'flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1 text-2xs transition-colors',
+													familyOn
+														? 'text-foreground hover:bg-muted/60'
+														: 'text-muted-foreground hover:bg-muted/40'
+												]}
+											>
+												<span>{family.label}</span>
+												<Checkbox
+													checked={familyOn}
+													onCheckedChange={() => toggleRoomActivity(family.key)}
+													aria-label={`Toggle war-room activity: ${family.label}`}
+												/>
+											</label>
+										</li>
+									{/each}
+								</ul>
+							{/if}
 						</li>
 					{/each}
 				</ul>
@@ -2590,7 +2705,7 @@
 									{#each g.rows as m, i (m.message_id)}
 										{@const prev = g.rows[i - 1]}
 										{@const cont = isContinuation(m, prev)}
-										{@const Icon = systemIcon(m.kind)}
+										{@const Icon = systemIcon(m.kind, m.activity_type)}
 
 										{#if m.kind === 'poll' && m.poll}
 											<!--
@@ -2700,7 +2815,9 @@
 												]}
 											>
 												{#if Icon}
-													<Icon class={`h-3.5 w-3.5 shrink-0 ${systemColor(m.kind)}`} />
+													<Icon
+														class={`h-3.5 w-3.5 shrink-0 ${systemColor(m.kind, m.activity_type)}`}
+													/>
 												{/if}
 												<span class="min-w-0 flex-1 break-words text-muted-foreground">
 													{#if actor}
