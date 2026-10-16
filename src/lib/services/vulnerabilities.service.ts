@@ -62,13 +62,19 @@ export const FINDING_EXPLOITATION_STATUSES = [
 ] as const;
 export type ExploitationStatus = (typeof FINDING_EXPLOITATION_STATUSES)[number];
 
-/** CISA VEX justifications, required (or a reason) for `not-affected`. */
+/**
+ * Justifications (the CISA VEX ones, then IRIS's own), required (or a
+ * reason) for `not-affected`.
+ */
 export const NOT_AFFECTED_JUSTIFICATIONS = [
 	'component_not_present',
 	'vulnerable_code_not_present',
 	'vulnerable_code_not_in_execute_path',
 	'vulnerable_code_cannot_be_controlled_by_adversary',
-	'inline_mitigations_already_exist'
+	'inline_mitigations_already_exist',
+	'version_not_affected',
+	'saas_deployment',
+	'on_prem_deployment'
 ] as const;
 export type NotAffectedJustification = (typeof NOT_AFFECTED_JUSTIFICATIONS)[number];
 

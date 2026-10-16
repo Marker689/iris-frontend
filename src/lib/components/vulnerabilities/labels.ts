@@ -110,7 +110,10 @@ export const NOT_AFFECTED_JUSTIFICATION_LABELS: Record<NotAffectedJustification,
 	vulnerable_code_not_in_execute_path: 'Vulnerable code not in execute path',
 	vulnerable_code_cannot_be_controlled_by_adversary:
 		'Vulnerable code cannot be controlled by adversary',
-	inline_mitigations_already_exist: 'Inline mitigations already exist'
+	inline_mitigations_already_exist: 'Inline mitigations already exist',
+	version_not_affected: 'Version not affected',
+	saas_deployment: 'SaaS deployment',
+	on_prem_deployment: 'On-Prem deployment'
 };
 
 /** Label lookup that tolerates values the backend may add later. */
