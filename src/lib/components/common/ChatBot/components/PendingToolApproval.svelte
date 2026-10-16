@@ -32,8 +32,12 @@
 				return `Close case #${a.case_identifier}.`;
 			case 'iris_cases_reopen':
 				return `Reopen case #${a.case_identifier}.`;
-			case 'iris_cases_update':
-				return `Update case #${a.case_identifier}.`;
+			case 'iris_cases_update': {
+				const p = (a.payload as Record<string, unknown>) ?? {};
+				return typeof p.case_description === 'string'
+					? `Update case #${a.case_identifier} and rewrite its summary.`
+					: `Update case #${a.case_identifier}.`;
+			}
 			case 'iris_cases_create':
 				return `Create a new case${
 					a.payload && typeof a.payload === 'object'
@@ -78,6 +82,60 @@
 				return `Create a note${a.title ? ` titled "${a.title}"` : ''} in this war room.`;
 			case 'iris_war_room_notes_update':
 				return describeNoteEdit(`war-room note #${a.note_id}`, a.title, a.content);
+			case 'iris_war_rooms_update': {
+				const changes = [
+					typeof a.name === 'string' ? `rename it to "${a.name}"` : '',
+					a.state ? `set its state to ${a.state}` : '',
+					a.severity_id !== undefined ? `set its severity to #${a.severity_id}` : '',
+					typeof a.description === 'string' ? 'rewrite its summary' : ''
+				].filter(Boolean);
+				return `Update this war room${changes.length ? `: ${changes.join(', ')}` : ''}.`;
+			}
+			case 'iris_war_room_sitreps_update':
+				return describeNoteEdit(`sitrep #${a.sitrep_id}`, a.title, a.body_md);
+			case 'iris_war_room_tasks_update':
+				return a.closed === true
+					? `Close war-room task #${a.task_id}.`
+					: a.closed === false
+						? `Reopen war-room task #${a.task_id}.`
+						: `Update war-room task #${a.task_id}.`;
+			case 'iris_war_room_decisions_update':
+				return `Update decision #${a.decision_id}${a.status ? ` and set it to ${a.status}` : ''}.`;
+			case 'iris_war_room_timeline_events_create':
+				return `Add the event${a.title ? ` "${a.title}"` : ''} to war-room timeline #${a.timeline_id}.`;
+			case 'iris_war_room_timeline_events_update':
+				return `Update war-room timeline event #${a.event_id}.`;
+			case 'iris_war_room_scope_assets_create': {
+				const asset = (a.asset as Record<string, unknown>) ?? {};
+				return `Create the asset${asset.asset_name ? ` "${asset.asset_name}"` : ''} in ${cases(a.case_ids)}.`;
+			}
+			case 'iris_war_room_scope_iocs_create': {
+				const ioc = (a.ioc as Record<string, unknown>) ?? {};
+				return `Create the IOC${ioc.ioc_value ? ` "${ioc.ioc_value}"` : ''} in ${cases(a.case_ids)}.`;
+			}
+			case 'iris_war_room_scope_assets_push':
+				return `Copy ${count(a.asset_ids, 'asset')} into ${cases(a.case_ids)}.`;
+			case 'iris_war_room_scope_iocs_push':
+				return `Copy ${count(a.ioc_ids, 'IOC')} into ${cases(a.case_ids)}.`;
+			case 'iris_war_room_scope_assets_flag':
+				return `${a.action === 'clear' ? 'Remove' : 'Set'} flag #${a.flag_id} ${
+					a.action === 'clear' ? 'from' : 'on'
+				} ${count(a.asset_ids, 'asset')}.`;
+			case 'iris_war_room_scope_assets_status':
+				return `Change the status of ${count(a.asset_ids, 'asset')}.`;
+			case 'iris_war_room_scope_registry_assets_attach':
+				return `Attach ${count(a.managed_asset_ids, 'registry asset')} to this war room${
+					a.case_id ? `, linked to case #${a.case_id}` : ''
+				}.`;
+			case 'iris_war_room_scope_staging_create': {
+				const p = (a.payload as Record<string, unknown>) ?? {};
+				const label = a.object_type === 'ioc' ? p.ioc_value : p.asset_name;
+				return `Stage the ${a.object_type === 'ioc' ? 'IOC' : 'asset'}${label ? ` "${label}"` : ''} in this war room.`;
+			}
+			case 'iris_war_room_scope_staging_push':
+				return `Create staged object #${a.staged_id} in ${
+					Array.isArray(a.case_ids) ? cases(a.case_ids) : 'its proposed cases'
+				}.`;
 			case 'iris_case_notes_directories_create':
 				return `Create a note folder${a.name ? ` named "${a.name}"` : ''} on case #${
 					a.case_identifier
@@ -126,6 +184,17 @@
 		}
 	}
 
+	function count(ids: unknown, noun: string): string {
+		const n = Array.isArray(ids) ? ids.length : 0;
+		return `${n} ${noun}${n === 1 ? '' : 's'}`;
+	}
+
+	function cases(ids: unknown): string {
+		return Array.isArray(ids) && ids.length
+			? `case${ids.length === 1 ? '' : 's'} ${ids.map((id) => `#${id}`).join(', ')}`
+			: 'no case';
+	}
+
 	function describeNoteEdit(target: string, title: unknown, content: unknown): string {
 		const rename = typeof title === 'string';
 		const rewrite = typeof content === 'string';
@@ -135,16 +204,30 @@
 		return `Update ${target}.`;
 	}
 
-	// A note edit replaces the whole body, so the analyst has to see what
-	// would be written — the one-line summary isn't enough to approve it.
+	// A note, summary or sitrep edit replaces the whole body, so the
+	// analyst has to see what would be written — the one-line summary
+	// isn't enough to approve it.
 	function proposedNoteBody(pc: PendingToolCall): string | null {
 		const a = pc.arguments as Record<string, unknown>;
-		const body =
-			pc.tool_name === 'iris_case_notes_update'
-				? ((a.payload as Record<string, unknown>) ?? {}).note_content
-				: pc.tool_name === 'iris_war_room_notes_update'
-					? a.content
-					: undefined;
+		const payload = (a.payload as Record<string, unknown>) ?? {};
+		let body: unknown;
+		switch (pc.tool_name) {
+			case 'iris_case_notes_update':
+				body = payload.note_content;
+				break;
+			case 'iris_cases_update':
+				body = payload.case_description;
+				break;
+			case 'iris_war_room_notes_update':
+				body = a.content;
+				break;
+			case 'iris_war_rooms_update':
+				body = a.description;
+				break;
+			case 'iris_war_room_sitreps_update':
+				body = a.body_md;
+				break;
+		}
 		return typeof body === 'string' ? body : null;
 	}
 
