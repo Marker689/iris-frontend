@@ -3,12 +3,15 @@
   no connectors and never runs; it sits under the other nodes, so it
   can be stretched behind the group it describes. Selected (and the
   workflow editable), its corners and sides resize it; the size is kept
-  in its config (`width` / `height`). The text is plain text.
+  in its config (`width` / `height`). The text is Markdown, rendered
+  under the untrusted profile: a workflow can be imported or drafted by
+  Yuki, so a note must not be able to fake IRIS UI or beacon out.
 -->
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import { NodeResizer, type NodeProps } from '@xyflow/svelte';
 	import { CircleAlertIcon } from 'lucide-svelte';
+	import { MarkDownPreview } from '$lib/components/common/MarkDown';
 	import {
 		NOTE_MAX_SIZE,
 		NOTE_MIN_SIZE,
@@ -59,11 +62,14 @@
 		<div class="shrink-0 truncate px-2.5 pt-2 text-xs font-semibold" title={label}>{label}</div>
 	{/if}
 	<div
-		class="nowheel min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-2 text-xs leading-snug"
+		class="nowheel min-h-0 flex-1 overflow-y-auto px-2.5 py-2 text-xs leading-snug"
 		data-testid={`wf-note-text-${id}`}
 	>
-		{#if text}{text}{:else}<span class="italic opacity-60">Empty note: write it in the panel.</span
-			>{/if}
+		{#if text}<MarkDownPreview
+				markdown={text}
+				untrusted
+				class="text-xs text-inherit [&_*]:text-inherit"
+			/>{:else}<span class="italic opacity-60">Empty note: write it in the panel.</span>{/if}
 	</div>
 	{#if errors.length}
 		<span

@@ -1314,7 +1314,7 @@
 			</div>
 		{:else if nodeType === NOTE_TYPE}
 			<label class="flex flex-col gap-1">
-				<span class={LABEL_CLASS}>Note (plain text)</span>
+				<span class={LABEL_CLASS}>Note (Markdown)</span>
 				<Textarea
 					rows={10}
 					class="text-xs"
@@ -1346,8 +1346,9 @@
 				</div>
 			</div>
 			<p class="text-2xs text-muted-foreground">
-				A note is never connected nor run. Select it on the canvas and drag its corners to resize
-				it; it stays behind the other nodes.
+				A note is never connected nor run. Markdown is rendered without images, and only with https
+				or relative links. Select it on the canvas and drag its corners to resize it; it stays
+				behind the other nodes.
 			</p>
 		{:else if nodeType === 'stop'}
 			{@render choice('status', 'End the run as', [
