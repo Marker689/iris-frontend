@@ -225,6 +225,7 @@
 	let dropTargetFolderId = $state<number | null>(null);
 
 	const moveSource = async (source: DragSource, targetFolderId: number) => {
+		dropTargetFolderId = null;
 		if (source.kind === 'file') {
 			const ok = await datastore.moveFile(source.id, targetFolderId);
 			toast({
@@ -238,7 +239,13 @@
 				variant: ok ? 'success' : 'destructive'
 			});
 		}
-		dropTargetFolderId = null;
+	};
+
+	// Files dragged in from the OS have no source row to fire `dragend`, so
+	// leaving the tree is what clears their highlight.
+	const handleTreeDragLeave = (event: DragEvent) => {
+		const tree = event.currentTarget as HTMLElement;
+		if (!tree.contains(event.relatedTarget as Node | null)) dropTargetFolderId = null;
 	};
 </script>
 
@@ -255,21 +262,25 @@
 {:else if Object.keys(datastore.tree.data).length === 0}
 	<p class="px-2 text-xs text-muted-foreground">{emptyMessage}</p>
 {:else}
-	<DatastoreTreeNode
-		tree={displayTree}
-		showRootBadge={!rootLabel}
-		{selectedFileId}
-		{dropTargetFolderId}
-		{filter}
-		onFolderAction={handleFolderAction}
-		onFileAction={handleFileAction}
-		onContextMenuFolder={(id, isRoot, x, y) =>
-			openContextMenu({ kind: 'folder', id, isRoot }, x, y)}
-		onContextMenuFile={(id, x, y) => openContextMenu({ kind: 'file', id }, x, y)}
-		onMove={(source, targetFolderId) => moveSource(source, targetFolderId)}
-		onUploadFiles={(folderId, files) => datastoreUploadFiles(datastore, folderId, files)}
-		onDragTargetChange={(id) => (dropTargetFolderId = id)}
-	/>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div ondragleave={handleTreeDragLeave}>
+		<DatastoreTreeNode
+			tree={displayTree}
+			{caseId}
+			showRootBadge={!rootLabel}
+			{selectedFileId}
+			{dropTargetFolderId}
+			{filter}
+			onFolderAction={handleFolderAction}
+			onFileAction={handleFileAction}
+			onContextMenuFolder={(id, isRoot, x, y) =>
+				openContextMenu({ kind: 'folder', id, isRoot }, x, y)}
+			onContextMenuFile={(id, x, y) => openContextMenu({ kind: 'file', id }, x, y)}
+			onMove={(source, targetFolderId) => moveSource(source, targetFolderId)}
+			onUploadFiles={(folderId, files) => datastoreUploadFiles(datastore, folderId, files)}
+			onDragTargetChange={(id) => (dropTargetFolderId = id)}
+		/>
+	</div>
 {/if}
 
 {#if contextMenu.open && contextMenu.target}
