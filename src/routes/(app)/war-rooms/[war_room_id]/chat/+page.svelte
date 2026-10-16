@@ -9,6 +9,7 @@
 <script lang="ts">
 	import { formatDate, formatDateTime, parseServerDate } from '$lib/utils/time-formatter';
 	import { onMount, onDestroy, tick } from 'svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import {
@@ -730,6 +731,12 @@
 
 	onDestroy(() => {
 		if (pollTimer) clearInterval(pollTimer);
+	});
+
+	// Pulled as soon as someone posts, edits, reacts or votes, instead of
+	// at the next poll tick (which stays as the fallback).
+	useWarRoomLive(['chat'], async () => {
+		await Promise.all([pollNewer(), loadThreads(), loadTopics()]);
 	});
 
 	// Used by the per-bubble delete affordance to decide whether to render

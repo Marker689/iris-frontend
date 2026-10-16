@@ -42,7 +42,11 @@
 		createWarRoomNoteSharesContext,
 		type WarRoomNoteSharesContext
 	} from './note-shares.svelte';
-	import { WAR_ROOM_CTX, type WarRoomContext } from '$lib/contexts/war-room.context.svelte';
+	import {
+		WAR_ROOM_CTX,
+		useWarRoomLive,
+		type WarRoomContext
+	} from '$lib/contexts/war-room.context.svelte';
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
 
 	let { children }: { children: Snippet } = $props();
@@ -149,6 +153,12 @@
 	onDestroy(() => {
 		notes.reset();
 		shares.reset();
+	});
+
+	// A note or folder created, renamed, moved, shared or deleted elsewhere.
+	// The note bodies are already live through the collaborative editor.
+	useWarRoomLive(['notes'], async () => {
+		await Promise.all([notes.loadTree(), shares.load()]);
 	});
 
 	const shareFromContextMenu = () => {

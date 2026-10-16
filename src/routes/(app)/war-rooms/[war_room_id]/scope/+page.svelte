@@ -47,6 +47,7 @@
 	import { SearchableSelect } from '$lib/components/ui/searchable-select';
 	import { toast } from '$lib/components/ui/toast';
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { assetFlags, loadAssetFlags } from '$lib/stores/asset-flags.store.svelte';
 	import type { AssetFlag } from '$lib/services/asset-flags.service';
 	import { AssetTypesService, type AssetType } from '$lib/services/asset-types.service';
@@ -531,6 +532,19 @@
 				void loadMatrix();
 			}
 		});
+	});
+
+	// Someone else changed the scope — here, on an attached case, or which
+	// cases are attached: re-read what is shown, on the same pages and
+	// keeping the selection.
+	useWarRoomLive(['scope', 'cases', 'vulnerabilities'], async () => {
+		await Promise.all([
+			loadAssets(),
+			loadIocs(),
+			loadStaging(),
+			loadAttached(),
+			canReadVulns ? loadMatrix() : null
+		]);
 	});
 
 	// Without vulnerability read (once known): off the Vulnerabilities tab,

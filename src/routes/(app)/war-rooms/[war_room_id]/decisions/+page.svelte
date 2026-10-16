@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
 	import { getContext, onDestroy, onMount } from 'svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import {
@@ -139,8 +140,8 @@
 	let now = $state(Date.now());
 	let ticker: ReturnType<typeof setInterval> | null = null;
 
-	const load = async () => {
-		loading = true;
+	const load = async (silent = false) => {
+		if (!silent) loading = true;
 		const res = await WarRoomDecisionsService.list(warRoomId);
 		if (res.ok && Array.isArray(res.data)) {
 			decisions = res.data;
@@ -177,6 +178,10 @@
 	onDestroy(() => {
 		if (ticker) clearInterval(ticker);
 	});
+
+	// Someone else proposed, edited, voted on or decided: re-read in place
+	useWarRoomLive(['decisions'], () => load(true));
+	useWarRoomLive(['members', 'cases'], loadSupporting);
 
 	const upsert = (d: WarRoomDecision) => {
 		const idx = decisions.findIndex((x) => x.decision_id === d.decision_id);

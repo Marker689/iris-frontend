@@ -5,6 +5,7 @@
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { page } from '$app/state';
 	import { Plus, Trash2, Search, Users } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -48,8 +49,8 @@
 	// Expansion — which team's members are open.
 	let expanded = $state<Set<number>>(new Set());
 
-	const load = async () => {
-		loading = true;
+	const load = async (silent = false) => {
+		if (!silent) loading = true;
 		const [teamsRes, membersRes, usersRes] = await Promise.all([
 			WarRoomTeamsService.list(warRoomId),
 			WarRoomsService.listMembers(warRoomId),
@@ -74,6 +75,9 @@
 	onMount(() => {
 		load();
 	});
+
+	// Teams and their members are both drawn from the room's members
+	useWarRoomLive(['teams', 'members'], () => load(true));
 
 	const memberById = $derived(new Map(members.map((m) => [m.user_id, m])));
 

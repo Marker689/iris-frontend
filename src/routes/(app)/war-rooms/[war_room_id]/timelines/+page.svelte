@@ -29,6 +29,7 @@
 		type WarRoomTimelineEvent
 	} from '$lib/services/war-room-timelines.service';
 	import { UsersService } from '$lib/services/users.service';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { safeHexColor } from '$lib/utils/color';
 	import TimelineView from './components/timeline-view.svelte';
 
@@ -90,8 +91,11 @@
 	let dragEventId = $state<number | null>(null);
 	let dragOverTimelineId = $state<number | null>(null);
 
-	const load = async () => {
-		loading = true;
+	// A load started later wins (a live refresh racing a selection change)
+	let loadSeq = 0;
+	const load = async (silent = false) => {
+		const seq = ++loadSeq;
+		if (!silent) loading = true;
 		// Native war-room timelines (list) + linked-case timelines (sidebar tree)
 		// in parallel — one round-trip's worth of latency for both trees.
 		const [tl, lc] = await Promise.all([
@@ -120,6 +124,7 @@
 					})
 				: Promise.resolve({ ok: true, data: [] as WarRoomTimelineEvent[] } as const)
 		]);
+		if (seq !== loadSeq) return;
 		const merged: WarRoomTimelineEvent[] = [];
 		if (ev.ok && Array.isArray(ev.data)) merged.push(...ev.data);
 		if (cev.ok && Array.isArray(cev.data)) merged.push(...cev.data);
@@ -186,6 +191,10 @@
 		await loadPreferences();
 		await load();
 	});
+
+	// Someone else changed a timeline, an event, or the attached cases
+	// (whose timelines are projected here): re-read in place.
+	useWarRoomLive(['timelines', 'cases'], () => load(true));
 
 	const toggleSelect = (id: number) => {
 		const next = new Set(selectedIds);

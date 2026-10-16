@@ -12,6 +12,7 @@
 <script lang="ts">
 	import { formatDateTime } from '$lib/utils/time-formatter';
 	import { getContext } from 'svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import {
 		DatabaseIcon,
 		File as FileIcon,
@@ -99,6 +100,9 @@
 			isRefreshing = false;
 		}
 	};
+
+	// Files added or removed elsewhere, or a case attached / detached
+	useWarRoomLive(['datastore', 'cases'], load);
 
 	$effect(() => {
 		if (!panel.state.open) return;

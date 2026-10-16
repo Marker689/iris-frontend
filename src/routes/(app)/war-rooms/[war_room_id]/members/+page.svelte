@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { page } from '$app/state';
 	import { Plus, Trash2, Search, Crown } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -35,8 +36,8 @@
 	// Access level: 2 = read_only, 4 = full_access.
 	let selectedAccess = $state<number>(4);
 
-	const load = async () => {
-		loading = true;
+	const load = async (silent = false) => {
+		if (!silent) loading = true;
 		const res = await WarRoomsService.listMembers(warRoomId);
 		if (res.ok && Array.isArray(res.data)) {
 			members = res.data;
@@ -59,6 +60,8 @@
 		load();
 		loadUsers();
 	});
+
+	useWarRoomLive(['members'], () => load(true));
 
 	const candidates = $derived.by(() => {
 		const have = new Set(members.map((m) => m.user_id));

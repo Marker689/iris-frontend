@@ -43,6 +43,7 @@
 		type WarRoomTaskFanOutSummary
 	} from '$lib/services/war-room-tasks.service';
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import FanOutDialog from './components/FanOutDialog.svelte';
 	import FanOutPanel from './components/FanOutPanel.svelte';
 	import TaskTeamChips from './components/TaskTeamChips.svelte';
@@ -277,6 +278,51 @@
 		loadUsedTags();
 		loadFanOutSummary();
 	});
+
+	// Someone else changed the tasks (or a team, or the attached cases a
+	// fan-out targets): re-read what is shown in place — the pages already
+	// loaded, the open subtrees and fan-out panels — without a spinner.
+	const refreshLive = async () => {
+		if (viewMode === 'board') {
+			const res = await WarRoomTasksService.list(warRoomId, buildFilterParams('all'));
+			if (res.ok && Array.isArray(res.data)) boardTasks = res.data;
+		} else {
+			let rows: WarRoomTask[] = [];
+			for (let p = 1; p <= _currentPage; p++) {
+				const res = await WarRoomTasksService.listPaginated(warRoomId, {
+					...buildFilterParams(),
+					page: p
+				});
+				if (!res.ok || !res.data || typeof res.data === 'string') return;
+				const env = res.data;
+				rows = [...rows, ...env.data];
+				totalParents = env.total;
+				nextPage = env.next_page;
+				if (env.next_page == null) break;
+			}
+			parents = rows;
+			// Subtrees not open are dropped, to be re-read when expanded
+			const subtrees = await Promise.all(
+				[...expanded].map(async (id) => {
+					const res = await WarRoomTasksService.list(warRoomId, { parent_task_id: id });
+					return [id, res.ok && Array.isArray(res.data) ? res.data : (childrenByParent[id] ?? [])];
+				})
+			);
+			childrenByParent = Object.fromEntries(subtrees);
+		}
+		void loadUsedTags();
+		void loadFanOutSummary();
+		fanOutReload = {
+			...fanOutReload,
+			...Object.fromEntries([...fanOutExpanded].map((id) => [id, (fanOutReload[id] ?? 0) + 1]))
+		};
+	};
+	useWarRoomLive(['tasks', 'cases'], refreshLive);
+	useWarRoomLive(['teams'], () => {
+		void loadTeams();
+		return refreshLive();
+	});
+	useWarRoomLive(['members'], loadUsers);
 
 	// -------- Fan-out --------
 	const openFanOut = (t: WarRoomTask) => {

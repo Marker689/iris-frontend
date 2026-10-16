@@ -12,6 +12,7 @@
 <script lang="ts">
 	import { AiSuggestionsChip, AiSuggestionsPanel } from '$lib/components/ai-suggestions';
 	import { getContext, onDestroy, onMount } from 'svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
 	import { canReadVulnerabilities } from '$lib/components/vulnerabilities/permissions';
 	import { page } from '$app/state';
@@ -147,6 +148,24 @@
 		}, REFRESH_MS);
 		document.addEventListener('visibilitychange', onVisibility);
 	});
+
+	// The board summarises the whole room: any change refreshes it, the
+	// poll above stays as the fallback when the socket is down.
+	useWarRoomLive(
+		[
+			'room',
+			'members',
+			'cases',
+			'tasks',
+			'scope',
+			'vulnerabilities',
+			'timelines',
+			'decisions',
+			'teams',
+			'sitreps'
+		],
+		() => load(true)
+	);
 
 	onDestroy(() => {
 		if (timer) clearInterval(timer);

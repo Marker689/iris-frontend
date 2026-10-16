@@ -2,6 +2,7 @@
 	import { apiErrorMessage } from '$lib/utils/error-handler';
 	import { formatDate, formatDateTime } from '$lib/utils/time-formatter';
 	import { getContext, onMount } from 'svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { page } from '$app/state';
 	import { Plus, Trash2, Download, Send, FileText, FileLock, Sparkles, Timer } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -88,8 +89,8 @@
 		if (selectedId != null) loadDetail(selectedId);
 	};
 
-	const loadDetail = async (id: number) => {
-		detailLoading = true;
+	const loadDetail = async (id: number, silent = false) => {
+		if (!silent) detailLoading = true;
 		const res = await WarRoomSitRepsService.get(warRoomId, id);
 		detailLoading = false;
 		if (res.ok && res.data && typeof res.data !== 'string') {
@@ -111,6 +112,24 @@
 		loadCadence();
 		const tick = setInterval(() => (now = Date.now()), 30_000);
 		return () => clearInterval(tick);
+	});
+
+	// Someone else drafted, renamed, published or deleted a sitrep, or
+	// changed the cadence. The body being edited here is a shared document
+	// already live, so an open editor is left alone.
+	useWarRoomLive(['sitreps'], async () => {
+		const res = await WarRoomSitRepsService.list(warRoomId);
+		if (res.ok && Array.isArray(res.data)) {
+			sitreps = res.data;
+			if (selectedId != null && !sitreps.some((s) => s.sitrep_id === selectedId)) {
+				selectedId = sitreps[0]?.sitrep_id ?? null;
+				editing = false;
+			}
+		}
+		await Promise.all([
+			loadCadence(),
+			selectedId != null && !editing ? loadDetail(selectedId, true) : null
+		]);
 	});
 
 	const select = (id: number) => {

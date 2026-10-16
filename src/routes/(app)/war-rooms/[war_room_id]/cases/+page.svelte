@@ -12,6 +12,7 @@
 <script lang="ts">
 	import { formatDate } from '$lib/utils/time-formatter';
 	import { onMount } from 'svelte';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { page } from '$app/state';
 	import {
 		Building2,
@@ -74,8 +75,8 @@
 	let selectedCache = $state<Record<number, Case>>({});
 	let attachNote = $state('');
 
-	const load = async () => {
-		loading = true;
+	const load = async (silent = false) => {
+		if (!silent) loading = true;
 		const res = await WarRoomsService.listCases(warRoomId);
 		if (res.ok && Array.isArray(res.data)) {
 			attachments = res.data;
@@ -83,7 +84,9 @@
 		loading = false;
 	};
 
-	onMount(load);
+	onMount(() => load());
+	// Attached / detached elsewhere, or an attached case changed (state, closure)
+	useWarRoomLive(['cases'], () => load(true));
 
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 	const onSearchCandidates = (value: string) => {

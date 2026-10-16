@@ -26,6 +26,7 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import UserAvatar from '$lib/components/common/UserAvatar.svelte';
 	import { WarRoomsService, type WarRoomPerson } from '$lib/services/war-rooms.service';
+	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 
 	const warRoomId = $derived(Number(page.params.war_room_id));
 
@@ -35,9 +36,9 @@
 	let listOpen = $state(false);
 	let listFilter = $state('');
 
-	const load = async () => {
+	const load = async (silent = false) => {
 		if (!warRoomId) return;
-		loading = true;
+		if (!silent) loading = true;
 		const res = await WarRoomsService.listPeople(warRoomId);
 		if (res.ok && Array.isArray(res.data)) {
 			people = res.data;
@@ -52,7 +53,9 @@
 		}
 	});
 
-	onMount(load);
+	onMount(() => load());
+	// Members, and the analysts of the attached cases
+	useWarRoomLive(['members', 'cases', 'teams'], () => load(true));
 
 	// Tight cap: the strip is a summary, the popover is the directory.
 	const MAX_VISIBLE = 5;
