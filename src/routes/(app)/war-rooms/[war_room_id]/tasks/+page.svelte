@@ -43,7 +43,8 @@
 		type WarRoomTaskFanOutSummary
 	} from '$lib/services/war-room-tasks.service';
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
-	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
+	import { useWarRoom, useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
+	import type { Paginated } from '$lib/services/api.service';
 	import FanOutDialog from './components/FanOutDialog.svelte';
 	import FanOutPanel from './components/FanOutPanel.svelte';
 	import TaskTeamChips from './components/TaskTeamChips.svelte';
@@ -119,6 +120,18 @@
 	let boardTasks = $state<WarRoomTask[]>([]);
 	let boardLoading = $state(false);
 
+	// A live refresh only lands if nothing changed the rows while it was
+	// in flight: `listReset` / `boardReset` count the full reloads (a
+	// filter change), `localEdits` every local write to the rows, and
+	// `boardMoves` the optimistic board moves not yet answered. Otherwise
+	// it would put back what was read before (rows of the old filter, a
+	// card in the column it just left); it asks to run again instead.
+	let listReset = 0;
+	let boardReset = 0;
+	let localEdits = 0;
+	let boardMoves = 0;
+	const warRoomCtx = useWarRoom();
+
 	type FormState = {
 		title: string;
 		description: string;
@@ -179,12 +192,14 @@
 	}
 
 	const loadFirstPage = async () => {
+		const reset = ++listReset;
 		loading = true;
 		_currentPage = 1;
 		const res = await WarRoomTasksService.listPaginated(warRoomId, {
 			...buildFilterParams(),
 			page: 1
 		});
+		if (reset !== listReset) return;
 		if (res.ok && res.data && typeof res.data !== 'string') {
 			const env = res.data;
 			parents = env.data;
@@ -201,12 +216,14 @@
 	const loadNextPage = async () => {
 		if (nextPage == null || loadingMore) return;
 		loadingMore = true;
+		const reset = listReset;
 		const res = await WarRoomTasksService.listPaginated(warRoomId, {
 			...buildFilterParams(),
 			page: nextPage
 		});
-		if (res.ok && res.data && typeof res.data !== 'string') {
+		if (reset === listReset && res.ok && res.data && typeof res.data !== 'string') {
 			const env = res.data;
+			localEdits++;
 			parents = [...parents, ...env.data];
 			totalParents = env.total;
 			nextPage = env.next_page;
@@ -224,6 +241,7 @@
 			parent_task_id: parentId
 		});
 		if (res.ok && Array.isArray(res.data)) {
+			localEdits++;
 			childrenByParent = { ...childrenByParent, [parentId]: res.data };
 		}
 	}
@@ -231,8 +249,10 @@
 	// The board shows the whole filtered set in one shot — a kanban that
 	// silently holds back page 2 reads as "this is everything".
 	const loadBoard = async () => {
+		const reset = ++boardReset;
 		boardLoading = true;
 		const res = await WarRoomTasksService.list(warRoomId, buildFilterParams('all'));
+		if (reset !== boardReset) return;
 		if (res.ok && Array.isArray(res.data)) boardTasks = res.data;
 		boardLoading = false;
 	};
@@ -283,24 +303,25 @@
 	// fan-out targets): re-read what is shown in place — the pages already
 	// loaded, the open subtrees and fan-out panels — without a spinner.
 	const refreshLive = async () => {
+		const edits = localEdits;
 		if (viewMode === 'board') {
+			const reset = boardReset;
 			const res = await WarRoomTasksService.list(warRoomId, buildFilterParams('all'));
+			if (reset !== boardReset || edits !== localEdits || boardMoves > 0) {
+				warRoomCtx.live.dispatch('tasks');
+				return;
+			}
 			if (res.ok && Array.isArray(res.data)) boardTasks = res.data;
 		} else {
-			let rows: WarRoomTask[] = [];
-			for (let p = 1; p <= _currentPage; p++) {
-				const res = await WarRoomTasksService.listPaginated(warRoomId, {
-					...buildFilterParams(),
-					page: p
-				});
-				if (!res.ok || !res.data || typeof res.data === 'string') return;
-				const env = res.data;
-				rows = [...rows, ...env.data];
-				totalParents = env.total;
-				nextPage = env.next_page;
-				if (env.next_page == null) break;
-			}
-			parents = rows;
+			const reset = listReset;
+			const pages = await Promise.all(
+				Array.from({ length: _currentPage }, (_, i) =>
+					WarRoomTasksService.listPaginated(warRoomId, {
+						...buildFilterParams(),
+						page: i + 1
+					})
+				)
+			);
 			// Subtrees not open are dropped, to be re-read when expanded
 			const subtrees = await Promise.all(
 				[...expanded].map(async (id) => {
@@ -308,6 +329,19 @@
 					return [id, res.ok && Array.isArray(res.data) ? res.data : (childrenByParent[id] ?? [])];
 				})
 			);
+			if (reset !== listReset || edits !== localEdits) {
+				warRoomCtx.live.dispatch('tasks');
+				return;
+			}
+			const envs: Paginated<WarRoomTask>[] = [];
+			for (const res of pages) {
+				if (!res.ok || !res.data || typeof res.data === 'string') return;
+				envs.push(res.data);
+			}
+			const last = envs[envs.length - 1];
+			parents = envs.flatMap((env) => env.data);
+			totalParents = last.total;
+			nextPage = last.next_page;
 			childrenByParent = Object.fromEntries(subtrees);
 		}
 		void loadUsedTags();
@@ -410,6 +444,7 @@
 	};
 
 	function upsertTask(next: WarRoomTask) {
+		localEdits++;
 		// The board holds a flat copy of the same rows; keep it level with
 		// the list so a create/edit/close made from either view shows up in
 		// both without a refetch.
@@ -435,6 +470,7 @@
 	}
 
 	function removeTaskLocally(taskId: number) {
+		localEdits++;
 		// Deleting a parent cascades to its subtasks server-side, and the
 		// board lists those as cards of their own — drop them too.
 		boardTasks = boardTasks.filter((x) => x.task_id !== taskId && x.parent_task_id !== taskId);
@@ -550,6 +586,7 @@
 	 * loaded and hide the parent's other subtasks.
 	 */
 	function syncTaskInPlace(next: WarRoomTask) {
+		localEdits++;
 		boardTasks = boardTasks.map((x) => (x.task_id === next.task_id ? next : x));
 		parents = parents.map((x) => (x.task_id === next.task_id ? next : x));
 		const pid = next.parent_task_id;
@@ -565,19 +602,22 @@
 		const previous = task.status_id;
 		// Optimistic: the card lands in the new column on drop, not after
 		// the round-trip.
+		localEdits++;
 		boardTasks = boardTasks.map((x) =>
 			x.task_id === task.task_id ? { ...x, status_id: statusId } : x
 		);
 
+		boardMoves++;
 		const res = await WarRoomTasksService.update(warRoomId, task.task_id, {
 			status_id: statusId
-		});
+		}).finally(() => boardMoves--);
 
 		if (res.ok && res.data && typeof res.data !== 'string') {
 			syncTaskInPlace(res.data as WarRoomTask);
 			return;
 		}
 
+		localEdits++;
 		boardTasks = boardTasks.map((x) =>
 			x.task_id === task.task_id ? { ...x, status_id: previous } : x
 		);

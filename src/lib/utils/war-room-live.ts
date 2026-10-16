@@ -3,7 +3,7 @@
  *
  * Every successful write to a war room (or to a case attached to it),
  * from the UI, the API or Yuki, makes the backend send
- * `war_room_changed {war_room_id, topic, actor_id}` on `/notifications`
+ * `war_room_changed {war_room_id, topic}` on `/notifications`
  * to whoever joined the room (`war_room_watch {war_room_id}`, checked as
  * a REST read). A push never carries data: the views of that topic
  * re-read it over REST, with the reader's own access.
@@ -40,7 +40,6 @@ export type WarRoomLiveTopic = (typeof WAR_ROOM_LIVE_TOPICS)[number];
 export interface WarRoomLiveEvent {
 	war_room_id: number;
 	topic: WarRoomLiveTopic;
-	actor_id: number | null;
 }
 
 export type WarRoomLiveHandler = (topics: Set<WarRoomLiveTopic>) => void | Promise<void>;
