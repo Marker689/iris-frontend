@@ -96,6 +96,18 @@
 				return `Escalate alert #${a.alert_identifier} into a new case.`;
 			case 'iris_alerts_merge':
 				return `Merge alert #${a.alert_identifier} into case #${a.target_case_id}.`;
+			case 'iris_alerts_create': {
+				const p = (a.payload as Record<string, unknown>) ?? {};
+				const iocs = Array.isArray(a.alert_iocs) ? a.alert_iocs.length : 0;
+				const assets = Array.isArray(a.alert_assets) ? a.alert_assets.length : 0;
+				const extras = [
+					iocs ? `${iocs} IOC${iocs === 1 ? '' : 's'}` : '',
+					assets ? `${assets} asset${assets === 1 ? '' : 's'}` : ''
+				].filter(Boolean);
+				return `Create an alert${p.alert_title ? ` "${p.alert_title}"` : ''} for customer #${
+					a.alert_customer_id
+				}${extras.length ? ` with ${extras.join(' and ')}` : ''}.`;
+			}
 			case 'iris_alerts_update': {
 				const p = (a.payload as Record<string, unknown>) ?? {};
 				const changed = Object.keys(p);
