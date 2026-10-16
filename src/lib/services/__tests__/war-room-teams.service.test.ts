@@ -50,6 +50,38 @@ describe('WarRoomTeamsService', () => {
 	});
 
 	// -----------------------------------------------------------------------
+	// listImportableGroups() / importGroup()
+	// -----------------------------------------------------------------------
+
+	describe('listImportableGroups()', () => {
+		it('calls GET /war-rooms/{warRoomId}/teams/groups', async () => {
+			const mock = { ok: true, status: 200, data: [] };
+			(ApiService.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mock);
+
+			const res = await WarRoomTeamsService.listImportableGroups(7);
+
+			expect(ApiService.get).toHaveBeenCalledWith('/war-rooms/7/teams/groups', {});
+			expect(res).toBe(mock);
+		});
+	});
+
+	describe('importGroup()', () => {
+		it('calls POST /war-rooms/{warRoomId}/teams/import with the body', async () => {
+			const mock = { ok: true, status: 201, data: {} };
+			(ApiService.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mock);
+
+			const res = await WarRoomTeamsService.importGroup(7, { group_id: 3, name: 'Blue' });
+
+			expect(ApiService.post).toHaveBeenCalledWith(
+				'/war-rooms/7/teams/import',
+				{ group_id: 3, name: 'Blue' },
+				{}
+			);
+			expect(res).toBe(mock);
+		});
+	});
+
+	// -----------------------------------------------------------------------
 	// get()
 	// -----------------------------------------------------------------------
 

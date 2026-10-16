@@ -40,6 +40,27 @@ export interface CreateTeamBody {
 	color?: string | null;
 }
 
+/** An IRIS group a team can be imported from. */
+export interface ImportableGroup {
+	group_id: number;
+	group_name: string;
+	group_description: string | null;
+	/** Active members only. */
+	member_ids: number[];
+}
+
+export interface ImportGroupBody {
+	group_id: number;
+	/** Defaults to the group name. */
+	name?: string;
+	color?: string | null;
+}
+
+export interface ImportedTeam extends WarRoomTeam {
+	/** Group members who weren't in the war room and joined it as responder. */
+	auto_added_room_member_ids: number[];
+}
+
 export interface UpdateTeamBody {
 	name?: string;
 	description?: string | null;
@@ -68,6 +89,26 @@ export class WarRoomTeamsService {
 		options: ApiOptions = {}
 	): Promise<RequestResponse<WarRoomTeam>> {
 		return ApiService.post<WarRoomTeam>(`/war-rooms/${warRoomId}/teams`, body, options);
+	}
+
+	/** IRIS groups (war-room writers only). */
+	static listImportableGroups(
+		warRoomId: number,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<ImportableGroup[]>> {
+		return ApiService.get<ImportableGroup[]>(`/war-rooms/${warRoomId}/teams/groups`, options);
+	}
+
+	/**
+	 * Create a team from an IRIS group: a copy of its name, description and
+	 * active members, edited afterwards like any team.
+	 */
+	static importGroup(
+		warRoomId: number,
+		body: ImportGroupBody,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<ImportedTeam>> {
+		return ApiService.post<ImportedTeam>(`/war-rooms/${warRoomId}/teams/import`, body, options);
 	}
 
 	static update(
