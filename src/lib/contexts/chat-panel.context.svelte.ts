@@ -481,20 +481,46 @@ export const createChatPanelContext = () => {
 		}
 	};
 
-	const send = (text: string) => {
-		if (!state.currentConversation) return;
+	/** Upload the files of a turn; null (and a toast) when one fails. */
+	const _uploadAttachments = async (
+		conversationId: number,
+		files: File[]
+	): Promise<number[] | null> => {
+		const ids: number[] = [];
+		for (const file of files) {
+			const res = await ChatService.uploadAttachment(conversationId, file);
+			if (!res.ok || !res.data || typeof res.data === 'string') {
+				const message = `Could not send ${file.name || 'the file'}: ${
+					res.error?.message ?? 'upload failed'
+				}`;
+				state.error = message;
+				toast({ title: message, variant: 'destructive' });
+				return null;
+			}
+			ids.push(res.data.attachment_id);
+		}
+		return ids;
+	};
+
+	/** Send a turn, with its files. False when it did not go out. */
+	const send = async (text: string, files: File[] = []): Promise<boolean> => {
+		if (!state.currentConversation) return false;
+		const conversationId = state.currentConversation.id;
 		state.error = null;
-		if (state.streamingConversationId === state.currentConversation.id) {
+		const attachmentIds = files.length ? await _uploadAttachments(conversationId, files) : [];
+		if (attachmentIds === null) return false;
+		if (state.currentConversation?.id !== conversationId) return false;
+		if (state.streamingConversationId === conversationId) {
 			// Mid-run: the backend queues the turn for the run's next step.
 			state.queuedTexts = [...state.queuedTexts, text];
-			_ensureSocket().send(state.currentConversation.id, text);
-			return;
+			_ensureSocket().send(conversationId, text, attachmentIds);
+			return true;
 		}
 		// Writes still waiting for approval are denied by the backend when
 		// a new turn comes in — the analyst has moved on.
 		state.pendingToolCalls = [];
 		state.streamingAssistant = { text: '', pending: '', toolUses: [] };
-		state.streamingConversationId = state.currentConversation.id;
+		state.streamingConversationId = conversationId;
 		// Prepend a one-line focus hint on the FIRST send of a
 		// conversation that was started with e.g. an alert focus. The
 		// LLM receives it as part of the user turn and treats the id
@@ -503,10 +529,11 @@ export const createChatPanelContext = () => {
 		// alert_identifier they can pull from the hint.
 		let outbound = text;
 		if (state.focusHint?.alertId != null) {
-			outbound = `[context: focused on alert #${state.focusHint.alertId}]\n\n${text}`;
+			outbound = `[context: focused on alert #${state.focusHint.alertId}]${text ? `\n\n${text}` : ''}`;
 			state.focusHint = null;
 		}
-		_ensureSocket().send(state.currentConversation.id, outbound);
+		_ensureSocket().send(conversationId, outbound, attachmentIds);
+		return true;
 	};
 
 	/**
@@ -521,9 +548,10 @@ export const createChatPanelContext = () => {
 			caseId?: number | null;
 			warRoomId?: number | null;
 			alertId?: number | null;
-		} = {}
+		} = {},
+		files: File[] = []
 	): Promise<boolean> => {
-		if (!text.trim()) return false;
+		if (!text.trim() && files.length === 0) return false;
 		if (!state.currentConversation) {
 			let convId: number | null = null;
 			if (scope.warRoomId != null) {
@@ -538,8 +566,7 @@ export const createChatPanelContext = () => {
 				state.focusHint = { alertId: scope.alertId };
 			}
 		}
-		send(text);
-		return true;
+		return send(text, files);
 	};
 
 	/**

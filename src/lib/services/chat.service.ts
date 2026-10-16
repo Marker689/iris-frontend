@@ -9,7 +9,7 @@
  * service in the app (`ApiService.get/post/delete`).
  */
 import { io, type Socket } from 'socket.io-client';
-import { socketOrigin } from '$lib/config/api.config';
+import { apiOrigin, socketOrigin } from '$lib/config/api.config';
 import { auth } from '$lib/stores/auth.store';
 import { ApiService } from './api.service';
 import type { ApiOptions, RequestResponse } from './api.service';
@@ -38,6 +38,24 @@ export interface ChatContentBlock {
 	content?: unknown;
 	[k: string]: unknown;
 }
+
+/**
+ * A file sent to Yuki, as the user message keeps it (`type:
+ * 'attachment'` block) and as the upload returns it. The kind comes
+ * from the bytes, server side.
+ */
+export interface ChatAttachment {
+	type: 'attachment';
+	attachment_id: number;
+	filename: string;
+	kind: 'image' | 'pdf' | 'text';
+	media_type: string;
+	size: number;
+}
+
+/** Mirrors the backend limits in `iris_engine/llm/attachments.py`. */
+export const CHAT_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+export const CHAT_ATTACHMENTS_MAX_PER_MESSAGE = 5;
 
 export interface ChatMessage {
 	id: number;
@@ -219,6 +237,76 @@ export class ChatService {
 		return ApiService.delete(`/case-chat/conversations/${conversationId}`, options);
 	}
 
+	/**
+	 * Upload a file for the next turn. Multipart, so it bypasses
+	 * ApiService (which forces JSON) and carries the bearer itself.
+	 */
+	static async uploadAttachment(
+		conversationId: number,
+		file: File
+	): Promise<RequestResponse<ChatAttachment>> {
+		const form = new FormData();
+		form.append('file', file, file.name || 'pasted-file');
+		const token = auth.getAccessToken();
+		const headers: Record<string, string> = {};
+		if (token) headers.Authorization = `Bearer ${token}`;
+		try {
+			const response = await fetch(
+				`${apiOrigin()}/api/v2/case-chat/conversations/${conversationId}/attachments`,
+				{ method: 'POST', body: form, headers }
+			);
+			let body: { data?: ChatAttachment; message?: string } | null = null;
+			try {
+				body = await response.json();
+			} catch {
+				body = null;
+			}
+			if (!response.ok) {
+				return {
+					status: response.status,
+					data: null,
+					ok: false,
+					error: {
+						message: body?.message ?? `Upload failed (${response.status})`,
+						type: 'api-error',
+						status: response.status
+					}
+				};
+			}
+			return {
+				status: response.status,
+				data: body?.data ?? (body as unknown as ChatAttachment),
+				ok: true
+			};
+		} catch (err) {
+			return {
+				status: 0,
+				data: null,
+				ok: false,
+				error: {
+					message: err instanceof Error ? err.message : 'Network error',
+					type: 'network',
+					status: 0
+				}
+			};
+		}
+	}
+
+	/** The bytes of a sent file, fetched with the bearer (a bare URL would 401). */
+	static async fetchAttachment(attachmentId: number): Promise<Blob | null> {
+		const token = auth.getAccessToken();
+		const headers: Record<string, string> = {};
+		if (token) headers.Authorization = `Bearer ${token}`;
+		try {
+			const response = await fetch(`${apiOrigin()}/api/v2/case-chat/attachments/${attachmentId}`, {
+				headers
+			});
+			return response.ok ? await response.blob() : null;
+		} catch {
+			return null;
+		}
+	}
+
 	static async renameConversation(
 		conversationId: number,
 		title: string,
@@ -318,10 +406,11 @@ export class ChatSocketClient {
 		});
 	}
 
-	send(conversationId: number, userText: string): void {
+	send(conversationId: number, userText: string, attachmentIds: number[] = []): void {
 		this.socket?.emit('send', {
 			conversation_id: conversationId,
-			user_text: userText
+			user_text: userText,
+			...(attachmentIds.length ? { attachment_ids: attachmentIds } : {})
 		});
 	}
 

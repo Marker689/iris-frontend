@@ -608,7 +608,7 @@
 							<div
 								class="max-w-[80%] rounded-md border border-dashed border-primary/50 px-3 py-2 text-muted-foreground"
 							>
-								<p class="whitespace-pre-wrap">{queued}</p>
+								<p class="whitespace-pre-wrap">{queued || 'Files'}</p>
 								<p class="mt-1 text-2xs">Queued — Yuki reads this at its next step</p>
 							</div>
 						</div>
@@ -645,12 +645,16 @@
 				{disabled}
 				{streaming}
 				onStop={chat.stop}
-				onSend={(text) =>
-					chat.sendOrStart(text, {
-						caseId: currentCaseId,
-						warRoomId: currentWarRoomId,
-						alertId: currentAlertId
-					})}
+				onSend={(text, files) =>
+					chat.sendOrStart(
+						text,
+						{
+							caseId: currentCaseId,
+							warRoomId: currentWarRoomId,
+							alertId: currentAlertId
+						},
+						files
+					)}
 			/>
 
 			<!-- Slim token/context indicator strip. Self-hides when the

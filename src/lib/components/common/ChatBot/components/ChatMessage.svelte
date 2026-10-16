@@ -1,7 +1,7 @@
 <!--
   One message bubble in the chat thread.
 
-  User bubbles render plain text; assistant bubbles render markdown via
+  User bubbles render plain text and the files sent with it; assistant bubbles render markdown via
   the existing MarkDownPreview component. Tool-role messages are hidden
   from the analyst's view (they're LLM plumbing) — their results are
   shown inside the associated assistant bubble's tool cards.
@@ -9,7 +9,8 @@
 <script lang="ts">
 	import { SparklesIcon, UserIcon } from 'lucide-svelte';
 	import MarkDownPreview from '$lib/components/common/MarkDown/MarkDownPreview.svelte';
-	import type { ChatMessage, ChatContentBlock } from '$lib/services/chat.service';
+	import type { ChatAttachment, ChatMessage, ChatContentBlock } from '$lib/services/chat.service';
+	import ChatAttachmentView from './ChatAttachmentView.svelte';
 	import ToolCallCard from './ToolCallCard.svelte';
 
 	let { message }: { message: ChatMessage } = $props();
@@ -19,6 +20,12 @@
 	);
 	const toolUseBlocks = $derived(
 		(message.content ?? []).filter((b: ChatContentBlock) => b.type === 'tool_use')
+	);
+
+	const attachmentBlocks = $derived(
+		(message.content ?? []).filter(
+			(b: ChatContentBlock) => b.type === 'attachment'
+		) as unknown as ChatAttachment[]
 	);
 
 	const isUser = $derived(message.role === 'user');
@@ -44,7 +51,14 @@
 				: 'bg-muted'}"
 		>
 			{#if isUser}
-				<p class="whitespace-pre-wrap">{combinedText}</p>
+				{#if combinedText}<p class="whitespace-pre-wrap">{combinedText}</p>{/if}
+				{#if attachmentBlocks.length > 0}
+					<div class="flex flex-col items-end gap-1" class:mt-2={!!combinedText}>
+						{#each attachmentBlocks as attachment (attachment.attachment_id)}
+							<ChatAttachmentView {attachment} />
+						{/each}
+					</div>
+				{/if}
 			{:else if combinedText}
 				<MarkDownPreview markdown={combinedText} />
 			{/if}
