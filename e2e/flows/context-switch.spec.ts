@@ -3,8 +3,8 @@ import { E2E_USERNAME, login } from '../helpers/auth';
 import { adminApi, seed, cleanup } from '../helpers/api';
 
 // The topbar case switcher (src/lib/components/navigation/TopBar/TopBar.svelte).
-// On a `/case/...` route it renders the current case's name, and the backend
-// prefixes case names with `#<id> - `, so the id is the stable part to assert on.
+// On a `/case/...` route it renders only the current case's `#<id>` — the full
+// name lives in the case header below it — so the id is what we assert on.
 const TOPBAR = 'header.min-h-14';
 
 test.describe('Complex flow · case context switch', () => {

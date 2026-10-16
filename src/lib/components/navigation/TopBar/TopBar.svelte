@@ -124,7 +124,7 @@
 </script>
 
 <!--
-  Flex bar with three groups: case title (left, hugs left), case-section
+  Flex bar with three groups: case switcher (left, hugs left), case-section
   nav (centre, mx-auto), action cluster (right, hugs right). The
   `mx-auto` on the centre wrapper distributes whatever empty space is
   left between the title and the action cluster evenly into the margins
@@ -133,25 +133,36 @@
   (rather than centred in the full viewport). When the gap shrinks past
   the nav's intrinsic width, the `min-w-0 overflow-hidden` lets the
   inline strip yield gracefully and the dropdown variant takes over.
+
+  The header is a size container so the tab strip switches on the bar's
+  own width, not the viewport's — the sidebar beside it eats a variable
+  share of the viewport depending on whether it is collapsed.
 -->
 <header
 	style="background-color: hsl(var(--iris-blue));"
-	class="shadow-elevation-1 flex max-h-14 min-h-14 items-center gap-3 px-3 text-white sm:px-5"
+	class="shadow-elevation-1 flex max-h-14 min-h-14 items-center gap-3 px-3 text-white @container sm:px-5"
 >
 	{#if case_id !== null && pathname.startsWith('/case') && pathname !== '/cases'}
-		<div class="flex min-w-0 items-center gap-2">
-			<button
-				onclick={() => (showSwitchContext = true)}
-				title={currentCaseTitle}
-				class="min-w-0 truncate text-sm font-medium text-white/90 transition-colors hover:text-white"
-			>
-				{currentCaseTitle}
-			</button>
-		</div>
+		<!--
+		  Only the case number here: the case header right below already
+		  carries the full name, and printing it twice cost the tab strip
+		  the room it needs to stay inline on laptop widths. The full name
+		  stays reachable through the tooltip.
+		-->
+		<button
+			onclick={() => (showSwitchContext = true)}
+			title={`${currentCaseTitle ?? ''} — Switch context (Ctrl + K)`}
+			aria-label={`Switch context, current case: ${currentCaseTitle ?? `#${case_id}`}`}
+			class="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/15 bg-white/10 px-2.5 font-mono text-xs font-medium text-white transition-colors hover:bg-white/20"
+		>
+			#{case_id}
+			<ChevronDownIcon size="14" class="opacity-70" />
+		</button>
 
 		<!--
-		  Centre grid cell. Contains BOTH the inline tab strip (visible at
-		  2xl+) and the dropdown trigger (visible below 2xl). Both surfaces
+		  Centre grid cell. Contains BOTH the inline tab strip (visible once
+		  the bar is @6xl / 72rem wide) and the dropdown trigger (visible
+		  below that). Both surfaces
 		  live inside one wrapping `<div>` so they occupy a single grid
 		  track regardless of which one is currently rendered — previously
 		  they were siblings of the header itself, so the `<DropdownMenu.Root>`
@@ -160,12 +171,12 @@
 
 		  `min-w-0 overflow-hidden` lets the inline strip be clipped if the
 		  viewport really can't fit it (rather than spilling into the next
-		  cell); the dropdown variant takes over below `2xl` where the strip
+		  cell); the dropdown variant takes over below `@6xl` where the strip
 		  is hidden outright.
 		-->
 		<div class="mx-auto flex h-full min-w-0 items-stretch overflow-hidden">
 			<nav
-				class="hidden h-full min-w-0 items-stretch overflow-hidden 2xl:flex"
+				class="hidden h-full min-w-0 items-stretch overflow-hidden @6xl:flex"
 				aria-label="Case sections"
 			>
 				{#each caseButtons as button}
@@ -189,7 +200,7 @@
 			</nav>
 
 			<DropdownMenu.Root>
-				<DropdownMenu.Trigger class="flex items-center 2xl:hidden">
+				<DropdownMenu.Trigger class="flex items-center @6xl:hidden">
 					<span
 						class="flex items-center gap-1 border-b-2 border-transparent px-2 py-1.5 text-sm font-medium text-white/85 transition-colors hover:text-white aria-expanded:border-white"
 					>

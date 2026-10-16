@@ -656,7 +656,10 @@
 				class="min-w-0 truncate text-[15px] font-semibold leading-tight tracking-tight text-foreground"
 				title={caseData?.case_name}
 			>
-				{caseData?.case_name?.split(' - ')[1] ?? caseData?.case_name}
+				<!-- Strip only the `#id - ` prefix the backend bakes into the
+				     name: splitting on ' - ' dropped everything after a second
+				     dash ("X - Y - Z" showed as "Y"). -->
+				{caseData?.case_name?.replace(/^#\d+\s*-\s*/, '')}
 			</h2>
 
 			<!--
