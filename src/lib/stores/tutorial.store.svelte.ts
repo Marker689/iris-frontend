@@ -4,7 +4,7 @@ import { onApiEvent, type ApiEvent } from '$lib/services/api-events';
 import { UsersService } from '$lib/services/users.service';
 import { tutorialById } from '$lib/tutorials';
 import { findAnchor } from '$lib/tutorials/dom';
-import { captureVars, interpolate, matchesApi, matchesPath } from '$lib/tutorials/logic';
+import { bindApi, bindPath, captureVars, interpolate } from '$lib/tutorials/logic';
 import type { Tutorial, TutorialRun, TutorialStep, TutorialVars } from '$lib/tutorials/types';
 
 /**
@@ -19,6 +19,9 @@ import type { Tutorial, TutorialRun, TutorialStep, TutorialVars } from '$lib/tut
  * Steps complete on their own: API steps through the `api-events` feed,
  * route and element steps through `observe()`, which the overlay calls
  * on every animation frame.
+ *
+ * Tutorials written by administrators are not in the bundle: the run
+ * carries their definition (`run.definition`).
  */
 const STORAGE_KEY = 'iris_tutorial_run';
 const PREFERENCE_KEY = 'tutorials';
@@ -40,6 +43,16 @@ const persist = () => {
 	else localStorage.removeItem(STORAGE_KEY);
 };
 
+const isTutorial = (value: unknown): value is Tutorial => {
+	if (!value || typeof value !== 'object') return false;
+	const candidate = value as Partial<Tutorial>;
+	return (
+		typeof candidate.id === 'string' &&
+		typeof candidate.title === 'string' &&
+		Array.isArray(candidate.steps)
+	);
+};
+
 const isRun = (value: unknown): value is TutorialRun => {
 	if (!value || typeof value !== 'object') return false;
 	const run = value as Partial<TutorialRun>;
@@ -47,12 +60,15 @@ const isRun = (value: unknown): value is TutorialRun => {
 		typeof run.tutorialId === 'string' &&
 		typeof run.step === 'number' &&
 		!!run.vars &&
-		typeof run.vars === 'object'
+		typeof run.vars === 'object' &&
+		(run.definition === undefined || isTutorial(run.definition))
 	);
 };
 
-const currentTutorial = (): Tutorial | null =>
-	state.run ? (tutorialById(state.run.tutorialId) ?? null) : null;
+const resolve = (run: TutorialRun): Tutorial | null =>
+	run.definition ?? tutorialById(run.tutorialId) ?? null;
+
+const currentTutorial = (): Tutorial | null => (state.run ? resolve(state.run) : null);
 
 const currentStep = (): TutorialStep | null =>
 	currentTutorial()?.steps[state.run?.step ?? 0] ?? null;
@@ -60,8 +76,9 @@ const currentStep = (): TutorialStep | null =>
 const handleApiEvent = (event: ApiEvent) => {
 	const run = state.run;
 	const wait = currentStep()?.waitFor;
-	if (!run || wait?.kind !== 'api' || !matchesApi(wait, event, run.vars)) return;
-	advance(captureVars(wait, event.data));
+	if (!run || wait?.kind !== 'api') return;
+	const bound = bindApi(wait, event, run.vars);
+	if (bound) advance({ ...bound, ...captureVars(wait, event.data) });
 };
 
 const listen = () => {
@@ -87,10 +104,15 @@ const recordCompletion = async (tutorialId: string) => {
 
 const finish = () => {
 	const tutorial = currentTutorial();
+	const preview = state.run?.preview ?? false;
 	state.run = null;
 	stopListening();
 	persist();
 	if (!tutorial) return;
+	if (preview) {
+		toast({ title: `Preview finished: ${tutorial.title}`, variant: 'success' });
+		return;
+	}
 	toast({ title: `Tutorial complete: ${tutorial.title}`, variant: 'success' });
 	void recordCompletion(tutorial.id);
 };
@@ -137,7 +159,7 @@ export const tutorial = {
 		hydrated = true;
 		try {
 			const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
-			const tutorial = isRun(parsed) ? tutorialById(parsed.tutorialId) : undefined;
+			const tutorial = isRun(parsed) ? resolve(parsed) : null;
 			// A run saved by an older build may point past the last step.
 			if (isRun(parsed) && tutorial && parsed.step < tutorial.steps.length) {
 				state.run = parsed;
@@ -157,9 +179,22 @@ export const tutorial = {
 		}
 	},
 
-	start(tutorialId: string) {
-		if (!tutorialById(tutorialId)) return;
-		state.run = { tutorialId, step: 0, vars: {} };
+	/**
+	 * Starts a built-in tutorial by id, or any tutorial passed whole
+	 * (administrator-written ones). `preview` runs a draft without
+	 * recording completion.
+	 */
+	start(source: string | Tutorial, options: { preview?: boolean } = {}) {
+		const definition = typeof source === 'string' ? undefined : source;
+		const tutorialId = typeof source === 'string' ? source : source.id;
+		if (definition ? definition.steps.length === 0 : !tutorialById(tutorialId)) return;
+		state.run = {
+			tutorialId,
+			step: 0,
+			vars: {},
+			...(definition ? { definition } : {}),
+			...(options.preview ? { preview: true } : {})
+		};
 		state.minimised = false;
 		listen();
 		persist();
@@ -194,7 +229,9 @@ export const tutorial = {
 		const run = state.run;
 		const wait = currentStep()?.waitFor;
 		if (!run || !wait) return;
-		if (wait.kind === 'route' && matchesPath(wait.path, pathname, run.vars)) advance();
-		else if (wait.kind === 'element' && isOnScreen(interpolate(wait.anchor, run.vars))) advance();
+		if (wait.kind === 'route') {
+			const bound = bindPath(wait.path, pathname, run.vars);
+			if (bound) advance(bound);
+		} else if (wait.kind === 'element' && isOnScreen(interpolate(wait.anchor, run.vars))) advance();
 	}
 };

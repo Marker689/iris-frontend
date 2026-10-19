@@ -13,6 +13,11 @@
 	import { fillElement, findAnchor, findFirstAnchor } from '$lib/tutorials/dom';
 	import { interpolate, normalisePath, parseInline } from '$lib/tutorials/logic';
 	import type { TutorialFill } from '$lib/tutorials/types';
+	import {
+		CUSTOM_TUTORIAL_PREFIX,
+		TutorialsService,
+		toEngineTutorial
+	} from '$lib/services/tutorials.service';
 
 	/**
 	 * Guided-tutorial chrome: a docked panel with the current step and a
@@ -23,7 +28,8 @@
 	 * `dialog-content.svelte`).
 	 *
 	 * `?tutorial=<id>` on any app URL starts a tutorial (links in docs,
-	 * the e2e suite).
+	 * the e2e suite); `custom-<n>` ids are the published tutorials
+	 * administrators wrote.
 	 */
 
 	type Rect = { top: number; left: number; width: number; height: number };
@@ -99,7 +105,7 @@
 
 		const requested = page.url.searchParams.get('tutorial');
 		if (requested) {
-			tutorial.start(requested);
+			void startRequested(requested);
 			const url = new URL(page.url);
 			url.searchParams.delete('tutorial');
 			void goto(`${url.pathname}${url.search}${url.hash}`, {
@@ -115,6 +121,19 @@
 		});
 		return () => cancelAnimationFrame(frame);
 	});
+
+	const startRequested = async (id: string) => {
+		if (!id.startsWith(CUSTOM_TUTORIAL_PREFIX)) {
+			tutorial.start(id);
+			return;
+		}
+		const res = await TutorialsService.listPublished();
+		const found = Array.isArray(res.data)
+			? res.data.map(toEngineTutorial).find((item) => item.id === id)
+			: undefined;
+		if (found) tutorial.start(found);
+		else toast({ title: 'This tutorial is not available', variant: 'warning' });
+	};
 
 	const fill = (item: TutorialFill) => {
 		const el = findAnchor(interpolate(item.anchor, vars));

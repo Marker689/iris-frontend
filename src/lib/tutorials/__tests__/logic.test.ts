@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	anchorSelector,
+	bindApi,
+	bindPath,
 	captureVars,
 	interpolate,
 	matchesApi,
@@ -8,6 +10,7 @@ import {
 	missingVars,
 	normalisePath,
 	parseInline,
+	pathVars,
 	readPath,
 	unwrapEnvelope
 } from '../logic';
@@ -51,12 +54,48 @@ describe('matchesPath', () => {
 		expect(matchesPath('/case/{caseId}/assets', '/case/12/assets/4', { caseId: 12 })).toBe(false);
 	});
 
-	it('never matches while a variable is missing', () => {
+	it('never matches a literal placeholder left in a URL', () => {
 		expect(matchesPath('/case/{caseId}/assets', '/case/{caseId}/assets', {})).toBe(false);
+	});
+
+	it('matches any one segment with *', () => {
+		expect(matchesPath('/alerts/escalate/*', '/alerts/escalate/42', {})).toBe(true);
+		expect(matchesPath('/alerts/escalate/*', '/alerts/escalate/42/x', {})).toBe(false);
+		expect(matchesPath('/alerts/escalate/*', '/alerts/escalate', {})).toBe(false);
+	});
+
+	it('escapes regexp characters in the template', () => {
+		expect(matchesPath('/a.b', '/a.b', {})).toBe(true);
+		expect(matchesPath('/a.b', '/axb', {})).toBe(false);
 	});
 
 	it('accepts a regexp', () => {
 		expect(matchesPath(/^\/case\/\d+$/, '/case/7?x=1', {})).toBe(true);
+	});
+});
+
+describe('bindPath', () => {
+	it('binds variables not known yet to their segment', () => {
+		expect(bindPath('/case/{caseId}/iocs', '/case/12/iocs', {})).toEqual({ caseId: 12 });
+		expect(bindPath('/war-rooms/{room}', '/war-rooms/ab%20c', {})).toEqual({ room: 'ab c' });
+	});
+
+	it('binds nothing for known variables and wildcards', () => {
+		expect(bindPath('/case/{caseId}/*', '/case/12/iocs', { caseId: 12 })).toEqual({});
+	});
+
+	it('requires a repeated variable to repeat its value', () => {
+		expect(bindPath('/x/{id}/y/{id}', '/x/3/y/3', {})).toEqual({ id: 3 });
+		expect(bindPath('/x/{id}/y/{id}', '/x/3/y/4', {})).toBeNull();
+	});
+
+	it('returns null on a mismatch', () => {
+		expect(bindPath('/case/{caseId}/iocs', '/case/12/notes', {})).toBeNull();
+	});
+
+	it('lists the variables a template can bind', () => {
+		expect(pathVars('/cases/{caseId}/iocs/{iocId}')).toEqual(['caseId', 'iocId']);
+		expect(pathVars(/^\/x$/)).toEqual([]);
 	});
 });
 
@@ -65,6 +104,11 @@ describe('matchesApi', () => {
 
 	it('matches a successful call with the same method and path', () => {
 		expect(matchesApi(wait, event(), { caseId: 12 })).toBe(true);
+	});
+
+	it('binds path variables of the call', () => {
+		expect(bindApi(wait, event(), {})).toEqual({ caseId: 12 });
+		expect(bindApi(wait, event({ ok: false }), {})).toBeNull();
 	});
 
 	it('ignores failed calls and other methods', () => {

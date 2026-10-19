@@ -5,6 +5,7 @@ import {
 	CircleUserIcon,
 	FilterIcon,
 	FlagIcon,
+	GraduationCapIcon,
 	KeyRoundIcon,
 	LayersIcon,
 	LockKeyholeIcon,
@@ -66,6 +67,7 @@ export const SETTINGS_PAGES: SettingsPage[] = [
 	{ icon: PlugIcon, label: 'MCP server', href: '/mcp', group: 'AI' },
 	{ icon: BellIcon, label: 'Notifications', href: '/notifications', group: 'Platform' },
 	{ icon: MegaphoneIcon, label: 'Banners', href: '/banners', group: 'Platform' },
+	{ icon: GraduationCapIcon, label: 'Tutorials', href: '/tutorials', group: 'Platform' },
 	{ icon: SettingsIcon, label: 'Server settings', href: '/server', group: 'Platform' }
 ];
 
@@ -131,6 +133,7 @@ export const SETTINGS_PAGE_PERMISSIONS: Record<string, PermissionName> = {
 	'/ai-workflows': 'ai_workflows_read',
 	'/keystore': 'ai_workflows_read',
 	'/banners': 'server_administrator',
+	'/tutorials': 'server_administrator',
 	'/server': 'server_administrator'
 };
 

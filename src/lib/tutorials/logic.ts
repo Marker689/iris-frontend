@@ -21,18 +21,76 @@ export const normalisePath = (path: string): string => {
 	return bare.length > 1 ? bare.replace(/\/+$/, '') : bare;
 };
 
+const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const SEGMENT_TOKEN_RE = /\{([A-Za-z_][A-Za-z0-9_]*)\}|\*/g;
+
+const asVar = (raw: string): string | number => {
+	let decoded = raw;
+	try {
+		decoded = decodeURIComponent(raw);
+	} catch {
+		// Keep the raw segment.
+	}
+	return /^\d+$/.test(decoded) && decoded.length < 16 ? Number(decoded) : decoded;
+};
+
+/**
+ * Matches `actual` against a path template and returns the variables the
+ * match binds, or `null` when it does not match.
+ *
+ * - `{name}` already in `vars` must match its value exactly;
+ * - `{name}` not known yet matches any one segment and is bound to it, so
+ *   a step can pick the case id off the URL the user navigated to;
+ * - `*` matches any one segment and binds nothing.
+ */
+export const bindPath = (
+	pattern: string | RegExp,
+	actual: string,
+	vars: TutorialVars
+): TutorialVars | null => {
+	const path = normalisePath(actual);
+	if (pattern instanceof RegExp) return pattern.test(path) ? {} : null;
+	const template = normalisePath(pattern);
+	const names: string[] = [];
+	let source = '';
+	let last = 0;
+	for (const match of template.matchAll(SEGMENT_TOKEN_RE)) {
+		const index = match.index ?? 0;
+		source += escapeRe(template.slice(last, index));
+		const name = match[1];
+		if (name === undefined) source += '[^/]+';
+		else if (vars[name] !== undefined) source += escapeRe(String(vars[name]));
+		else if (names.includes(name)) source += `\\${names.indexOf(name) + 1}`;
+		else {
+			names.push(name);
+			// Never bind a literal `{x}` left in a URL by a missing variable.
+			source += '([^/{}]+)';
+		}
+		last = index + match[0].length;
+	}
+	source += escapeRe(template.slice(last));
+	const match = new RegExp(`^${source}$`).exec(path);
+	if (!match) return null;
+	return Object.fromEntries(names.map((name, i) => [name, asVar(match[i + 1])]));
+};
+
 export const matchesPath = (
 	pattern: string | RegExp,
 	actual: string,
 	vars: TutorialVars
-): boolean => {
-	if (pattern instanceof RegExp) return pattern.test(normalisePath(actual));
-	if (missingVars(pattern, vars).length > 0) return false;
-	return normalisePath(interpolate(pattern, vars)) === normalisePath(actual);
-};
+): boolean => bindPath(pattern, actual, vars) !== null;
+
+/** Variables bound by the call, or `null` when it is not the awaited one. */
+export const bindApi = (wait: ApiWait, event: ApiEvent, vars: TutorialVars): TutorialVars | null =>
+	event.ok && event.method === wait.method ? bindPath(wait.path, event.path, vars) : null;
 
 export const matchesApi = (wait: ApiWait, event: ApiEvent, vars: TutorialVars): boolean =>
-	event.ok && event.method === wait.method && matchesPath(wait.path, event.path, vars);
+	bindApi(wait, event, vars) !== null;
+
+/** Names a path template binds when its variables are not known yet. */
+export const pathVars = (pattern: string | RegExp): string[] =>
+	pattern instanceof RegExp ? [] : [...pattern.matchAll(VAR_RE)].map((m) => m[1]);
 
 /**
  * Some v2 endpoints wrap the entity in `{ status, message, data }`,

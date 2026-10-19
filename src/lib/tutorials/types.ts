@@ -14,13 +14,21 @@ export type TutorialVars = Record<string, string | number>;
 export type ApiWait = {
 	kind: 'api';
 	method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-	/** Template matched exactly (`/cases/{caseId}/assets`) or a regexp. */
+	/**
+	 * Template matched exactly (`/cases/{caseId}/assets`) or a regexp.
+	 * `*` matches any one segment; a `{var}` not captured yet matches any
+	 * one segment and captures it.
+	 */
 	path: string | RegExp;
 	/** `{ varName: 'dotted.path' }` read off the response body. */
 	capture?: Record<string, string>;
 };
 
-/** Done when the browser is on this path (query string ignored). */
+/**
+ * Done when the browser is on this path (query string ignored). Same
+ * template rules as `ApiWait.path`, so `/case/{caseId}` picks up the id
+ * of whichever case the user opened.
+ */
 export type RouteWait = { kind: 'route'; path: string | RegExp };
 
 /** Done when the anchor is on screen, e.g. a dialog that opened. */
@@ -64,4 +72,11 @@ export type TutorialRun = {
 	tutorialId: string;
 	step: number;
 	vars: TutorialVars;
+	/**
+	 * The tutorial itself, for those not built in (written by an
+	 * administrator), so a reload resumes without fetching it again.
+	 */
+	definition?: Tutorial;
+	/** An administrator trying a draft: completion is not recorded. */
+	preview?: boolean;
 };

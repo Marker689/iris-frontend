@@ -167,4 +167,55 @@ describe('tutorial store', () => {
 		tutorial.back();
 		expect(tutorial.run?.step).toBe(0);
 	});
+
+	it('runs a tutorial passed whole and resumes it from storage', async () => {
+		const custom: Tutorial = {
+			id: 'custom-3',
+			title: 'Ours',
+			summary: '',
+			duration: '',
+			steps: [
+				{ title: 'Open a case', body: '', waitFor: { kind: 'route', path: '/case/{caseId}' } },
+				{
+					title: 'Add an IOC',
+					body: '',
+					waitFor: { kind: 'api', method: 'POST', path: '/cases/{caseId}/iocs/*' }
+				},
+				{ title: 'Done', body: '' }
+			]
+		};
+		const { tutorial } = await load();
+		tutorial.start(custom);
+		tutorial.observe('/case/8');
+		expect(tutorial.vars).toEqual({ caseId: 8 });
+		expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).definition.id).toBe('custom-3');
+
+		const resumed = await load();
+		resumed.tutorial.hydrate();
+		expect(resumed.tutorial.step?.title).toBe('Add an IOC');
+		resumed.emit({ method: 'POST', path: '/cases/9/iocs/x', status: 201, ok: true, data: {} });
+		expect(resumed.tutorial.step?.title).toBe('Add an IOC');
+		resumed.emit({ method: 'POST', path: '/cases/8/iocs/x', status: 201, ok: true, data: {} });
+		expect(resumed.tutorial.step?.title).toBe('Done');
+	});
+
+	it('does not record a preview as completed', async () => {
+		const { tutorial } = await load();
+		tutorial.start(
+			{ ...demo, id: 'custom-1', steps: [{ title: 'Only', body: '' }] },
+			{ preview: true }
+		);
+		tutorial.next();
+		expect(tutorial.run).toBeNull();
+		expect(toast).toHaveBeenCalledWith(
+			expect.objectContaining({ title: 'Preview finished: Demo' })
+		);
+		expect(getMyPreference).not.toHaveBeenCalled();
+	});
+
+	it('refuses a tutorial without steps', async () => {
+		const { tutorial } = await load();
+		tutorial.start({ ...demo, id: 'custom-2', steps: [] });
+		expect(tutorial.run).toBeNull();
+	});
 });

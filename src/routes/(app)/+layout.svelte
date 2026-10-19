@@ -8,6 +8,7 @@
 	import { dismissedBanners } from '$lib/stores/dismissed-banners.store.svelte';
 	import { CaseAddModal } from './[components]/CaseModals';
 	import TutorialOverlay from '$lib/components/tutorials/TutorialOverlay.svelte';
+	import TutorialRecorderPanel from '$lib/components/tutorials/TutorialRecorderPanel.svelte';
 	import AiQuestionPopup from '$lib/components/ai-suggestions/AiQuestionPopup.svelte';
 	import { APP_CTX, createAppContext, type AppContext } from '$lib/contexts/app.context.svelte';
 	import {
@@ -169,3 +170,5 @@
 
 <!-- Guided tutorials (Help → Tutorials, or `?tutorial=<id>`). -->
 <TutorialOverlay />
+<!-- Settings → Tutorials → Record: shown on every page while recording. -->
+<TutorialRecorderPanel />
