@@ -4,14 +4,18 @@
   right, a bordered table below with column headers and hover rows.
   Rich per-row metadata (severity chip, status pill, id/title, alert
   count, customer, owner avatar, source rule, creation time) so
-  analysts spot "what to open next" without drilling in.
+  analysts spot "what to open next" without drilling in. Analysts with
+  `alert_clusters_write` can select open clusters and close them in bulk.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { getContext, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ShieldAlertIcon } from 'lucide-svelte';
+	import { CircleCheckIcon, ShieldAlertIcon } from 'lucide-svelte';
 	import Button from '$lib/components/ui/button/button.svelte';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { toast } from '$lib/components/ui/toast';
+	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
 	import { Loading } from '$lib/components/ui/loading';
 	import Searchbar from '$lib/components/ui/searchbar/searchbar.svelte';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
@@ -19,6 +23,7 @@
 	import AlertsPagination from '../alerts/components/alerts-pagination.svelte';
 	import {
 		AlertClustersService,
+		type BatchCloseAlertClustersResponse,
 		type PaginatedAlertClusters
 	} from '$lib/services/alert-clusters.service';
 	import {
@@ -45,6 +50,66 @@
 	let statuses = $state<AlertClusterStatus[]>([]);
 	let severities = $state<Severity[]>([]);
 	let customers = $state<Customer[]>([]);
+
+	const userCtx = getContext<UserCtx | undefined>(USER_CTX);
+	// Same permission `POST /alert-clusters/batch/close` requires
+	const canClose = $derived(userCtx?.can('alert_clusters_write') ?? false);
+
+	// Selection mode shows the checkboxes; clusters picked for a bulk
+	// close, on the current page only
+	let selecting = $state(false);
+	let selectedIds = $state<number[]>([]);
+	let closing = $state(false);
+
+	// Dismissed / escalated clusters are already closed: the backend skips them
+	const isClosable = (c: AlertCluster) =>
+		['open', 'investigating'].includes((c.status?.status_name ?? '').toLowerCase());
+	const closableIds = $derived(clusters.filter(isClosable).map((c) => c.cluster_id));
+	const allSelected = $derived(
+		closableIds.length > 0 && closableIds.every((id) => selectedIds.includes(id))
+	);
+
+	const toggleSelected = (id: number, checked: boolean) => {
+		selectedIds = checked
+			? [...selectedIds.filter((s) => s !== id), id]
+			: selectedIds.filter((s) => s !== id);
+	};
+
+	const cancelSelect = () => {
+		selecting = false;
+		selectedIds = [];
+	};
+
+	const closeSelected = async () => {
+		const ids = [...selectedIds];
+		const count = `${ids.length} alert cluster${ids.length === 1 ? '' : 's'}`;
+		if (!ids.length || !confirm(`Close ${count}? Their alerts will be closed too.`)) return;
+		closing = true;
+		try {
+			const res = await AlertClustersService.batchClose(ids);
+			if (!res.ok) {
+				toast({
+					title: 'Failed to close the alert clusters',
+					description: res.error?.message ?? 'Request failed',
+					variant: 'destructive'
+				});
+				return;
+			}
+			const result = res.data as BatchCloseAlertClustersResponse;
+			const missed = result.skipped.length + result.not_found.length;
+			toast({
+				title: `Closed ${result.closed.length} of ${count}`,
+				description: missed
+					? `${missed} could not be closed (already closed or inaccessible).`
+					: undefined,
+				variant: missed ? 'default' : 'success'
+			});
+			selecting = false;
+			await load();
+		} finally {
+			closing = false;
+		}
+	};
 
 	const perPageOptions = [10, 25, 50, 100].map((n) => ({
 		value: String(n),
@@ -111,6 +176,7 @@
 			}
 			clusters = list;
 			total = payload?.total ?? 0;
+			selectedIds = [];
 		} finally {
 			loading = false;
 		}
@@ -206,11 +272,45 @@
 		<div
 			class="flex shrink-0 flex-col gap-2 border-b border-border/60 bg-muted/30 px-5 py-2 xl:flex-row xl:items-center xl:justify-between xl:gap-4"
 		>
-			<div class="flex shrink-0 items-baseline gap-2">
+			<div class="flex shrink-0 items-center gap-2">
 				<h1 class="text-sm font-semibold tracking-tight">Alert Clusters</h1>
 				<span class="whitespace-nowrap text-xs text-muted-foreground">
 					{total} total — awaiting triage
 				</span>
+				{#if canClose}
+					{#if selecting}
+						<span class="whitespace-nowrap text-xs font-medium">{selectedIds.length} selected</span>
+						<Button
+							variant="outline"
+							size="xs"
+							disabled={closing || allSelected || closableIds.length === 0}
+							onclick={() => (selectedIds = [...closableIds])}
+						>
+							Select All
+						</Button>
+						<Button
+							size="xs"
+							disabled={closing || selectedIds.length === 0}
+							onclick={closeSelected}
+							data-testid="alert-clusters-close-selected"
+						>
+							<CircleCheckIcon size={14} />
+							{closing ? 'Closing…' : 'Close'}
+						</Button>
+						<Button variant="ghost" size="xs" disabled={closing} onclick={cancelSelect}>
+							Cancel
+						</Button>
+					{:else}
+						<Button
+							variant="outline"
+							size="xs"
+							onclick={() => (selecting = true)}
+							data-testid="alert-clusters-select"
+						>
+							Select
+						</Button>
+					{/if}
+				{/if}
 			</div>
 
 			<div class="flex flex-wrap items-center justify-end gap-2">
@@ -335,6 +435,17 @@
 						class="sticky top-0 z-10 bg-muted/50 text-left text-2xs uppercase tracking-wide text-muted-foreground backdrop-blur"
 					>
 						<tr>
+							{#if canClose && selecting}
+								<th class="w-10 py-2.5 pl-4">
+									<Checkbox
+										aria-label="Select all open clusters on this page"
+										checked={allSelected}
+										indeterminate={!allSelected && selectedIds.length > 0}
+										disabled={closableIds.length === 0}
+										onCheckedChange={(checked) => (selectedIds = checked ? [...closableIds] : [])}
+									/>
+								</th>
+							{/if}
 							<th class="px-4 py-2.5 font-medium">Alert Cluster</th>
 							<th class="px-4 py-2.5 font-medium">Severity</th>
 							<th class="px-4 py-2.5 font-medium">Status</th>
@@ -348,13 +459,13 @@
 					<tbody>
 						{#if loading}
 							<tr>
-								<td colspan="8" class="py-16">
+								<td colspan={canClose && selecting ? 9 : 8} class="py-16">
 									<div class="flex justify-center"><Loading /></div>
 								</td>
 							</tr>
 						{:else if clusters.length === 0}
 							<tr>
-								<td colspan="8" class="px-4 py-16">
+								<td colspan={canClose && selecting ? 9 : 8} class="px-4 py-16">
 									<div class="flex flex-col items-center gap-2 text-center">
 										<ShieldAlertIcon class="h-8 w-8 text-muted-foreground/50" />
 										<p class="text-sm font-medium">No alert clusters match</p>
@@ -370,8 +481,24 @@
 							{#each clusters as inc (inc.cluster_id)}
 								<tr
 									class="cursor-pointer border-t transition-colors hover:bg-muted/30"
-									onclick={() => goto(clusterUrl(inc.cluster_id))}
+									onclick={() => {
+										// In selection mode a click picks the cluster instead of opening it
+										if (!selecting) return goto(clusterUrl(inc.cluster_id));
+										if (isClosable(inc))
+											toggleSelected(inc.cluster_id, !selectedIds.includes(inc.cluster_id));
+									}}
 								>
+									{#if canClose && selecting}
+										<td class="w-10 py-3 pl-4" onclick={(e) => e.stopPropagation()}>
+											<Checkbox
+												aria-label={`Select alert cluster #${inc.cluster_id}`}
+												checked={selectedIds.includes(inc.cluster_id)}
+												disabled={!isClosable(inc)}
+												onCheckedChange={(checked) =>
+													toggleSelected(inc.cluster_id, checked === true)}
+											/>
+										</td>
+									{/if}
 									<td class="max-w-md px-4 py-3">
 										<div class="flex min-w-0 items-center gap-2">
 											<span class="truncate font-medium">

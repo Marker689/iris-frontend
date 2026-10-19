@@ -49,6 +49,12 @@ export interface EscalateAlertClusterResponse {
 	case_id: number;
 }
 
+export interface BatchCloseAlertClustersResponse {
+	closed: number[];
+	skipped: number[];
+	not_found: number[];
+}
+
 export interface CaseSourceAlertCluster {
 	cluster_id: number;
 	cluster_title: string;
@@ -113,6 +119,17 @@ export class AlertClustersService {
 
 	static async remove(id: number, options: ApiOptions = {}) {
 		return ApiService.delete<null>(`/api/v2/alert-clusters/${id}`, options);
+	}
+
+	// Close (Dismiss) several clusters and their alerts. Clusters already
+	// dismissed or escalated come back in `skipped`, unreachable ones in
+	// `not_found`.
+	static async batchClose(clusterIds: number[], options: ApiOptions = {}) {
+		return ApiService.post<BatchCloseAlertClustersResponse, { cluster_ids: number[] }>(
+			'/api/v2/alert-clusters/batch/close',
+			{ cluster_ids: clusterIds },
+			options
+		);
 	}
 
 	static async addAlerts(id: number, alertIds: number[], options: ApiOptions = {}) {
