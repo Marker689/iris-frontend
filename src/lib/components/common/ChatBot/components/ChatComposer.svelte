@@ -1,5 +1,6 @@
 <!--
-  Chat composer — one textarea + a Send button.
+  Chat composer — one textarea with its actions (attach, Stop, Send)
+  on a row underneath, inside the same bordered box.
 
   Enter submits; Shift+Enter inserts a newline. Stays open while the
   assistant runs: a turn sent then reaches the model at its next step
@@ -206,7 +207,11 @@
 			{/each}
 		</div>
 	{/if}
-	<div class="flex items-end gap-2">
+	<!-- One bordered box: the textarea grows on top, the actions sit on a
+	     row under it — attach on the left, Stop + Send on the right. -->
+	<div
+		class="flex flex-col rounded-md border border-input bg-transparent shadow-sm focus-within:ring-1 focus-within:ring-ring"
+	>
 		<Textarea
 			bind:value={text}
 			placeholder={streaming
@@ -214,7 +219,7 @@
 				: placeholder}
 			disabled={disabled || sending}
 			rows={2}
-			class="flex-1 resize-none text-xs"
+			class="min-h-[44px] flex-1 resize-none border-0 text-xs shadow-none focus-visible:ring-0 md:text-xs"
 			onkeydown={onKeyDown}
 			onpaste={onPaste}
 		/>
@@ -226,21 +231,11 @@
 			onchange={onPicked}
 			data-testid="chat-composer-file-input"
 		/>
-		<div class="flex flex-col gap-1">
-			{#if streaming && onStop}
-				<Button
-					size="sm"
-					variant="outline"
-					onclick={onStop}
-					title="Stop Yuki (Esc)"
-					aria-label="Stop Yuki"
-				>
-					<SquareIcon size={14} />
-				</Button>
-			{/if}
+		<div class="flex items-center gap-1 px-1.5 pb-1.5">
 			<Button
-				size="sm"
+				size="icon"
 				variant="ghost"
+				class="h-7 w-7 text-muted-foreground"
 				onclick={() => fileInput?.click()}
 				disabled={disabled || sending}
 				title={`Attach images, PDF or text files (up to ${maxMb} MB each)`}
@@ -248,9 +243,30 @@
 			>
 				<PaperclipIcon size={14} />
 			</Button>
-			<Button size="sm" onclick={submit} disabled={disabled || sending} aria-label="Send">
-				<SendIcon size={14} />
-			</Button>
+			<div class="ml-auto flex items-center gap-1">
+				{#if streaming && onStop}
+					<Button
+						size="icon"
+						variant="outline"
+						class="h-7 w-7"
+						onclick={onStop}
+						title="Stop Yuki (Esc)"
+						aria-label="Stop Yuki"
+					>
+						<SquareIcon size={12} />
+					</Button>
+				{/if}
+				<Button
+					size="icon"
+					class="h-7 w-7"
+					onclick={submit}
+					disabled={disabled || sending}
+					title="Send (Enter)"
+					aria-label="Send"
+				>
+					<SendIcon size={14} />
+				</Button>
+			</div>
 		</div>
 	</div>
 </div>

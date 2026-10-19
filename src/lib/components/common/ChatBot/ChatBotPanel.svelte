@@ -70,12 +70,21 @@
 	const disabled = $derived(chat.state.loading);
 
 	// True in the initial-latency window: the user just sent and the
-	// stream is running but no text has arrived yet. Also true between
-	// a tool_result and the next TextDelta (model reasoning on the
-	// tool output). Drives the shimmer bar.
+	// stream is running but nothing has arrived yet. Drives the
+	// standalone thinking bubble; once text or tool cards show up, the
+	// streaming bubble carries the indicator inline instead.
 	const thinking = $derived(
 		streaming && (!chat.state.streamingAssistant || chat.state.streamingAssistant.text.length === 0)
 	);
+
+	// What the indicator says Yuki is doing: the tool it's running when
+	// one has started without a result yet, otherwise thinking.
+	const activityLabel = $derived.by<string>(() => {
+		const running = chat.state.streamingAssistant?.toolUses.find(
+			(tu) => !tu.pending && tu.result === undefined && !tu.error
+		);
+		return running ? `Running ${running.tool_name}` : 'Yuki is thinking';
+	});
 
 	async function newHere() {
 		showHistory = false;
@@ -639,6 +648,9 @@
 										{/each}
 									</div>
 								{/if}
+								{#if streaming}
+									<ThinkingShimmer inline label={activityLabel} />
+								{/if}
 							</div>
 						</div>
 					{:else if thinking}
@@ -646,7 +658,7 @@
 						     arrived yet, or model reasoning after a
 						     tool_result. Show the shimmer instead of an
 						     empty bubble. -->
-						<ThinkingShimmer />
+						<ThinkingShimmer label={activityLabel} />
 					{/if}
 
 					{#each chat.state.queuedTexts as queued, i (i)}

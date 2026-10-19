@@ -1,60 +1,108 @@
 <!--
-  Thinking indicator — a shimmer bar that plays under the assistant
-  avatar while the model is running but no text has streamed yet.
+  Thinking indicator — three bouncing dots and a label, shown for as
+  long as Yuki is running.
 
-  Two situations trigger it:
-    1. Initial latency after `send` — the request is in flight but the
-       provider hasn't emitted its first text delta.
-    2. Between a tool_result and the next TextDelta — the model is
-       reasoning on the tool output.
+  Two shapes:
+    * standalone (default): its own bubble under the assistant avatar,
+      while nothing has streamed yet — the latency after `send`.
+    * `inline`: just the dots and the label, at the foot of the
+      streaming bubble once text or tool cards have arrived, so the
+      analyst can still tell Yuki is working between steps (reasoning
+      on a tool result, running the next tool).
 
-  Kept as CSS-only (no JS animation loop) so it costs nothing when
-  offscreen. Uses the existing `--muted` + `--muted-foreground` design
-  tokens for light/dark parity.
+  CSS-only (no JS animation loop) so it costs nothing when offscreen,
+  and still under `prefers-reduced-motion`.
 -->
 <script lang="ts">
-	let { label = 'Yuki is thinking' }: { label?: string } = $props();
+	import { SparklesIcon } from 'lucide-svelte';
+
+	let { label = 'Yuki is thinking', inline = false }: { label?: string; inline?: boolean } =
+		$props();
 </script>
 
-<div class="flex gap-2 text-xs" aria-live="polite">
-	<div
-		class="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary"
-	>
-		<!-- Empty avatar circle. The sparkle icon lives in the header,
-		     using it here would compete with the shimmer for attention. -->
+{#snippet indicator()}
+	<span class="flex items-center gap-1.5 text-2xs text-muted-foreground" aria-live="polite">
+		<span class="dots" aria-hidden="true">
+			<span></span>
+			<span></span>
+			<span></span>
+		</span>
+		<span class="italic">{label}…</span>
+	</span>
+{/snippet}
+
+{#if inline}
+	<div class="mt-2">{@render indicator()}</div>
+{:else}
+	<div class="flex gap-2 text-xs">
+		<div
+			class="avatar flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary"
+		>
+			<SparklesIcon size={12} />
+		</div>
+		<div class="rounded-md bg-muted px-3 py-2">
+			{@render indicator()}
+		</div>
 	</div>
-	<div class="flex min-w-[220px] max-w-[80%] flex-col gap-1.5 rounded-md bg-muted px-3 py-2">
-		<span class="text-2xs italic text-muted-foreground">{label}…</span>
-		<div class="shimmer-bar" aria-hidden="true"></div>
-	</div>
-</div>
+{/if}
 
 <style>
-	/* A 100%-wide gradient stripe that translates left→right forever.
-	   `background-size: 200%` puts the transparent tails outside the
-	   visible area at each end so the animation never shows a hard
-	   edge. `background-clip: padding-box` isn't needed — the bar has
-	   no border. */
-	.shimmer-bar {
-		height: 6px;
-		width: 100%;
-		border-radius: 3px;
-		background: linear-gradient(
-			90deg,
-			hsl(var(--muted-foreground) / 0.08) 0%,
-			hsl(var(--muted-foreground) / 0.28) 50%,
-			hsl(var(--muted-foreground) / 0.08) 100%
-		);
-		background-size: 200% 100%;
-		animation: shimmer 1.4s ease-in-out infinite;
+	.dots {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
 	}
 
-	@keyframes shimmer {
-		0% {
-			background-position: 200% 0;
-		}
+	.dots span {
+		width: 5px;
+		height: 5px;
+		border-radius: 9999px;
+		background: hsl(var(--primary));
+		animation: bounce 1.2s ease-in-out infinite;
+	}
+
+	.dots span:nth-child(2) {
+		animation-delay: 0.15s;
+	}
+
+	.dots span:nth-child(3) {
+		animation-delay: 0.3s;
+	}
+
+	.avatar :global(svg) {
+		animation: pulse 1.6s ease-in-out infinite;
+	}
+
+	@keyframes bounce {
+		0%,
+		60%,
 		100% {
-			background-position: -200% 0;
+			transform: translateY(0);
+			opacity: 0.35;
+		}
+		30% {
+			transform: translateY(-3px);
+			opacity: 1;
+		}
+	}
+
+	@keyframes pulse {
+		0%,
+		100% {
+			opacity: 0.5;
+			transform: scale(0.9);
+		}
+		50% {
+			opacity: 1;
+			transform: scale(1.1);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.dots span,
+		.avatar :global(svg) {
+			animation: none;
+			opacity: 1;
 		}
 	}
 </style>
