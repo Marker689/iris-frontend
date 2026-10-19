@@ -219,6 +219,7 @@ export const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
 		title: '',
 		body: '',
 		proposed_action: null,
+		actions: [],
 		confidence: null,
 		severity: 'medium'
 	},

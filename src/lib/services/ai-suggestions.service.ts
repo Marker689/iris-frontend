@@ -42,6 +42,19 @@ export interface AiSuggestionProposedAction {
 	arguments: Record<string, unknown>;
 }
 
+/** `pending` until run (a failed run keeps it pending, with `error`). */
+export type AiSuggestionActionStatus = 'pending' | 'done' | 'skipped';
+
+/** One action of a suggestion that bundles several. */
+export interface AiSuggestionBundledAction extends AiSuggestionProposedAction {
+	id: number;
+	label: string;
+	status: AiSuggestionActionStatus;
+	tool_call_id: number | null;
+	/** Why the last attempt to run it failed. */
+	error: string | null;
+}
+
 export interface AiSuggestionRef {
 	type: AiSuggestionEntityType;
 	id: number;
@@ -70,6 +83,8 @@ export interface AiSuggestion {
 	title: string;
 	body: string | null;
 	proposed_action: AiSuggestionProposedAction | null;
+	/** Several actions, accepted all at once or a few of them (instead of `proposed_action`). */
+	proposed_actions?: AiSuggestionBundledAction[] | null;
 	/** `popup`: an `info_request` its audience answers in a dialog, wherever they are. */
 	form_schema: { fields: AiSuggestionFormField[]; popup?: boolean } | null;
 	related_refs: AiSuggestionRef[] | null;
@@ -208,13 +223,20 @@ export class AiSuggestionsService {
 		return ApiService.get<AiSuggestion>(`${BASE}/${id}`, options);
 	}
 
-	/** Runs the proposed action as the current user. */
+	/**
+	 * Runs the proposed action as the current user; for a bundled
+	 * suggestion, the `actions` ids (default: every pending one).
+	 */
 	static async accept(
 		id: number,
 		note: string | null = null,
-		options: ApiOptions = {}
+		options: ApiOptions = {},
+		actions: number[] | null = null
 	): Promise<RequestResponse<AiSuggestion>> {
-		return ApiService.post<AiSuggestion>(`${BASE}/${id}/accept`, note ? { note } : {}, options);
+		const body: { note?: string; actions?: number[] } = {};
+		if (note) body.note = note;
+		if (actions) body.actions = actions;
+		return ApiService.post<AiSuggestion>(`${BASE}/${id}/accept`, body, options);
 	}
 
 	static async dismiss(

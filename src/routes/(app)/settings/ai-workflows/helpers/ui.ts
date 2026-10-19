@@ -348,6 +348,11 @@ export function toolReferences(nodes: AiGraphNode[]): string[] {
 		} else if (node.type === 'suggest') {
 			const tool = (config.proposed_action as Record<string, unknown> | undefined)?.tool;
 			if (typeof tool === 'string') tools.add(tool);
+			if (Array.isArray(config.actions)) {
+				for (const action of config.actions as Record<string, unknown>[]) {
+					if (typeof action?.tool === 'string') tools.add(action.tool);
+				}
+			}
 		}
 	}
 	return [...tools].sort();

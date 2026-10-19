@@ -33,9 +33,10 @@ describe('toolReferences', () => {
 				node('a', 'action', { tool: 'add_ioc' }),
 				node('b', 'ai_agent', { tools: ['get_case', 3, 'add_ioc'] }),
 				node('c', 'suggest', { proposed_action: { tool: 'close_case' } }),
+				node('e', 'suggest', { actions: [{ tool: 'add_note' }, { tool: 4 }] }),
 				node('d', 'delay', { tool: 'ignored' })
 			])
-		).toEqual(['add_ioc', 'close_case', 'get_case']);
+		).toEqual(['add_ioc', 'add_note', 'close_case', 'get_case']);
 	});
 });
 

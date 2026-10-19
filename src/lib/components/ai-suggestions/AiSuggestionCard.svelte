@@ -8,8 +8,11 @@
   related objects, what it would run, the run trace ("Why?") and how it
   was resolved.
 
-  Accepting runs the proposed tool call as the current analyst, so the
-  confirm dialog spells out the tool and its exact arguments first.
+  A suggestion proposes one action or a bundle of them, each shown as
+  readable `field → value` rows (raw tool call behind a toggle). A bundle
+  is a checklist: accept all of it or only the ticked actions. Accepting
+  runs them as the current analyst, so the confirm dialog lists exactly
+  what will run first.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
@@ -38,6 +41,8 @@
 		aiSuggestionsEntityHref,
 		aiSuggestionsRunHref
 	} from '$lib/stores/ai-suggestions.store.svelte';
+	import { aiSuggestionActions, aiSuggestionActionsSummary } from './ai-suggestion-actions';
+	import AiSuggestionActionView from './AiSuggestionActionView.svelte';
 	import AiSuggestionAnswerForm from './AiSuggestionAnswerForm.svelte';
 
 	interface Props {
@@ -56,8 +61,11 @@
 	const confidence = $derived(aiSuggestionConfidence(suggestion.confidence));
 	const isOpen = $derived(suggestion.status === 'open');
 	const isInfoRequest = $derived(suggestion.kind === 'info_request');
+	const actions = $derived(aiSuggestionActions(suggestion));
+	const pendingActions = $derived(actions.filter((a) => a.status === 'pending'));
+	const isBundle = $derived(actions.some((a) => a.bundled));
 	const canAccept = $derived(
-		isOpen && !isInfoRequest && suggestion.can_accept !== false && !!suggestion.proposed_action
+		isOpen && !isInfoRequest && suggestion.can_accept !== false && pendingActions.length > 0
 	);
 	// The link text is always the canonical `type #id`; the title is
 	// LLM-provided, so it only shows as secondary text / tooltip.
@@ -82,13 +90,22 @@
 			? `${AI_SUGGESTION_ENTITY_LABELS[suggestion.entity_type] ?? suggestion.entity_type} #${suggestion.entity_id}`
 			: null
 	);
-	const snippet = $derived(aiSuggestionSnippet(suggestion.body));
+	const snippet = $derived(
+		actions.length > 0 ? aiSuggestionActionsSummary(actions) : aiSuggestionSnippet(suggestion.body)
+	);
 	const actingAs = $derived(
 		$current_user ? `${$current_user.user_name} (${$current_user.user_login})` : 'you'
 	);
 
 	let expanded = $state(untrack(() => highlight));
-	let showArgs = $state(false);
+	// Bundle: the pending actions left unticked (everything is ticked by default)
+	let unticked = $state<number[]>([]);
+	const selectedIds = $derived(
+		pendingActions.filter((a) => !unticked.includes(a.id)).map((a) => a.id)
+	);
+	const toRun = $derived(
+		isBundle ? pendingActions.filter((a) => selectedIds.includes(a.id)) : pendingActions
+	);
 	let showResult = $state(false);
 	let showAnswer = $state(false);
 	let acceptOpen = $state(false);
@@ -121,13 +138,38 @@
 		return false;
 	}
 
+	function tick(id: number, checked: boolean) {
+		unticked = checked ? unticked.filter((u) => u !== id) : [...unticked, id];
+	}
+
+	function openAccept(all = false) {
+		if (all) unticked = [];
+		note = '';
+		acceptOpen = true;
+	}
+
 	async function accept() {
+		if (toRun.length === 0) return;
 		busy = true;
 		try {
-			const res = await AiSuggestionsService.accept(suggestion.id, note.trim() || null);
-			if (settle(res, 'Suggestion accepted', 'Could not accept the suggestion')) {
+			const res = await AiSuggestionsService.accept(
+				suggestion.id,
+				note.trim() || null,
+				{},
+				isBundle ? toRun.map((a) => a.id) : null
+			);
+			const okTitle =
+				isBundle && toRun.length < pendingActions.length
+					? `${toRun.length} of ${pendingActions.length} actions run`
+					: 'Suggestion accepted';
+			if (settle(res, okTitle, 'Could not accept the suggestion')) {
 				acceptOpen = false;
 				note = '';
+				unticked = [];
+			} else if (isBundle) {
+				// Actions before the failing one may have run: reload to show them
+				acceptOpen = false;
+				onChanged(null);
 			}
 		} finally {
 			busy = false;
@@ -279,11 +321,14 @@
 						<Button
 							size="xs"
 							class="h-6 px-2"
-							onclick={() => ((note = ''), (acceptOpen = true))}
+							onclick={() => openAccept(true)}
 							disabled={busy}
+							title={isBundle
+								? `Review and run the ${pendingActions.length} proposed actions`
+								: undefined}
 						>
 							<CheckIcon />
-							Accept
+							{isBundle && pendingActions.length > 1 ? `Accept ${pendingActions.length}` : 'Accept'}
 						</Button>
 					{/if}
 					{#if canDismiss}
@@ -385,29 +430,49 @@
 				</div>
 			{/if}
 
-			{#if suggestion.proposed_action}
-				<div class="rounded-md border bg-muted/20 text-2xs">
-					<button
-						type="button"
-						class="flex w-full items-center gap-1.5 px-2 py-1 text-left"
-						onclick={() => (showArgs = !showArgs)}
-						aria-expanded={showArgs}
-					>
-						<ChevronRightIcon
-							size={12}
-							class="shrink-0 transition-transform {showArgs ? 'rotate-90' : ''}"
+			{#if actions.length > 0}
+				<section class="flex min-w-0 flex-col gap-1.5" data-testid="ai-suggestion-actions">
+					<div class="flex items-center gap-1.5 text-2xs text-muted-foreground">
+						<WrenchIcon size={12} class="shrink-0" />
+						<span class="font-medium uppercase tracking-wide">
+							{actions.length === 1 ? 'Proposed action' : `${actions.length} proposed actions`}
+						</span>
+						{#if isBundle && canAccept && pendingActions.length > 1}
+							<span class="ml-auto flex items-center gap-1">
+								<Button
+									size="xs"
+									variant="outline"
+									class="h-6 px-2"
+									onclick={() => openAccept(false)}
+									disabled={busy || selectedIds.length === 0}
+									data-testid="ai-suggestion-accept-selected"
+								>
+									Accept selected ({selectedIds.length})
+								</Button>
+								<Button
+									size="xs"
+									class="h-6 px-2"
+									onclick={() => openAccept(true)}
+									disabled={busy}
+									data-testid="ai-suggestion-accept-all"
+								>
+									<CheckIcon />
+									Accept all ({pendingActions.length})
+								</Button>
+							</span>
+						{/if}
+					</div>
+					{#each actions as action (action.id)}
+						<AiSuggestionActionView
+							{action}
+							selectable={isBundle && canAccept && pendingActions.length > 1}
+							checked={selectedIds.includes(action.id)}
+							onCheckedChange={(v) => tick(action.id, v)}
+							disabled={busy}
+							open={actions.length === 1 && action.status === 'pending'}
 						/>
-						<WrenchIcon size={12} class="shrink-0 text-muted-foreground" />
-						<span class="text-muted-foreground">Proposed action</span>
-						<code class="font-mono">{suggestion.proposed_action.tool}</code>
-					</button>
-					{#if showArgs}
-						<pre
-							class="max-h-56 overflow-auto border-t px-2 py-1.5 font-mono text-2xs">{aiSuggestionPretty(
-								suggestion.proposed_action.arguments ?? {}
-							)}</pre>
-					{/if}
-				</div>
+					{/each}
+				</section>
 			{/if}
 
 			{#if isOpen && isInfoRequest && showAnswer}
@@ -468,37 +533,53 @@
 <Dialog.Root bind:open={acceptOpen}>
 	<Dialog.Content class="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Run this action as you?</Dialog.Title>
+			<Dialog.Title>
+				{isBundle && pendingActions.length > 1
+					? 'Run these actions as you?'
+					: 'Run this action as you?'}
+			</Dialog.Title>
 			<Dialog.Description>
-				Accepting runs the tool below with your own permissions, as
+				Accepting runs {isBundle && pendingActions.length > 1
+					? 'the ticked actions, in order,'
+					: 'the action below'}
+				with your own permissions, as
 				<span class="font-medium text-foreground">{actingAs}</span>. It is recorded in the activity
 				log under your name.
 			</Dialog.Description>
 		</Dialog.Header>
-		{#if suggestion.proposed_action}
-			<div class="flex min-w-0 flex-col gap-2 text-sm">
-				<div class="min-w-0">
-					<span class="text-xs text-muted-foreground">Tool</span>
-					<div class="break-all">
-						<code class="font-mono">{suggestion.proposed_action.tool}</code>
-					</div>
-				</div>
-				<div class="min-w-0">
-					<span class="text-xs text-muted-foreground">Arguments</span>
-					<pre
-						class="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs [overflow-wrap:anywhere]">{aiSuggestionPretty(
-							suggestion.proposed_action.arguments ?? {}
-						)}</pre>
-				</div>
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-muted-foreground">Note (optional)</span>
-					<Textarea rows={2} bind:value={note} disabled={busy} />
-				</label>
+		<div class="flex min-w-0 flex-col gap-2 text-sm">
+			<div class="flex max-h-[50vh] min-w-0 flex-col gap-1.5 overflow-y-auto">
+				{#each pendingActions as action (action.id)}
+					<AiSuggestionActionView
+						{action}
+						selectable={isBundle && pendingActions.length > 1}
+						checked={selectedIds.includes(action.id)}
+						onCheckedChange={(v) => tick(action.id, v)}
+						disabled={busy}
+						open={pendingActions.length <= 2}
+					/>
+				{/each}
 			</div>
-		{/if}
+			{#if isBundle && toRun.length < pendingActions.length}
+				<p class="text-2xs text-muted-foreground">
+					The {pendingActions.length - toRun.length} unticked
+					{pendingActions.length - toRun.length === 1 ? 'action is' : 'actions are'} skipped.
+				</p>
+			{/if}
+			<label class="flex flex-col gap-1">
+				<span class="text-xs text-muted-foreground">Note (optional)</span>
+				<Textarea rows={2} bind:value={note} disabled={busy} />
+			</label>
+		</div>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (acceptOpen = false)} disabled={busy}>Cancel</Button>
-			<Button onclick={accept} disabled={busy}>{busy ? 'Running…' : 'Run as me'}</Button>
+			<Button
+				onclick={accept}
+				disabled={busy || toRun.length === 0}
+				data-testid="ai-suggestion-run"
+			>
+				{busy ? 'Running…' : toRun.length > 1 ? `Run ${toRun.length} as me` : 'Run as me'}
+			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

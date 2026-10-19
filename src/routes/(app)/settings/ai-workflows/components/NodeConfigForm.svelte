@@ -251,6 +251,21 @@
 			: null
 	);
 
+	// ---- suggest actions: a bundle the analyst ticks, instead of proposed_action ----
+	type BundledAction = {
+		label: string;
+		tool: string;
+		arguments: Record<string, unknown>;
+		when?: string;
+	};
+	const bundled = $derived(list<BundledAction>(c.actions));
+	function setAction(index: number, patch: Partial<BundledAction>) {
+		set(
+			'actions',
+			bundled.map((a, i) => (i === index ? { ...a, ...patch } : a))
+		);
+	}
+
 	// ---- python inputs: a template string, or {$path} to pass a value as is ----
 	type ScriptInput = { name: string; value: unknown };
 	const isPath = (v: unknown): v is { $path: string } =>
@@ -1022,10 +1037,10 @@
 				{@render userPicker()}
 			{/if}
 			<label class="flex items-center justify-between gap-2 text-xs">
-				<span>Propose an action the analyst can accept</span>
+				<span>Propose one action the analyst can accept</span>
 				<Switch
 					checked={proposed !== null}
-					disabled={readOnly}
+					disabled={readOnly || bundled.length > 0}
 					onCheckedChange={(v: boolean) =>
 						set('proposed_action', v ? { tool: '', arguments: {} } : null)}
 				/>
@@ -1054,6 +1069,86 @@
 								})}
 						/>
 					{/key}
+				</div>
+			{/if}
+			{#if !proposed}
+				<div class="flex flex-col gap-2" data-testid="wf-cfg-actions">
+					<div class="flex items-center justify-between gap-2">
+						<span class={LABEL_CLASS}>Bundled actions</span>
+						{#if !readOnly}
+							<Button
+								variant="outline"
+								size="sm"
+								class="h-6 px-2 text-2xs"
+								disabled={bundled.length >= 10}
+								onclick={() =>
+									set('actions', [...bundled, { label: '', tool: '', arguments: {}, when: '' }])}
+								data-testid="wf-cfg-actions-add"
+							>
+								<PlusIcon size={12} />
+								Add an action
+							</Button>
+						{/if}
+					</div>
+					<p class="text-2xs text-muted-foreground">
+						Several actions in one suggestion (up to 10): the analyst accepts all of them or ticks
+						some. An action whose condition is false is left out.
+					</p>
+					{#each bundled as action, index (index)}
+						<div class="flex flex-col gap-1.5 rounded-md border p-2" data-testid="wf-cfg-action">
+							<div class="flex items-center gap-1">
+								<TemplateField
+									class="flex-1"
+									size="sm"
+									mono={false}
+									placeholder="Label, e.g. Set the severity to High"
+									disabled={readOnly}
+									value={str(action.label)}
+									onInput={(v) => setAction(index, { label: v })}
+								/>
+								{#if !readOnly}
+									<Button
+										variant="ghost"
+										size="sm"
+										class="h-6 w-6 p-0"
+										aria-label="Remove the action"
+										onclick={() =>
+											set(
+												'actions',
+												bundled.filter((_, i) => i !== index)
+											)}
+									>
+										<Trash2Icon size={12} />
+									</Button>
+								{/if}
+							</div>
+							{@render toolSelect(action.tool, (name) => setAction(index, { tool: name }))}
+							{@render toolHelp(action.tool, action.arguments, (args) => {
+								setAction(index, { arguments: args });
+								argumentsRevision += 1;
+							})}
+							<span class={LABEL_CLASS}>Arguments (JSON, string values are templates)</span>
+							{#key `${nodeId}:${index}:${argumentsRevision}`}
+								<JsonField
+									value={action.arguments ?? {}}
+									emptyValue={{}}
+									objectOnly
+									minLines={3}
+									{readOnly}
+									onChange={(v) => setAction(index, { arguments: v as Record<string, unknown> })}
+								/>
+							{/key}
+							<TemplateField
+								mode="expression"
+								size="sm"
+								mono
+								placeholder="Only when (optional), e.g. nodes.checks.output.fix_severity"
+								disabled={readOnly}
+								value={str(action.when)}
+								onInput={(v) => setAction(index, { when: v })}
+							/>
+						</div>
+					{/each}
 				</div>
 			{/if}
 		{:else if nodeType === 'action'}

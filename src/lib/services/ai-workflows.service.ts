@@ -1,5 +1,6 @@
 import { ApiService } from './api.service';
 import type { ApiOptions, RequestResponse } from './api.service';
+import type { AiSuggestionBundledAction } from './ai-suggestions.service';
 
 // ---- Enumerations (mirror `app/models/ai_workflows.py`) ------------------
 
@@ -414,6 +415,7 @@ export interface AiRunSuggestion {
 	severity: AiSeverity | null;
 	confidence: number | null;
 	proposed_action: { tool: string; arguments: Record<string, unknown> } | null;
+	proposed_actions?: AiSuggestionBundledAction[] | null;
 	entity_type: AiEntityType | null;
 	entity_id: number | null;
 	created_at: string | null;

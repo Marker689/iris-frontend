@@ -713,7 +713,16 @@
 								{s.body}
 							</p>
 						{/if}
-						{#if s.proposed_action}
+						{#if s.proposed_actions?.length}
+							<div class="mt-1 flex flex-col gap-1">
+								{#each s.proposed_actions as a (a.id)}
+									<JsonBlock
+										label={`${a.status === 'pending' ? 'Proposed' : a.status === 'done' ? 'Done' : 'Skipped'}: ${a.label} (${a.tool})`}
+										value={a.arguments}
+									/>
+								{/each}
+							</div>
+						{:else if s.proposed_action}
 							<div class="mt-1">
 								<JsonBlock
 									label={`Proposed: ${s.proposed_action.tool}`}
