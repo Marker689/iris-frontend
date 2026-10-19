@@ -8,10 +8,11 @@
 		SparklesIcon,
 		PlusIcon,
 		RefreshCwIcon,
-		SquareCheckBigIcon
+		WorkflowIcon
 	} from 'lucide-svelte';
 	import { runtimeConfig } from '$lib/stores/runtime-config.store.svelte';
 	import { CHAT_PANEL_CTX, type ChatPanelContext } from '$lib/contexts/chat-panel.context.svelte';
+	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
 	import BugReportDialog from '$lib/components/observability/BugReportDialog.svelte';
 	import {
 		Tooltip,
@@ -26,6 +27,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import ActionButton from './ActionButton.svelte';
 	import NotificationBell from './NotificationBell.svelte';
+	import RunWorkflowModal from './RunWorkflowModal.svelte';
 	import SwitchContextModal from './SwitchContextModal.svelte';
 	import TopBarSearch from './TopBarSearch.svelte';
 
@@ -36,6 +38,11 @@
 	// isn't set, so guard defensively).
 	const chatPanel = getContext<ChatPanelContext | undefined>(CHAT_PANEL_CTX);
 	const chatbotEnabled = $derived<boolean>(runtimeConfig.chatbot.enabled);
+	const userCtx = getContext<UserCtx | undefined>(USER_CTX);
+	// Manual runs need `ai_workflows_write`, as `POST /ai-workflows/<id>/run` does
+	const canRunWorkflows = $derived<boolean>(
+		runtimeConfig.aiWorkflowsEnabled && (userCtx?.can('ai_workflows_write') ?? false)
+	);
 
 	const case_id = $derived<number>(cases.currentCaseId());
 	const currentCase = $derived<Case>(cases.currentCase());
@@ -49,6 +56,7 @@
 	let goToCaseTriggerEl = $state<HTMLElement | null>(null);
 	let showSwitchContext = $state(false);
 	let showBugReport = $state(false);
+	let showRunWorkflow = $state(false);
 
 	let caseNumber = $state<number | null>(null);
 
@@ -81,24 +89,22 @@
 		return () => window.removeEventListener('keydown', onKey);
 	});
 
-	const addTaskLog = () => {
-		console.log('Add Task Log');
-	};
-
 	const createCase = () => {
 		cases.ui.showAddModal = true;
 	};
 
-	const topBarButtons = [
+	const topBarButtons = $derived([
 		{
 			icon: RefreshCwIcon,
 			tooltip: 'Switch Context (Ctrl + K)',
 			action: () => (showSwitchContext = true)
 		},
-		{ icon: SquareCheckBigIcon, tooltip: 'Add Task Log', action: addTaskLog },
+		...(canRunWorkflows
+			? [{ icon: WorkflowIcon, tooltip: 'Run a workflow', action: () => (showRunWorkflow = true) }]
+			: []),
 		{ icon: PlusIcon, tooltip: 'Create Case', action: createCase },
 		{ icon: BugIcon, tooltip: 'Report an issue', action: () => (showBugReport = true) }
-	];
+	]);
 
 	const caseButtons = [
 		{ label: 'Summary', path: '' },
@@ -321,3 +327,10 @@
 />
 
 <BugReportDialog open={showBugReport} onOpenChange={(v) => (showBugReport = v)} />
+
+{#if canRunWorkflows}
+	<RunWorkflowModal
+		bind:open={showRunWorkflow}
+		entity={case_id !== null ? { type: 'case', id: case_id } : null}
+	/>
+{/if}

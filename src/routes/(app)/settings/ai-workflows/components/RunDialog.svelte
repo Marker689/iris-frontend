@@ -37,6 +37,10 @@
 		triggers?: AiWorkflowTrigger[];
 		/** The workflow has unsaved changes: the run uses the saved version. */
 		dirty?: boolean;
+		/** Entity proposed when the trigger explicitly accepts its type. */
+		entity?: { type: AiEntityType; id: number } | null;
+		/** Initial state of the dry-run switch. */
+		defaultDryRun?: boolean;
 		onStarted?: (run: AiRunSummary) => void;
 	};
 
@@ -46,6 +50,8 @@
 		workflowName,
 		triggers = [],
 		dirty = false,
+		entity = null,
+		defaultDryRun = true,
 		onStarted
 	}: Props = $props();
 
@@ -76,6 +82,11 @@
 	let running = $state(false);
 
 	function resetEntity() {
+		if (entity && entityTypes.includes(entity.type)) {
+			entityType = entity.type;
+			entityId = String(entity.id);
+			return;
+		}
 		entityType = entityTypes.length ? entityTypes[0] : '';
 		entityId = '';
 	}
@@ -85,7 +96,7 @@
 			untrack(() => {
 				triggerId = defaultTrigger();
 				resetEntity();
-				dryRun = true;
+				dryRun = defaultDryRun;
 				payload = null;
 			});
 		}
