@@ -1416,7 +1416,7 @@
 		</div>
 
 		<div class="flex items-center gap-2">
-			{#if query.view === 'list'}
+			{#if query.view === 'list' || query.view === 'split'}
 				{#if selecting}
 					<Button variant="outline" size="xs" onclick={cancelSelect}>Cancel</Button>
 
@@ -1424,14 +1424,17 @@
 						variant="outline"
 						size="xs"
 						onclick={() => {
-							selected = {};
+							// The split view reads each alert's own flag
 							selectedAll = true;
+							selected = Object.fromEntries(alertsData.data.map((alert) => [alert.alert_id, true]));
 						}}>Select All</Button
 					>
 				{:else}
 					<Button variant="outline" size="xs" onclick={() => (selecting = true)}>Select</Button>
 				{/if}
+			{/if}
 
+			{#if query.view === 'list'}
 				<Button
 					variant="outline"
 					size="xs"
@@ -1612,6 +1615,7 @@
 				page={query.page}
 				perPage={query.per_page}
 				{selected}
+				{selecting}
 				sort={activeSort}
 				shortcutsEnabled={!showMerge &&
 					!showClose &&
@@ -1620,8 +1624,13 @@
 					!showConfirmDelete &&
 					!reassignOpen}
 				onToggleSort={toggleSort}
-				onSelect={(alert_id, checked) => (selected = { ...selected, [alert_id]: checked })}
+				onSelect={(alert_id, checked) => {
+					// The `x` shortcut selects without the Select button
+					selecting = true;
+					selected = { ...selected, [alert_id]: checked };
+				}}
 				onSelectMany={(alertIds, checked) => {
+					selecting = true;
 					const next = { ...selected };
 					for (const alertId of alertIds) next[alertId] = checked;
 					selected = next;

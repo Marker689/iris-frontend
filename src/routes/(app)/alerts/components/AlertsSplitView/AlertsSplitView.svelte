@@ -103,6 +103,8 @@
 		page: number;
 		perPage: number;
 		selected: Record<number, boolean>;
+		/** Selection mode: the checkboxes only show while it is on. */
+		selecting?: boolean;
 		/** Which column the queue is ordered by, and in which direction. */
 		sort: AlertSortState;
 		/** Which quick-filter tab is active. `null` = All open (no owner filter). */
@@ -188,6 +190,7 @@
 		page,
 		perPage,
 		selected,
+		selecting = false,
 		sort,
 		queueTab,
 		queueCounts,
@@ -1015,15 +1018,17 @@
 		     click one to order the whole result set by it, click it again to
 		     reverse. Ordering is server-side, so it survives paging. -->
 		<div class="queue-head">
-			<button
-				type="button"
-				class="checkbox"
-				role="checkbox"
-				aria-checked={allSelected}
-				aria-label={allSelected ? 'Deselect all alerts' : 'Select all alerts'}
-				data-checked={allSelected}
-				onclick={() => onSelectAll(!allSelected)}
-			></button>
+			{#if selecting}
+				<button
+					type="button"
+					class="checkbox"
+					role="checkbox"
+					aria-checked={allSelected}
+					aria-label={allSelected ? 'Deselect all alerts' : 'Select all alerts'}
+					data-checked={allSelected}
+					onclick={() => onSelectAll(!allSelected)}
+				></button>
+			{/if}
 			<div class="queue-cols" role="group" aria-label="Sort alerts">
 				{#each ALERT_QUEUE_COLUMNS as col (col.id)}
 					{@const arrow = alertSortArrow(sort, col.id)}
@@ -1065,19 +1070,22 @@
 			{@const sev = severityVar(alert.severity?.severity_name)}
 			<div
 				class="row"
+				class:row-plain={!selecting}
 				class:row-new={isUntriagedStatus(alert.status?.status_name)}
 				class:row-focused={isFocused}
 				bind:this={rowEls[alert.alert_id]}
 			>
-				<button
-					type="button"
-					class="checkbox"
-					role="checkbox"
-					aria-checked={selected[alert.alert_id] === true}
-					aria-label="Select alert {alert.alert_id}"
-					data-checked={selected[alert.alert_id] === true}
-					onclick={() => onSelect(alert.alert_id, !selected[alert.alert_id])}
-				></button>
+				{#if selecting}
+					<button
+						type="button"
+						class="checkbox"
+						role="checkbox"
+						aria-checked={selected[alert.alert_id] === true}
+						aria-label="Select alert {alert.alert_id}"
+						data-checked={selected[alert.alert_id] === true}
+						onclick={() => onSelect(alert.alert_id, !selected[alert.alert_id])}
+					></button>
+				{/if}
 
 				<button
 					type="button"
@@ -1146,18 +1154,20 @@
 						{@const picked = clusterSelection(unit.alerts)}
 						<div class="cluster-group" class:cluster-shut={!open}>
 							<div class="cluster-head">
-								<button
-									type="button"
-									class="checkbox"
-									role="checkbox"
-									aria-checked={picked === 'all' ? true : picked === 'some' ? 'mixed' : false}
-									aria-label="{picked === 'all' ? 'Deselect' : 'Select'} the {unit.alerts
-										.length} alerts of {unit.cluster.cluster_title}"
-									data-checked={picked === 'all'}
-									data-partial={picked === 'some'}
-									disabled={unit.alerts.length === 0}
-									onclick={() => toggleClusterSelection(unit.alerts)}
-								></button>
+								{#if selecting}
+									<button
+										type="button"
+										class="checkbox"
+										role="checkbox"
+										aria-checked={picked === 'all' ? true : picked === 'some' ? 'mixed' : false}
+										aria-label="{picked === 'all' ? 'Deselect' : 'Select'} the {unit.alerts
+											.length} alerts of {unit.cluster.cluster_title}"
+										data-checked={picked === 'all'}
+										data-partial={picked === 'some'}
+										disabled={unit.alerts.length === 0}
+										onclick={() => toggleClusterSelection(unit.alerts)}
+									></button>
+								{/if}
 
 								<button
 									type="button"
@@ -2765,6 +2775,9 @@
 	 */
 	.row-new {
 		background: var(--s-card);
+	}
+	.row-plain {
+		grid-template-columns: 1fr;
 	}
 	.row:hover {
 		background: var(--s-hover);
