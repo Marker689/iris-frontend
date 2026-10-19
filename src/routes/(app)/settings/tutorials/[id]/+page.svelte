@@ -8,6 +8,10 @@
 
   Try it runs the tutorial as it is in the editor, saved or not, in the
   same panel learners get; a preview is never recorded as completed.
+
+  `new?builtin=<id>` starts from a built-in tutorial: saving creates the
+  administrators' version of it, which replaces the built-in for
+  everyone (hides it once unpublished) until it is restored.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
@@ -19,6 +23,7 @@
 		DownloadIcon,
 		PlayIcon,
 		PlusIcon,
+		RotateCcwIcon,
 		SaveIcon,
 		TriangleAlertIcon
 	} from 'lucide-svelte';
@@ -35,6 +40,7 @@
 	} from '$lib/services/tutorials.service';
 	import { tutorial as tutorialRun } from '$lib/stores/tutorial.store.svelte';
 	import { tutorialRecorder } from '$lib/stores/tutorial-recorder.store.svelte';
+	import { tutorialById } from '$lib/tutorials';
 	import { tutorialFileName, tutorialToFile } from '$lib/tutorials/io';
 	import { lintTutorial } from '$lib/tutorials/lint';
 	import StepEditor from '../components/StepEditor.svelte';
@@ -47,8 +53,12 @@
 	} from '../helpers/step-form';
 
 	const routeId = $derived(page.params.id ?? 'new');
+	const requestedBuiltIn = $derived(page.url.searchParams.get('builtin'));
 
 	let tutorialId = $state<number | null>(null);
+	/** The built-in tutorial this is the administrators' version of. */
+	let builtinId = $state<string | null>(null);
+	const builtIn = $derived(builtinId ? (tutorialById(builtinId) ?? null) : null);
 	let title = $state('');
 	let summary = $state('');
 	let duration = $state('');
@@ -58,7 +68,7 @@
 	let saving = $state(false);
 	let savedSnapshot = $state('');
 
-	const body = $derived<Required<CustomTutorialBody>>({
+	const body = $derived<Required<Omit<CustomTutorialBody, 'builtin_id'>>>({
 		title: title.trim(),
 		summary: summary.trim(),
 		duration: duration.trim(),
@@ -89,6 +99,7 @@
 				return;
 			}
 			tutorialId = res.data.id;
+			builtinId = res.data.builtin_id;
 			title = res.data.title;
 			summary = res.data.summary;
 			duration = res.data.duration;
@@ -123,6 +134,7 @@
 	// stopping a recording of another one): (re)load on every change.
 	$effect(() => {
 		const route = routeId;
+		const requested = requestedBuiltIn;
 		untrack(() => {
 			if (tutorialId !== null && route === String(tutorialId)) return;
 			const id = Number(route);
@@ -131,9 +143,14 @@
 				return;
 			}
 			tutorialId = null;
-			title = summary = duration = '';
-			published = false;
-			steps = [];
+			const source = requested ? tutorialById(requested) : undefined;
+			builtinId = source?.id ?? null;
+			title = source?.title ?? '';
+			summary = source?.summary ?? '';
+			duration = source?.duration ?? '';
+			// Learners have it already: the edited version replaces it as soon as it is saved.
+			published = !!source;
+			steps = source?.steps.map(toStepForm) ?? [];
 			markSaved();
 		});
 	});
@@ -157,7 +174,7 @@
 		try {
 			const res =
 				tutorialId === null
-					? await TutorialsService.create(body)
+					? await TutorialsService.create({ ...body, builtin_id: builtinId })
 					: await TutorialsService.update(tutorialId, body);
 			if (!res.ok || !res.data || typeof res.data !== 'object') {
 				toast({
@@ -199,7 +216,7 @@
 		}
 		tutorialRun.start(
 			{
-				id: customTutorialId(tutorialId ?? 0),
+				id: builtinId ?? customTutorialId(tutorialId ?? 0),
 				title: body.title || 'Untitled tutorial',
 				summary: body.summary,
 				duration: body.duration,
@@ -207,6 +224,23 @@
 			},
 			{ preview: true }
 		);
+	}
+
+	async function restore() {
+		if (tutorialId === null) return;
+		if (!confirm('Restore the tutorial IRIS ships? Your changes will be lost.')) return;
+		const res = await TutorialsService.remove(tutorialId);
+		if (!res.ok) {
+			toast({
+				title: 'Failed to restore the tutorial',
+				description: res.error?.message,
+				variant: 'destructive'
+			});
+			return;
+		}
+		markSaved();
+		toast({ title: 'Built-in tutorial restored', variant: 'success' });
+		await goto('/settings/tutorials');
 	}
 
 	function exportIt() {
@@ -252,10 +286,20 @@
 		</div>
 
 		<div class="flex items-center gap-1.5">
-			<label class="mr-2 flex cursor-pointer items-center gap-2 text-xs">
+			<label
+				class="mr-2 flex cursor-pointer items-center gap-2 text-xs"
+				data-tour="tutorial-published"
+				title={builtIn ? 'Off hides this tutorial from the catalogue' : undefined}
+			>
 				<Switch checked={published} onCheckedChange={(v: boolean) => (published = v)} />
 				Published
 			</label>
+			{#if builtinId && tutorialId !== null}
+				<Button variant="outline" size="sm" class="h-7" onclick={restore} disabled={saving}>
+					<RotateCcwIcon size={12} class="mr-1" />
+					Restore
+				</Button>
+			{/if}
 			<Button
 				variant="outline"
 				size="sm"
@@ -263,15 +307,30 @@
 				onclick={record}
 				disabled={saving || loading || !!tutorialRecorder.recording}
 				data-testid="tutorial-record"
+				data-tour="tutorial-record"
 			>
 				<CircleIcon size={12} class="mr-1 fill-red-500 text-red-500" />
 				Record
 			</Button>
-			<Button variant="outline" size="sm" class="h-7" onclick={tryIt} disabled={loading}>
+			<Button
+				variant="outline"
+				size="sm"
+				class="h-7"
+				onclick={tryIt}
+				disabled={loading}
+				data-tour="tutorial-try"
+			>
 				<PlayIcon size={12} class="mr-1" />
 				Try it
 			</Button>
-			<Button variant="outline" size="sm" class="h-7" onclick={exportIt} disabled={loading}>
+			<Button
+				variant="outline"
+				size="sm"
+				class="h-7"
+				onclick={exportIt}
+				disabled={loading}
+				data-tour="tutorial-export"
+			>
 				<DownloadIcon size={12} class="mr-1" />
 				Export
 			</Button>
@@ -281,6 +340,7 @@
 				onclick={save}
 				disabled={saving || loading}
 				data-testid="tutorial-save"
+				data-tour="tutorial-save"
 			>
 				<SaveIcon size={12} class="mr-1" />
 				Save
@@ -290,7 +350,21 @@
 
 	<div class="flex-1 overflow-auto p-4">
 		<div class="mx-auto flex max-w-4xl flex-col gap-4">
-			<section class="grid gap-3 text-xs md:grid-cols-[1fr_10rem]">
+			{#if builtinId}
+				<p class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+					{#if !builtIn}
+						IRIS no longer ships this tutorial, so learners do not see it. Restore it to delete it.
+					{:else if tutorialId === null}
+						Built-in tutorial. Learners keep IRIS's version until you save yours: it then replaces
+						it for everyone.
+					{:else}
+						Your version of a built-in tutorial: it replaces IRIS's for everyone while published,
+						and hides it otherwise. Restore brings IRIS's version back.
+					{/if}
+				</p>
+			{/if}
+
+			<section class="grid gap-3 text-xs md:grid-cols-[1fr_10rem]" data-tour="tutorial-details">
 				<div class="flex flex-col gap-1">
 					<label class="font-medium" for="tutorial-title">Title</label>
 					<Input
@@ -347,7 +421,13 @@
 			{/each}
 
 			<div class="flex flex-wrap items-center gap-2">
-				<Button variant="outline" size="sm" onclick={addStep} data-testid="tutorial-add-step">
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={addStep}
+					data-testid="tutorial-add-step"
+					data-tour="tutorial-add-step"
+				>
 					<PlusIcon size={12} class="mr-1" />
 					Add a step
 				</Button>

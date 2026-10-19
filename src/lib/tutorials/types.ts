@@ -66,6 +66,11 @@ export type Tutorial = {
 	/** Rough duration shown in the catalogue: `~10 min`. */
 	duration: string;
 	steps: TutorialStep[];
+	/**
+	 * Who the catalogue lists it for; everyone when unset. A deep link
+	 * starts it whatever the audience.
+	 */
+	audience?: 'administrators';
 };
 
 export type TutorialRun = {

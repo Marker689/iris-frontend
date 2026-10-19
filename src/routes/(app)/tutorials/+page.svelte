@@ -3,8 +3,9 @@
 	(TutorialOverlay, mounted in the app layout); the steps then run on
 	the real pages. Completion comes from the `tutorials` user preference.
 
-	Built-in tutorials come with IRIS; "From your team" are the ones
-	administrators published in Settings → Tutorials.
+	Built-in tutorials come with IRIS, as administrators may have edited
+	or hidden them; "From your team" are the ones administrators wrote in
+	Settings → Tutorials. Some are listed to administrators only.
 -->
 
 <script lang="ts">
@@ -13,24 +14,23 @@
 	import CircleCheck from 'lucide-svelte/icons/circle-check';
 	import { Button } from '$lib/components/ui/button';
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
-	import {
-		CUSTOM_TUTORIAL_PREFIX,
-		TutorialsService,
-		toEngineTutorial
-	} from '$lib/services/tutorials.service';
+	import { TutorialsService } from '$lib/services/tutorials.service';
 	import { tutorial } from '$lib/stores/tutorial.store.svelte';
 	import { TUTORIALS } from '$lib/tutorials';
+	import { buildCatalogue, forAudience, startSource } from '$lib/tutorials/overrides';
 	import type { Tutorial } from '$lib/tutorials/types';
 
 	const userCtx = getContext<UserCtx>(USER_CTX);
 	const isAdmin = $derived(userCtx?.can('server_administrator') ?? false);
 
-	let team = $state<Tutorial[]>([]);
+	let catalogue = $state(buildCatalogue(TUTORIALS, []));
+	const builtIn = $derived(forAudience(catalogue.builtIn, isAdmin));
+	const team = $derived(forAudience(catalogue.team, isAdmin));
 
 	onMount(() => {
 		void tutorial.loadCompleted();
 		void TutorialsService.listPublished().then((res) => {
-			if (res.ok && Array.isArray(res.data)) team = res.data.map(toEngineTutorial);
+			if (res.ok && Array.isArray(res.data)) catalogue = buildCatalogue(TUTORIALS, res.data);
 		});
 	});
 </script>
@@ -45,6 +45,11 @@
 		<div class="min-w-0 grow">
 			<div class="flex items-center gap-2">
 				<h2 class="text-sm font-semibold">{item.title}</h2>
+				{#if item.audience === 'administrators'}
+					<span class="rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
+						Administrators
+					</span>
+				{/if}
 				{#if completedAt}
 					<span
 						class="flex items-center gap-1 text-xs text-muted-foreground"
@@ -66,7 +71,7 @@
 			variant={completedAt ? 'outline' : 'default'}
 			disabled={running}
 			data-testid="tutorial-start-{item.id}"
-			onclick={() => tutorial.start(item.id.startsWith(CUSTOM_TUTORIAL_PREFIX) ? item : item.id)}
+			onclick={() => tutorial.start(startSource(item))}
 		>
 			{running ? 'In progress' : completedAt ? 'Start again' : 'Start'}
 		</Button>
@@ -86,7 +91,7 @@
 	</div>
 
 	<ul class="flex flex-col gap-3">
-		{#each TUTORIALS as item (item.id)}
+		{#each builtIn as item (item.id)}
 			{@render card(item)}
 		{/each}
 	</ul>
@@ -97,7 +102,7 @@
 				<h2 class="text-sm font-semibold">From your team</h2>
 				{#if isAdmin}
 					<Button variant="link" size="sm" class="px-0" href="/settings/tutorials">
-						Write your own
+						Manage tutorials
 					</Button>
 				{/if}
 			</div>

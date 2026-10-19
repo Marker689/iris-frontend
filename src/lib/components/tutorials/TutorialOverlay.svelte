@@ -13,11 +13,9 @@
 	import { fillElement, findAnchor, findFirstAnchor } from '$lib/tutorials/dom';
 	import { interpolate, normalisePath, parseInline } from '$lib/tutorials/logic';
 	import type { TutorialFill } from '$lib/tutorials/types';
-	import {
-		CUSTOM_TUTORIAL_PREFIX,
-		TutorialsService,
-		toEngineTutorial
-	} from '$lib/services/tutorials.service';
+	import { TutorialsService } from '$lib/services/tutorials.service';
+	import { TUTORIALS, tutorialById } from '$lib/tutorials';
+	import { buildCatalogue, startSource } from '$lib/tutorials/overrides';
 
 	/**
 	 * Guided-tutorial chrome: a docked panel with the current step and a
@@ -29,7 +27,8 @@
 	 *
 	 * `?tutorial=<id>` on any app URL starts a tutorial (links in docs,
 	 * the e2e suite); `custom-<n>` ids are the published tutorials
-	 * administrators wrote.
+	 * administrators wrote. Built-in ids get the administrators' version
+	 * of the tutorial, if they edited or hid it.
 	 */
 
 	type Rect = { top: number; left: number; width: number; height: number };
@@ -123,15 +122,16 @@
 	});
 
 	const startRequested = async (id: string) => {
-		if (!id.startsWith(CUSTOM_TUTORIAL_PREFIX)) {
-			tutorial.start(id);
-			return;
-		}
 		const res = await TutorialsService.listPublished();
-		const found = Array.isArray(res.data)
-			? res.data.map(toEngineTutorial).find((item) => item.id === id)
-			: undefined;
-		if (found) tutorial.start(found);
+		let found;
+		if (res.ok && Array.isArray(res.data)) {
+			const { builtIn, team } = buildCatalogue(TUTORIALS, res.data);
+			found = [...builtIn, ...team].find((item) => item.id === id);
+		} else {
+			// Without the list, built-in tutorials still run as IRIS ships them.
+			found = tutorialById(id);
+		}
+		if (found) tutorial.start(startSource(found));
 		else toast({ title: 'This tutorial is not available', variant: 'warning' });
 	};
 

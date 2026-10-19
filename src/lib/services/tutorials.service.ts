@@ -11,6 +11,11 @@ export interface CustomTutorial {
 	/** Same shape as the built-in steps, except paths are always strings. */
 	steps: TutorialStep[];
 	published: boolean;
+	/**
+	 * Set when this is an administrator's version of a built-in tutorial
+	 * (`overrides.ts`). Fixed at creation.
+	 */
+	builtin_id: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -21,6 +26,8 @@ export interface CustomTutorialBody {
 	duration?: string;
 	steps?: TutorialStep[];
 	published?: boolean;
+	/** Only read on creation. */
+	builtin_id?: string | null;
 }
 
 /** Engine ids of custom tutorials, kept apart from the built-in ones. */
@@ -37,7 +44,11 @@ export const toEngineTutorial = (custom: CustomTutorial): Tutorial => ({
 });
 
 export class TutorialsService {
-	/** Published tutorials, for the catalogue. Any authenticated user can read this. */
+	/**
+	 * Published tutorials, for the catalogue, and the versions of built-in
+	 * ones even unpublished (without steps). Any authenticated user can
+	 * read this.
+	 */
 	static async listPublished(options: ApiOptions = {}): Promise<RequestResponse<CustomTutorial[]>> {
 		return ApiService.get<CustomTutorial[]>(`/manage/tutorials/published`, options);
 	}
