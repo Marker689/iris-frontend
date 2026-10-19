@@ -161,19 +161,32 @@
 		}
 	});
 
-	// ---- run_workflow: the workflows that may be called (they have a "workflow" trigger) ----
+	const editor = getContext<WorkflowEditorCtx | undefined>(WORKFLOW_EDITOR_CTX);
+
+	// ---- run_workflow: the other workflows that may be called (they have a "workflow"
+	// trigger), and this one as `self`: its id would not survive an export / import ----
+	const SELF = 'self';
 	let callable = $state<AiWorkflowSummary[] | null>(null);
+	let thisWorkflow = $state<AiWorkflowSummary | null>(null);
 	onMount(async () => {
 		if (nodeType !== 'run_workflow') return;
 		const res = await AiWorkflowsService.list();
-		callable = res.ok
-			? aiListData<AiWorkflowSummary>(res.data).filter(
-					(w) =>
-						w.id !== editor?.workflowId && aiWorkflowTriggers(w).some((t) => t.type === 'workflow')
-				)
-			: [];
+		const all = res.ok ? aiListData<AiWorkflowSummary>(res.data) : [];
+		thisWorkflow = all.find((w) => w.id === editor?.workflowId) ?? null;
+		callable = all.filter(
+			(w) => w.id !== editor?.workflowId && aiWorkflowTriggers(w).some((t) => t.type === 'workflow')
+		);
 	});
-	const calledWorkflow = $derived(callable?.find((w) => w.id === Number(c.workflow_id)));
+	const callsSelf = $derived(c.workflow_id === SELF);
+	// Picked by id before `self` existed
+	const callsSelfById = $derived(
+		editor?.workflowId != null && Number(c.workflow_id) === editor.workflowId
+	);
+	const calledWorkflow = $derived(
+		callsSelf || callsSelfById
+			? thisWorkflow
+			: callable?.find((w) => w.id === Number(c.workflow_id))
+	);
 
 	function set(key: string, value: unknown) {
 		node.config[key] = value;
@@ -181,7 +194,6 @@
 
 	// ---- node id ----
 	let idDraft = $derived(nodeId);
-	const editor = getContext<WorkflowEditorCtx | undefined>(WORKFLOW_EDITOR_CTX);
 	const idError = $derived(
 		nodeIdError(
 			idDraft.trim(),
@@ -1162,17 +1174,20 @@
 					value={c.workflow_id ? String(c.workflow_id) : ''}
 					onchange={(e) => {
 						const v = (e.currentTarget as HTMLSelectElement).value;
-						set('workflow_id', v ? Number(v) : null);
+						set('workflow_id', v === SELF ? SELF : v ? Number(v) : null);
 					}}
 					data-testid="wf-cfg-workflow-id"
 				>
 					<option value="">{callable === null ? 'Loading…' : 'Pick a workflow…'}</option>
+					<option value={SELF}>This workflow (calls itself)</option>
 					{#each callable ?? [] as w (w.id)}
 						<option value={String(w.id)}>
 							{w.name}{w.is_active ? '' : ' (inactive)'}
 						</option>
 					{/each}
-					{#if c.workflow_id && callable && !calledWorkflow}
+					{#if callsSelfById}
+						<option value={String(c.workflow_id)}>This workflow, by id (#{c.workflow_id})</option>
+					{:else if c.workflow_id && !callsSelf && callable && !calledWorkflow}
 						<option value={String(c.workflow_id)}>#{c.workflow_id} (not callable)</option>
 					{/if}
 				</select>
@@ -1180,6 +1195,17 @@
 					Only workflows with a "Called by a workflow" trigger are listed. The called run acts as
 					this run's user, on the same entity.
 				</span>
+				{#if callsSelf}
+					<span class="text-2xs text-muted-foreground">
+						Runs this workflow from its "Called by a workflow" trigger, which it needs. The chain
+						depth limit stops it from calling itself forever.
+					</span>
+				{:else if callsSelfById}
+					<span class="flex items-center gap-1 text-2xs text-amber-600">
+						<TriangleAlertIcon class="size-3 shrink-0" />
+						Picked by id: choose "This workflow" so the call still works after an export and import.
+					</span>
+				{/if}
 				{#if calledWorkflow && !calledWorkflow.is_active}
 					<span class="flex items-center gap-1 text-2xs text-destructive">
 						<TriangleAlertIcon class="size-3 shrink-0" />
