@@ -192,7 +192,12 @@
 					>
 						<Crosshair /> Pick element
 					</Button>
-					<Button variant="outline" size="sm" onclick={() => (noteOpen = true)}>
+					<Button
+						variant="outline"
+						size="sm"
+						data-tour="recorder-explain"
+						onclick={() => (noteOpen = true)}
+					>
 						<MessageSquarePlus /> Explain
 					</Button>
 					<Button

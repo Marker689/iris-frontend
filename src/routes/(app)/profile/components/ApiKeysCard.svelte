@@ -202,7 +202,7 @@
 	const visibleKeys = $derived(showRevoked ? keys : keys.filter((k) => !k.revoked_at));
 </script>
 
-<Card.Root>
+<Card.Root data-tour="api-keys">
 	<Card.Header>
 		<Card.Title class="flex items-center gap-2">
 			<KeyRoundIcon size={16} />
@@ -216,7 +216,10 @@
 	</Card.Header>
 	<Card.Content class="flex flex-col gap-4">
 		{#if mintedKey}
-			<div class="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+			<div
+				class="rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+				data-tour="api-key-minted"
+			>
 				<div class="flex items-center justify-between gap-2">
 					<div class="text-sm font-medium">
 						New key created — copy it now, it will not be shown again.
@@ -241,19 +244,20 @@
 					Show revoked
 				</label>
 			</div>
-			<Button size="sm" onclick={() => (showCreate = !showCreate)}>
+			<Button size="sm" data-tour="api-key-new" onclick={() => (showCreate = !showCreate)}>
 				<PlusIcon size={14} class="mr-1" />
 				{showCreate ? 'Cancel' : 'New key'}
 			</Button>
 		</div>
 
 		{#if showCreate}
-			<div class="rounded-md border p-3">
+			<div class="rounded-md border p-3" data-tour="api-key-form">
 				<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 					<div class="flex flex-col gap-1">
 						<Label class="text-xs">Name</Label>
 						<Input
 							bind:value={newName}
+							data-tour="api-key-name"
 							placeholder="Claude Desktop / CI script / …"
 							class="h-8 text-xs"
 						/>
@@ -265,6 +269,7 @@
 						</Label>
 						<Input
 							bind:value={newScopeCsv}
+							data-tour="api-key-scope"
 							placeholder="alerts_read, war_rooms_read (empty = full)"
 							class="h-8 text-xs"
 						/>

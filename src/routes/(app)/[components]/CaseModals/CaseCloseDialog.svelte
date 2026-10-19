@@ -87,7 +87,7 @@
 	  place a multi-paragraph post-mortem gets written, and the default
 	  `max-w-lg` box made even a short one feel like a comment field.
 	-->
-	<DialogContent class="sm:max-w-[760px]">
+	<DialogContent class="sm:max-w-[760px]" data-tour="case-close-form">
 		<DialogHeader>
 			<DialogTitle class="flex items-center">
 				{#if showIcon}
@@ -111,6 +111,7 @@
 			-->
 			<Textarea
 				bind:value={note}
+				data-tour="case-closing-note"
 				rows={14}
 				class="max-h-[50vh] text-xs"
 				placeholder="Why is this case being closed? Outcome, impact, follow-up actions…"

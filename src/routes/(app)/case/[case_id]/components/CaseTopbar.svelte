@@ -1336,7 +1336,7 @@
 
 		<DropdownMenu>
 			<DropdownMenuTrigger>
-				<Button variant="ghost" size="icon" class="h-8 w-8 rounded-sm">
+				<Button variant="ghost" size="icon" class="h-8 w-8 rounded-sm" data-tour="case-menu">
 					<MoreHorizontal size={16} />
 					<span class="sr-only">Case menu</span>
 				</Button>

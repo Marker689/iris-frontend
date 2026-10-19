@@ -53,7 +53,11 @@
 	const id = (field: string) => `step-${step.key}-${field}`;
 </script>
 
-<article class="rounded-lg border bg-background" data-testid="tutorial-step-{index}">
+<article
+	class="rounded-lg border bg-background"
+	data-testid="tutorial-step-{index}"
+	data-tour="tutorial-step"
+>
 	<header class="flex items-center gap-2 border-b px-3 py-2">
 		<span
 			class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-2xs font-semibold"
@@ -65,6 +69,7 @@
 			placeholder="Step title"
 			maxlength={200}
 			aria-label="Step {index + 1} title"
+			data-tour="tutorial-step-title"
 			bind:value={step.title}
 		/>
 		<Button
@@ -107,6 +112,7 @@
 				maxlength={4000}
 				class="text-xs"
 				placeholder="Click **New IOC** and paste one domain per line."
+				data-tour="tutorial-step-body"
 				bind:value={step.body}
 			/>
 			<p class="text-2xs text-muted-foreground">
@@ -114,7 +120,7 @@
 			</p>
 		</div>
 
-		<div class="flex flex-col gap-1">
+		<div class="flex flex-col gap-1" data-tour="tutorial-step-highlight">
 			<label class="font-medium" for={id('anchors')}>Highlight</label>
 			<Textarea
 				id={id('anchors')}
@@ -139,7 +145,7 @@
 			<p class="text-2xs text-muted-foreground">Offered when the learner is on another page.</p>
 		</div>
 
-		<div class="flex flex-col gap-2 md:col-span-2">
+		<div class="flex flex-col gap-2 md:col-span-2" data-tour="tutorial-step-wait">
 			<span class="font-medium">Done when</span>
 			<Select
 				type="single"
