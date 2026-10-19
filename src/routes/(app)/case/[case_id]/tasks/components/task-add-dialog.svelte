@@ -161,7 +161,10 @@
 		}
 	}}
 >
-	<Dialog.Content class="flex max-h-[90vh] max-w-[780px] flex-col gap-0 overflow-hidden p-0">
+	<Dialog.Content
+		class="flex max-h-[90vh] max-w-[780px] flex-col gap-0 overflow-hidden p-0"
+		data-tour="task-form"
+	>
 		<Dialog.Header class="shrink-0 border-b px-6 py-4">
 			<Dialog.Title class="text-base font-medium">Add Task</Dialog.Title>
 		</Dialog.Header>

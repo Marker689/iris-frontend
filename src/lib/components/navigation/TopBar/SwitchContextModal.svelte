@@ -260,7 +260,7 @@
 </script>
 
 <DialogPrimitive.Root bind:open {onOpenChange}>
-	<DialogContent class="sm:max-w-[525px]">
+	<DialogContent class="sm:max-w-[525px]" data-tour="switch-context">
 		<DialogHeader>
 			<DialogTitle>{title}</DialogTitle>
 		</DialogHeader>

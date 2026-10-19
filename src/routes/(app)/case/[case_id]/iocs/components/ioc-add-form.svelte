@@ -126,6 +126,7 @@
 							placeholder={addData.one_per_line ? 'One IOC per line' : 'IOC value'}
 							rows={addData.one_per_line ? 5 : 2}
 							class="mt-1 w-full"
+							data-tour="ioc-values"
 						/>
 					</div>
 				</div>

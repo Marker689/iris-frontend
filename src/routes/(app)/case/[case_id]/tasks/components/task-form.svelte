@@ -58,6 +58,7 @@
 							oninput={(e) =>
 								updateField('task_title', (e.currentTarget as HTMLInputElement).value)}
 							class="mt-1"
+							data-tour="task-title"
 						/>
 					</div>
 				</div>

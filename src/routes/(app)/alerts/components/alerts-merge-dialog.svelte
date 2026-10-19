@@ -313,7 +313,10 @@
 		}
 	}}
 >
-	<Dialog.Content class="flex max-h-[80vh] max-w-[980px] flex-col p-0">
+	<Dialog.Content
+		class="flex max-h-[80vh] max-w-[980px] flex-col p-0"
+		data-tour="alert-escalate-form"
+	>
 		<Dialog.Header class="border-b px-6 py-4">
 			<Dialog.Title class="text-base font-medium">{getTitle()}</Dialog.Title>
 		</Dialog.Header>

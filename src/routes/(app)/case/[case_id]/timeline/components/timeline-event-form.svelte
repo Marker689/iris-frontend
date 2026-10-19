@@ -187,6 +187,7 @@
 							oninput={(e) => updateTextField('event_title', (e.target as HTMLInputElement).value)}
 							placeholder="Event title"
 							class="mt-1"
+							data-tour="event-title"
 						/>
 					</div>
 				</div>
@@ -254,6 +255,7 @@
 							title="Auto-parse a date in any format"
 							aria-label="Auto-parse a date in any format"
 							aria-expanded={showDateConverter}
+							data-tour="event-date-parse"
 						>
 							<WandSparklesIcon class="h-4 w-4" />
 						</Button>
@@ -277,6 +279,7 @@
 							placeholder="Paste a date in any format (ISO 8601, syslog, epoch, ...) and press Enter"
 							class="flex-1"
 							autofocus
+							data-tour="event-date-parse-input"
 						/>
 						<Button
 							variant="outline"

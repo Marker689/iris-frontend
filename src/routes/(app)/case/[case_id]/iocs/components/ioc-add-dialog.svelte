@@ -366,6 +366,7 @@
 	<Dialog.Content
 		class="z-[70] flex max-h-[90vh] max-w-[980px] flex-col gap-0 overflow-hidden p-0"
 		overlayClass="z-[60]"
+		data-tour="ioc-form"
 	>
 		<Dialog.Header class="shrink-0 border-b px-6 py-4">
 			<Dialog.Title class="text-base font-medium">Add IOCs</Dialog.Title>
