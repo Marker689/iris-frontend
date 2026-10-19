@@ -28,6 +28,7 @@
 	import MultiSelect, { type MultiSelectItem } from './MultiSelect.svelte';
 	import JsonField from './JsonField.svelte';
 	import PairsEditor from './PairsEditor.svelte';
+	import ValueField from './ValueField.svelte';
 	import TemplateField from './TemplateField.svelte';
 	import TemplateHelp from './TemplateHelp.svelte';
 	import PythonEditor from './PythonEditor.svelte';
@@ -38,6 +39,7 @@
 		toolArgumentsSkeleton,
 		type ToolArgument
 	} from '../helpers/tool-arguments';
+	import { displayText } from '../helpers/values';
 	import {
 		CLASSIFICATION_TONES,
 		LABEL_CLASS,
@@ -196,7 +198,7 @@
 		onRename(next);
 	}
 
-	const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+	const str = displayText;
 	const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 	const inputValue = (e: Event) => (e.currentTarget as HTMLInputElement).value;
 	const numOrNull = (v: string) => (v.trim() === '' ? null : Number(v));
@@ -247,10 +249,6 @@
 			'inputs',
 			list<ScriptInput>(c.inputs).map((r, i) => (i === index ? { ...r, ...patch } : r))
 		);
-	}
-	function setInputMode(index: number, path: boolean) {
-		const current = inputText(list<ScriptInput>(c.inputs)[index]?.value);
-		setInput(index, { value: path ? { $path: current } : current });
 	}
 
 	// ---- notify: the entity it is about, when not the run's own ----
@@ -1196,6 +1194,7 @@
 				<PairsEditor
 					rows={c.inputs}
 					{readOnly}
+					structured
 					addLabel="Add input"
 					onChange={(v) => set('inputs', v)}
 					testId="wf-cfg-run-inputs"
@@ -1224,6 +1223,7 @@
 				<PairsEditor
 					rows={c.variables}
 					{readOnly}
+					structured
 					addLabel="Add variable"
 					onChange={(v) => set('variables', v)}
 					testId="wf-cfg-variables"
@@ -1234,7 +1234,7 @@
 				<span class={LABEL_CLASS}>Inputs (available as <code>inputs['NAME']</code>)</span>
 				{#each list<ScriptInput>(c.inputs) as row, index (index)}
 					<div
-						class="grid grid-cols-[6rem_6rem_minmax(0,1fr)_auto] items-center gap-1"
+						class="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-1"
 						data-testid="wf-cfg-python-input"
 					>
 						<Input
@@ -1244,28 +1244,10 @@
 							value={str(row.name)}
 							oninput={(e) => setInput(index, { name: inputValue(e) })}
 						/>
-						<select
-							class={SELECT_CLASS}
+						<ValueField
 							disabled={readOnly}
-							value={isPath(row.value) ? 'path' : 'template'}
-							onchange={(e) =>
-								setInputMode(index, (e.currentTarget as HTMLSelectElement).value === 'path')}
-							title="A template renders text; a path passes the value (object, list, number) as is"
-						>
-							<option value="template">Template</option>
-							<option value="path">Path</option>
-						</select>
-						<TemplateField
-							mode={isPath(row.value) ? 'path' : 'template'}
-							placeholder={isPath(row.value)
-								? 'nodes.load.output.result'
-								: '{{ trigger.entity_id }}'}
-							disabled={readOnly}
-							value={inputText(row.value)}
-							onInput={(v) =>
-								setInput(index, {
-									value: isPath(row.value) ? { $path: v } : v
-								})}
+							value={row.value}
+							onChange={(v) => setInput(index, { value: v })}
 						/>
 						{#if !readOnly}
 							<Button

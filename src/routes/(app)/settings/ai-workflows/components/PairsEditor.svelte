@@ -1,16 +1,20 @@
 <!--
   Rows of `{name, value}` (http_request headers / query params,
-  set_variables). Values are templates. With `secrets`, each row also
-  carries a `secret` flag: secret values are rendered with keystore
-  access (`key('NAME')`) and masked in the run logs.
+  set_variables, run_workflow inputs). Values are templates; with
+  `structured`, a value may also be a path or JSON (see ValueField).
+  A row keeps its value as is until it is edited. With `secrets`, each
+  row also carries a `secret` flag: secret values are rendered with
+  keystore access (`key('NAME')`) and masked in the run logs.
 -->
 <script lang="ts">
 	import { LockIcon, LockOpenIcon, PlusIcon, Trash2Icon } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import TemplateField from './TemplateField.svelte';
+	import ValueField from './ValueField.svelte';
+	import { displayText } from '../helpers/values';
 
-	type Pair = { name: string; value: string; secret?: boolean };
+	type Pair = { name: string; value: unknown; secret?: boolean };
 
 	type Props = {
 		rows: unknown;
@@ -22,6 +26,8 @@
 		testId?: string;
 		/** Offer the per-row secret toggle (headers / query params). */
 		secrets?: boolean;
+		/** Values may also be paths or JSON (set_variables, run_workflow inputs). */
+		structured?: boolean;
 	};
 
 	let {
@@ -32,14 +38,15 @@
 		addLabel = 'Add',
 		readOnly = false,
 		testId = 'wf-pairs',
-		secrets = false
+		secrets = false,
+		structured = false
 	}: Props = $props();
 
 	const list = $derived(
 		(Array.isArray(rows) ? (rows as Partial<Pair>[]) : []).map((r) => {
 			const pair: Pair = {
 				name: String(r?.name ?? ''),
-				value: r?.value === undefined || r?.value === null ? '' : String(r.value)
+				value: r?.value === undefined || r?.value === null ? '' : r.value
 			};
 			if (secrets) pair.secret = r?.secret === true;
 			return pair;
@@ -60,7 +67,7 @@
 <div class="flex flex-col gap-1.5" data-testid={testId}>
 	{#each list as row, index (index)}
 		<div
-			class={`grid items-center gap-1.5 ${secrets ? 'grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto_auto]' : 'grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto]'}`}
+			class={`grid items-center gap-1.5 ${secrets ? 'grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto_auto]' : structured ? 'grid-cols-[minmax(0,2fr)_minmax(0,5fr)_auto]' : 'grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto]'}`}
 		>
 			<Input
 				class="h-7 font-mono text-xs"
@@ -69,13 +76,23 @@
 				disabled={readOnly}
 				oninput={(e) => update(index, { name: (e.currentTarget as HTMLInputElement).value })}
 			/>
-			<TemplateField
-				size="sm"
-				placeholder={valuePlaceholder}
-				value={row.value}
-				disabled={readOnly}
-				onInput={(v) => update(index, { value: v })}
-			/>
+			{#if structured}
+				<ValueField
+					size="sm"
+					templatePlaceholder={valuePlaceholder}
+					value={row.value}
+					disabled={readOnly}
+					onChange={(v) => update(index, { value: v })}
+				/>
+			{:else}
+				<TemplateField
+					size="sm"
+					placeholder={valuePlaceholder}
+					value={displayText(row.value)}
+					disabled={readOnly}
+					onInput={(v) => update(index, { value: v })}
+				/>
+			{/if}
 			{#if secrets}
 				<button
 					type="button"
@@ -101,7 +118,7 @@
 				<Trash2Icon size={13} />
 			</button>
 		</div>
-		{#if secrets && !row.secret && usesKey(row.value)}
+		{#if secrets && !row.secret && usesKey(displayText(row.value))}
 			<p class="-mt-1 text-2xs text-amber-600">
 				Uses key(…): mark the row secret so the value is resolved and masked in the logs.
 			</p>
