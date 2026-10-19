@@ -98,7 +98,7 @@
 		'chatbot_max_turns_per_conversation',
 		'chatbot_max_tool_calls_per_turn',
 		'chatbot_auto_execute_read_tools',
-		'chatbot_auto_approve_write_tools',
+		'chatbot_allow_auto_approve_write_tools',
 		'chatbot_daily_token_budget_per_user',
 		'chatbot_daily_token_budget_org',
 		'chatbot_redact_ips',
@@ -191,7 +191,7 @@
 			model: '',
 			base_url: '',
 			auto_execute_read_tools: true,
-			auto_approve_write_tools: false,
+			allow_auto_approve_write_tools: false,
 			max_turns_per_conversation: 25,
 			max_tool_calls_per_turn: 8,
 			daily_token_budget_per_user: 500_000,
@@ -216,7 +216,7 @@
 			model: p.model,
 			base_url: p.base_url,
 			auto_execute_read_tools: p.auto_execute_read_tools,
-			auto_approve_write_tools: p.auto_approve_write_tools,
+			allow_auto_approve_write_tools: p.allow_auto_approve_write_tools,
 			max_turns_per_conversation: p.max_turns_per_conversation,
 			max_tool_calls_per_turn: p.max_tool_calls_per_turn,
 			daily_token_budget_per_user: p.daily_token_budget_per_user,
@@ -842,17 +842,19 @@
 
 						<label class="flex items-start gap-2 sm:col-span-2">
 							<Switch
-								checked={!!srvForm.chatbot_auto_approve_write_tools}
-								onCheckedChange={(v: boolean) => (srvForm.chatbot_auto_approve_write_tools = v)}
+								checked={!!srvForm.chatbot_allow_auto_approve_write_tools}
+								onCheckedChange={(v: boolean) =>
+									(srvForm.chatbot_allow_auto_approve_write_tools = v)}
 								disabled={srvSaving}
 							/>
 							<div>
-								<div class="font-medium">Auto-approve write tools</div>
+								<div class="font-medium">Allow analysts to auto-approve write tools</div>
 								<p class="text-2xs text-muted-foreground">
-									Off (default): the assistant asks before every write — creating IOCs, updating
-									assets, closing cases, etc. On: writes run without confirmation. Only enable once
-									you trust the assistant's behaviour on this install; deletes and status changes
-									are irreversible from the analyst's side.
+									The assistant always asks before a write — creating IOCs, updating assets, closing
+									cases, etc. On: analysts get a toggle in the chat to let writes run without
+									confirmation in a conversation; it starts off in every new conversation. Off
+									(default): no toggle, every write needs approval. Deletes and status changes are
+									irreversible from the analyst's side.
 								</p>
 							</div>
 						</label>
@@ -1210,10 +1212,10 @@
 			</label>
 			<label class="col-span-2 flex items-center gap-2">
 				<Switch
-					checked={form.auto_approve_write_tools ?? false}
-					onCheckedChange={(v) => (form.auto_approve_write_tools = v)}
+					checked={form.allow_auto_approve_write_tools ?? false}
+					onCheckedChange={(v) => (form.allow_auto_approve_write_tools = v)}
 				/>
-				<span>Auto-approve writes (skip Approve/Deny)</span>
+				<span>Allow analysts to auto-approve writes</span>
 			</label>
 			<label class="flex items-center gap-2">
 				<Switch checked={form.redact_ips ?? false} onCheckedChange={(v) => (form.redact_ips = v)} />

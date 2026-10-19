@@ -379,6 +379,25 @@ export const createChatPanelContext = () => {
 		return false;
 	};
 
+	const setAutoApproveWriteTools = async (
+		conversationId: number,
+		enabled: boolean
+	): Promise<boolean> => {
+		mutation.error = null;
+
+		const res = await ChatService.setAutoApproveWriteTools(conversationId, enabled);
+		if (res.ok && res.data && typeof res.data !== 'string') {
+			const updated = res.data as ChatConversation;
+			if (state.currentConversation?.id === updated.id) {
+				state.currentConversation = updated;
+			}
+			return true;
+		}
+
+		mutation.error = res.error?.message ?? null;
+		return false;
+	};
+
 	const archiveConversation = async (conversationId: number): Promise<boolean> => {
 		mutation.error = null;
 
@@ -682,6 +701,7 @@ export const createChatPanelContext = () => {
 		listWarRoomConversations,
 		listGlobalConversations,
 		renameConversation,
+		setAutoApproveWriteTools,
 		archiveConversation,
 		send,
 		sendOrStart,

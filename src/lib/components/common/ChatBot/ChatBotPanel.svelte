@@ -23,6 +23,7 @@
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import { Switch } from '$lib/components/ui/switch';
 	import { toast } from '$lib/components/ui/toast';
 	import { CHAT_PANEL_CTX, type ChatPanelContext } from '$lib/contexts/chat-panel.context.svelte';
 	import ChatMessage from './components/ChatMessage.svelte';
@@ -152,6 +153,34 @@
 		if (policy.retention_days > 0) notes.push(`kept ${policy.retention_days}d`);
 		return notes;
 	});
+
+	// ---------- Write auto-approve ----------
+	// Off on every new conversation: Yuki asks before each write until
+	// the analyst flips it. Only offered where the admin (or the policy
+	// enforced on the thread) allows it; the backend re-checks both on
+	// every turn, so an admin turning it off wins over a stale toggle.
+	const autoApproveAllowed = $derived(
+		!!chat.state.currentConversation?.auto_approve_write_tools_allowed
+	);
+	const autoApproveOn = $derived(
+		autoApproveAllowed && !!chat.state.currentConversation?.auto_approve_write_tools
+	);
+	let savingAutoApprove = $state(false);
+
+	async function setAutoApprove(enabled: boolean) {
+		const conv = chat.state.currentConversation;
+		if (!conv) return;
+		savingAutoApprove = true;
+		const saved = await chat.setAutoApproveWriteTools(conv.id, enabled);
+		savingAutoApprove = false;
+		if (!saved) {
+			toast({
+				title: 'Failed to change write approval',
+				description: chat.mutation.error ?? undefined,
+				variant: 'destructive'
+			});
+		}
+	}
 
 	let showHistory = $state(false);
 
@@ -510,6 +539,24 @@
 				</div>
 				{#if showHeaderScopePicker}
 					<ScopePicker {currentCaseId} {currentWarRoomId} {currentAlertId} onPick={onScopePicked} />
+				{/if}
+				{#if autoApproveAllowed}
+					<label
+						class="flex items-center gap-2 text-2xs"
+						title="When on, Yuki runs write tools (create, update, delete) without asking for approval in this conversation"
+					>
+						<Switch
+							checked={autoApproveOn}
+							onCheckedChange={setAutoApprove}
+							disabled={savingAutoApprove}
+							aria-label="Auto-approve writes"
+						/>
+						<span
+							class={autoApproveOn ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}
+						>
+							{autoApproveOn ? 'Writes run without asking' : 'Ask before writes'}
+						</span>
+					</label>
 				{/if}
 			</div>
 

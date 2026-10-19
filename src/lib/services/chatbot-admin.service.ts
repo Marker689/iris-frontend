@@ -20,7 +20,7 @@ export interface ChatbotPolicy {
 	model: string;
 	base_url: string;
 	auto_execute_read_tools: boolean;
-	auto_approve_write_tools: boolean;
+	allow_auto_approve_write_tools: boolean;
 	max_turns_per_conversation: number;
 	max_tool_calls_per_turn: number;
 	daily_token_budget_per_user: number;
@@ -54,7 +54,7 @@ export interface ChatbotPolicyBody {
 	api_key?: string | null;
 	base_url?: string;
 	auto_execute_read_tools?: boolean;
-	auto_approve_write_tools?: boolean;
+	allow_auto_approve_write_tools?: boolean;
 	max_turns_per_conversation?: number;
 	max_tool_calls_per_turn?: number;
 	daily_token_budget_per_user?: number;

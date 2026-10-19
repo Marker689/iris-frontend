@@ -103,6 +103,10 @@ export interface ChatConversation {
 	policy?: ChatConversationPolicy | null;
 	/** User turns sent while Yuki was running, waiting for its next step. */
 	queued_user_texts?: string[];
+	/** The analyst's opt-in to run writes without the Approve/Deny card. */
+	auto_approve_write_tools?: boolean;
+	/** Whether the admin (or the enforced policy) lets the analyst opt in. */
+	auto_approve_write_tools_allowed?: boolean;
 }
 
 export interface PendingToolCall {
@@ -315,6 +319,18 @@ export class ChatService {
 		return ApiService.patch<ChatConversation>(
 			`/case-chat/conversations/${conversationId}`,
 			{ title },
+			options
+		);
+	}
+
+	static async setAutoApproveWriteTools(
+		conversationId: number,
+		enabled: boolean,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<ChatConversation>> {
+		return ApiService.patch<ChatConversation>(
+			`/case-chat/conversations/${conversationId}`,
+			{ auto_approve_write_tools: enabled },
 			options
 		);
 	}
