@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { AiGraphNode } from '$lib/services/ai-workflows.service';
-import { definitionReview, keyReferences, toolReferences } from './ui';
+import type { AiGraphNode, AiWorkflowSummary } from '$lib/services/ai-workflows.service';
+import { definitionReview, keyReferences, toolReferences, workflowMatchesSearch } from './ui';
 
 const node = (id: string, type: string, config: Record<string, unknown> = {}): AiGraphNode => ({
 	id,
@@ -71,5 +71,57 @@ describe('definitionReview', () => {
 
 	it('is empty for harmless nodes', () => {
 		expect(definitionReview({ nodes: [node('d', 'delay')], edges: [] })).toEqual([]);
+	});
+});
+
+describe('workflowMatchesSearch', () => {
+	const workflow = {
+		id: 1,
+		name: 'Phishing triage',
+		description: 'Enrich reported mails',
+		owner: { id: 3, login: 'jdoe', name: 'Jane Doe' },
+		trigger_type: 'event',
+		trigger_config: {},
+		triggers: [
+			{
+				type: 'event',
+				config: { hooks: ['on_postload_alert_create', 'on_postload_alert_update'] }
+			},
+			{ type: 'cron', config: { cron: '*/15 * * * *' } }
+		]
+	} as unknown as AiWorkflowSummary;
+
+	it('matches everything on an empty or blank search', () => {
+		expect(workflowMatchesSearch(workflow, '')).toBe(true);
+		expect(workflowMatchesSearch(workflow, '   ')).toBe(true);
+	});
+
+	it('matches the name and description, case-insensitively', () => {
+		expect(workflowMatchesSearch(workflow, 'PHISHING')).toBe(true);
+		expect(workflowMatchesSearch(workflow, 'reported mail')).toBe(true);
+	});
+
+	it('matches the owner by name or login', () => {
+		expect(workflowMatchesSearch(workflow, 'jane')).toBe(true);
+		expect(workflowMatchesSearch(workflow, 'jdoe')).toBe(true);
+	});
+
+	it('matches every hook of an event trigger, not only the first', () => {
+		expect(workflowMatchesSearch(workflow, 'alert_update')).toBe(true);
+	});
+
+	it('matches trigger labels and schedules', () => {
+		expect(workflowMatchesSearch(workflow, 'schedule')).toBe(true);
+		expect(workflowMatchesSearch(workflow, '*/15')).toBe(true);
+	});
+
+	it('rejects what appears nowhere', () => {
+		expect(workflowMatchesSearch(workflow, 'ransomware')).toBe(false);
+	});
+
+	it('copes with a missing description and owner', () => {
+		const bare = { ...workflow, description: null, owner: null };
+		expect(workflowMatchesSearch(bare, 'phishing')).toBe(true);
+		expect(workflowMatchesSearch(bare, 'jane')).toBe(false);
 	});
 });

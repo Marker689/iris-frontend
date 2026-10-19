@@ -30,8 +30,10 @@ import type {
 	AiTriggerType,
 	AiUserRef,
 	AiValidationError,
-	AiWaitStatus
+	AiWaitStatus,
+	AiWorkflowSummary
 } from '$lib/services/ai-workflows.service';
+import { aiWorkflowTriggers } from '$lib/services/ai-workflows.service';
 import type { NoteColor } from '$lib/utils/ai-workflow-graph';
 
 export const NODE_ICONS: Record<string, typeof Icon> = {
@@ -105,6 +107,33 @@ export function triggerDetail(type: AiTriggerType, config: Record<string, unknow
 	}
 	if (type === 'cron') return String(c.cron ?? '');
 	return '';
+}
+
+/**
+ * Whether a workflow matches a free-text search, case-insensitively: on
+ * its name, description, owner, and each trigger's label, type, hooks and
+ * schedule. An empty search matches everything.
+ */
+export function workflowMatchesSearch(workflow: AiWorkflowSummary, search: string): boolean {
+	const needle = search.trim().toLowerCase();
+	if (!needle) return true;
+	const haystack = [
+		workflow.name,
+		workflow.description ?? '',
+		workflow.owner ? userLabel(workflow.owner) : '',
+		workflow.owner?.login ?? '',
+		...aiWorkflowTriggers(workflow).flatMap((trigger) => {
+			const config = trigger.config ?? {};
+			const hooks = Array.isArray(config.hooks) ? (config.hooks as string[]) : [];
+			return [
+				TRIGGER_LABELS[trigger.type] ?? '',
+				trigger.type,
+				...hooks,
+				trigger.type === 'cron' ? String(config.cron ?? '') : ''
+			];
+		})
+	];
+	return haystack.some((value) => value.toLowerCase().includes(needle));
 }
 
 export const ENTITY_LABELS: Record<AiEntityType, string> = {

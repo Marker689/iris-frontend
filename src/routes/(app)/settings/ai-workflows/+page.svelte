@@ -1,5 +1,5 @@
 <!--
-  AI workflows: list with trigger, active toggle, owner, version and
+  AI workflows: searchable list with trigger, active toggle, owner, version and
   last-24h run counts; new / import / edit / export / publish / delete / run
   / move to category actions, the category column (drop a row on a
   category to move it), the workflow library and the JSON authoring guide. The editor
@@ -19,11 +19,14 @@
 		PlayIcon,
 		PlusIcon,
 		RefreshCwIcon,
+		SearchIcon,
 		Trash2Icon,
 		UploadIcon,
-		WorkflowIcon
+		WorkflowIcon,
+		XIcon
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
 	import { toast } from '$lib/components/ui/toast';
 	import ApiError from '$lib/components/ui/api-error.svelte';
@@ -60,7 +63,8 @@
 		RUN_STATUS_TONES,
 		TRIGGER_LABELS,
 		triggerDetail,
-		userLabel
+		userLabel,
+		workflowMatchesSearch
 	} from './helpers/ui';
 
 	const userCtx = getContext<UserCtx>(USER_CTX);
@@ -82,12 +86,14 @@
 	let publishOpen = $state(false);
 	let importing = $state(false);
 
+	let search = $state('');
+
 	const categories = new CategoryState('ai-workflows');
-	const categoryCounts = $derived(countByCategory(workflows, categories.categories));
+	const searched = $derived(workflows.filter((w) => workflowMatchesSearch(w, search)));
+	// Category counts follow the search, not the category, like war rooms.
+	const categoryCounts = $derived(countByCategory(searched, categories.categories));
 	const shown = $derived(
-		workflows.filter((w) =>
-			categoryMatches(categories.filter, w.category_id, categories.categories)
-		)
+		searched.filter((w) => categoryMatches(categories.filter, w.category_id, categories.categories))
 	);
 
 	async function moveWorkflow(workflowId: number, categoryId: number | null) {
@@ -346,15 +352,46 @@
 					<aside class="w-48 shrink-0" data-testid="wf-categories">
 						<CategorySidebar
 							store={categories}
-							total={workflows.length}
+							total={searched.length}
 							counts={categoryCounts}
 							canManage={canWrite}
 							itemLabel="workflows"
 							onDropItem={canWrite ? moveWorkflow : undefined}
 						/>
 					</aside>
-					<div class="min-w-0 flex-1">
-						{#if shown.length === 0}
+					<div class="min-w-0 flex-1 space-y-3">
+						<div class="relative max-w-sm">
+							<SearchIcon
+								size={12}
+								class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+							/>
+							<Input
+								type="search"
+								placeholder="Search by name, description, owner, trigger…"
+								class="h-7 pl-7 pr-7 text-xs"
+								bind:value={search}
+								aria-label="Search workflows"
+								data-testid="wf-search"
+							/>
+							{#if search}
+								<button
+									type="button"
+									aria-label="Clear search"
+									class="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+									onclick={() => (search = '')}
+								>
+									<XIcon size={11} />
+								</button>
+							{/if}
+						</div>
+						{#if shown.length === 0 && search.trim()}
+							<p
+								class="py-10 text-center text-xs text-muted-foreground"
+								data-testid="wf-search-empty"
+							>
+								No workflow matches <span class="font-mono">{search.trim()}</span>.
+							</p>
+						{:else if shown.length === 0}
 							<p
 								class="py-10 text-center text-xs text-muted-foreground"
 								data-testid="wf-category-empty"
