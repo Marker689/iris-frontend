@@ -478,8 +478,21 @@
 	 */
 	const urlCarriesFilters = (url: URL) => FILTER_KEYS.some((key) => url.searchParams.has(key));
 
-	/** Resolves to whether a navigation was actually issued. */
-	const writeQueryToUrl = async (queryState: QueryState): Promise<boolean> => {
+	/**
+	 * The URL `commitQuery` last wrote, whose query it loads itself. The URL
+	 * effect skips that one navigation, or every page change, sort and
+	 * filter would fetch the queue twice.
+	 */
+	let selfLoadedHref: string | null = null;
+
+	/**
+	 * Resolves to whether a navigation was actually issued. `selfLoaded`
+	 * says the caller loads `queryState` itself — see `selfLoadedHref`.
+	 */
+	const writeQueryToUrl = async (
+		queryState: QueryState,
+		{ selfLoaded = false }: { selfLoaded?: boolean } = {}
+	): Promise<boolean> => {
 		const url = new URL(window.location.href);
 		// Untracked for the same reason as in `readQueryFromUrl`: the
 		// default-view branch of the URL effect calls this synchronously.
@@ -542,6 +555,8 @@
 		const nextHref = `${url.pathname}${url.search}`;
 		const currentHref = `${window.location.pathname}${window.location.search}`;
 		if (nextHref === currentHref) return false;
+
+		if (selfLoaded) selfLoadedHref = nextHref;
 
 		await goto(nextHref, {
 			replaceState: true,
@@ -648,7 +663,7 @@
 		if (status === 'loading') return;
 
 		query = nextQuery;
-		writeQueryToUrl(nextQuery);
+		writeQueryToUrl(nextQuery, { selfLoaded: true });
 
 		if (status !== 'initial') {
 			status = 'loading';
@@ -1138,6 +1153,12 @@
 	$effect(() => {
 		const url = new URL(page.url);
 		const nextQuery = readQueryFromUrl(url);
+
+		if (selfLoadedHref !== null && selfLoadedHref === `${url.pathname}${url.search}`) {
+			selfLoadedHref = null;
+			return;
+		}
+		selfLoadedHref = null;
 
 		// Nothing is fetched until the default view is known — see the
 		// declaration of `defaultViewResolved`. The query still lands so
