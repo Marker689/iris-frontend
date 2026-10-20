@@ -115,6 +115,8 @@ export interface AiManualTriggerConfig {
 	menus?: string[];
 	/** Menu entry label; the workflow name when empty. */
 	menu_label?: string;
+	/** One run for all the selected case objects, their list in `trigger.payload.data`. */
+	batch?: boolean;
 }
 
 export interface AiWebhookTriggerConfig {

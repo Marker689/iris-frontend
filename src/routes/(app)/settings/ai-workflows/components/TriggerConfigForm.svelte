@@ -116,6 +116,13 @@
 		return [...new Set(needed)].filter((e) => !accepted.includes(e));
 	});
 
+	// One run for the whole selection: objects of one case only
+	const SINGLE_RUN_MENUS = ['alert', 'case'];
+	const singleRunMenus = $derived.by(() => {
+		if (type !== 'manual') return [];
+		return asStrings(config.menus).filter((m) => SINGLE_RUN_MENUS.includes(m));
+	});
+
 	const preview = $derived(type === 'cron' ? cronPreview(String(config.cron ?? '')) : null);
 
 	const fmtUtc = (d: Date) =>
@@ -345,6 +352,27 @@
 							data-testid="wf-trigger-menu-label"
 						/>
 					</label>
+					<label class="flex items-center justify-between gap-2 text-xs">
+						<span>
+							One run for the whole selection
+							<span class="block text-2xs text-muted-foreground">
+								Several selected objects start a single run on their case, with their list in
+								<code class="font-mono">trigger.payload.data</code>, instead of one run each.
+							</span>
+						</span>
+						<Switch
+							checked={config.batch === true}
+							disabled={readOnly || (singleRunMenus.length > 0 && config.batch !== true)}
+							onCheckedChange={(v) => (config.batch = v)}
+							data-testid="wf-trigger-batch"
+						/>
+					</label>
+					{#if config.batch === true && singleRunMenus.length > 0}
+						<span class="flex items-center gap-1 text-2xs text-destructive">
+							<TriangleAlertIcon class="size-3 shrink-0" />
+							Not for the {singleRunMenus.join(', ')} menu: their objects each run on their own entity.
+						</span>
+					{/if}
 				{/if}
 			{:else if type === 'webhook'}
 				<label class="flex items-center justify-between gap-2 text-xs">
