@@ -6,7 +6,8 @@
   whatever tab is open, and so the Edit / Delete / module-hook actions have
   one home instead of being repeated at the top of every Details tab — which
   is where all four of them used to sit, each with its own copy of the
-  clipboard and hook plumbing.
+  clipboard and hook plumbing. The hooks sit in a "Run" menu next to Edit,
+  the same one the list's selection bar shows.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -21,18 +22,17 @@
 		type ServerIcon
 	} from 'lucide-svelte';
 	import { cn } from '$lib/utils';
-	import { callHook, hookOptionKey } from '$lib/utils/hooks';
 	import { toast } from '$lib/stores/toast.store';
-	import { HooksService, type HookObjectType, type HookOption } from '$lib/services/hooks.service';
+	import type { HookObjectType } from '$lib/services/hooks.service';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuItem,
-		DropdownMenuTrigger,
-		Separator
+		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
 	import ConfirmationDialog from '$lib/components/ui/dialog/ConfirmationDialog.svelte';
+	import BulkHooksMenu from './BulkHooksMenu.svelte';
 
 	type IconComponent = typeof ServerIcon;
 
@@ -111,8 +111,6 @@
 			isDeleting = false;
 		}
 	};
-	let hookOptions = $state<HookOption[]>([]);
-
 	const copyToClipboard = (value: string) => {
 		navigator.clipboard
 			.writeText(value)
@@ -125,28 +123,6 @@
 				toast({ title: 'Could not copy link', variant: 'destructive' });
 			});
 	};
-
-	const callModule = async (hookOption: HookOption) => {
-		const result = await callHook(caseId, hookType, [objectId], hookOption);
-
-		toast({
-			variant: result?.status === 'error' ? 'destructive' : 'success',
-			title: result?.message
-		});
-	};
-
-	const loadHooks = async () => {
-		// v2 returns the bare array — `response.data` IS the list. Reading
-		// a second `.data` off it (as this used to) always yielded
-		// undefined, which is why no module ever contributed a button here.
-		const response = await HooksService.list(hookType);
-		hookOptions = Array.isArray(response.data) ? response.data : [];
-	};
-
-	$effect(() => {
-		void hookType;
-		loadHooks();
-	});
 </script>
 
 <!--
@@ -207,6 +183,8 @@
 					{/if}
 				</Button>
 			{:else}
+				<BulkHooksMenu {hookType} {caseId} targets={[objectId]} size="sm" align="end" />
+
 				<Button variant="outline" size="sm" onclick={onStartEditing}>
 					<EditIcon class="h-4 w-4" />
 					{editLabel}
@@ -254,16 +232,6 @@
 				>
 					<FileSymlinkIcon /> Markdown Link
 				</DropdownMenuItem>
-
-				{#if canEdit && hookOptions.length}
-					<Separator />
-
-					{#each hookOptions as hookOption (hookOptionKey(hookOption))}
-						<DropdownMenuItem onclick={() => callModule(hookOption)}>
-							{hookOption.manual_hook_ui_name}
-						</DropdownMenuItem>
-					{/each}
-				{/if}
 			</DropdownMenuContent>
 		</DropdownMenu>
 	</div>

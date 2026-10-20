@@ -11,7 +11,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { ChevronDownIcon, ZapIcon } from 'lucide-svelte';
-	import { Button } from '$lib/components/ui/button';
+	import { Button, type ButtonSize } from '$lib/components/ui/button';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -36,6 +36,11 @@
 		onDone?: () => void;
 		/** Replaces the default "Run" button; spread `props` on the element. */
 		trigger?: Snippet<[{ props: Record<string, unknown>; disabled: boolean }]>;
+		/** Size and extra classes of the default "Run" button. */
+		size?: ButtonSize;
+		class?: string;
+		/** Header of the menu, e.g. "Run on this case". */
+		label?: string;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
 	};
@@ -48,6 +53,9 @@
 		options,
 		onDone,
 		trigger,
+		size = 'xs',
+		class: className = '',
+		label,
 		align = 'start',
 		side = 'bottom'
 	}: Props = $props();
@@ -96,7 +104,7 @@
 				{#if trigger}
 					{@render trigger({ props, disabled: isDisabled })}
 				{:else}
-					<Button {...props} size="xs" variant="outline" disabled={isDisabled}>
+					<Button {...props} {size} variant="outline" class={className} disabled={isDisabled}>
 						<ZapIcon size={12} />
 						Run
 						<ChevronDownIcon size={12} />
@@ -106,9 +114,9 @@
 		</DropdownMenuTrigger>
 
 		<DropdownMenuContent {align} {side}>
-			{#if targets.length > 1}
+			{#if targets.length > 1 || label}
 				<DropdownMenuLabel class="text-2xs font-normal text-muted-foreground">
-					On {targets.length} selected
+					{targets.length > 1 ? `On ${targets.length} selected` : label}
 				</DropdownMenuLabel>
 				<DropdownMenuSeparator />
 			{/if}

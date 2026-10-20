@@ -9,8 +9,7 @@
 		HardDriveUploadIcon,
 		PlayIcon,
 		RotateCcwIcon,
-		ThumbsUpIcon,
-		ZapIcon
+		ThumbsUpIcon
 	} from 'lucide-svelte';
 	import { current_user } from '$lib/stores/auth.store';
 	import { CASES_CTX, type CasesContext } from '$lib/contexts/cases.context.svelte';
@@ -68,10 +67,7 @@
 	import {
 		DropdownMenuItem,
 		DropdownMenuLabel,
-		DropdownMenuSeparator,
-		DropdownMenuSub,
-		DropdownMenuSubContent,
-		DropdownMenuSubTrigger
+		DropdownMenuSeparator
 	} from '$lib/components/ui/dropdown-menu';
 	import { toast } from '$lib/components/ui/toast';
 	import CaseTopbar from './components/CaseTopbar.svelte';
@@ -81,7 +77,6 @@
 	import RequestReviewDialog from './components/RequestReviewDialog.svelte';
 	import CaseReportDialog from './components/CaseReportDialog.svelte';
 	import type { CaseReportType } from '$lib/services/case-reports.service';
-	import { callHook, hookOptionKey } from '$lib/utils/hooks';
 	import { APP_CTX, type AppContext } from '$lib/contexts/app.context.svelte';
 	import type { Case } from '$lib/types/resources/case';
 	import type { UserInfo } from '$lib/services/auth.service';
@@ -205,15 +200,6 @@
 				variant: 'destructive'
 			});
 		}
-	};
-
-	const callModule = async (hookOption: HookOption) => {
-		const id = cases.currentCaseId();
-		const result = await callHook(id, 'case', [id], hookOption);
-		toast({
-			variant: result?.status === 'error' ? 'destructive' : 'success',
-			title: result?.message
-		});
 	};
 
 	// Review status IDs are seeded in a fixed order by post_init.py:
@@ -393,20 +379,6 @@
 		<DropdownMenuItem>
 			<HardDriveUploadIcon class="mr-2 size-4" /> Pipelines
 		</DropdownMenuItem>
-		{#if hookOptions.length}
-			<DropdownMenuSub>
-				<DropdownMenuSubTrigger>
-					<ZapIcon class="mr-2 size-4" /> Processors
-				</DropdownMenuSubTrigger>
-				<DropdownMenuSubContent>
-					{#each hookOptions as hookOption (hookOptionKey(hookOption))}
-						<DropdownMenuItem onclick={() => callModule(hookOption)}>
-							{hookOption.manual_hook_ui_name}
-						</DropdownMenuItem>
-					{/each}
-				</DropdownMenuSubContent>
-			</DropdownMenuSub>
-		{/if}
 	{/if}
 	{#if caseAccess.canEdit() || isReviewer}
 		<DropdownMenuSeparator />
@@ -472,7 +444,7 @@
 	  view"). Pinning the height here keeps the scroll inside the panes.
 	-->
 	<div class="flex h-full min-h-0 w-full grow flex-col bg-background">
-		<CaseTopbar menuItems={caseMenuItems} />
+		<CaseTopbar menuItems={caseMenuItems} {hookOptions} />
 
 		{#if caseAccess.isReadOnly()}
 			<ReadOnlyBanner />

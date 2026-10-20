@@ -20,7 +20,8 @@
 		Star,
 		Tag,
 		Unlink2,
-		UserRound
+		UserRound,
+		ZapIcon
 	} from 'lucide-svelte';
 	import { goto } from '$app/navigation';
 	import { AlertService } from '$lib/services/alerts.service';
@@ -74,13 +75,17 @@
 	import CaseAddDropdown from './CaseAddDropdown.svelte';
 	import CaseExportDialog from './CaseExportDialog.svelte';
 	import CaseQuickAddButton from './CaseQuickAddButton.svelte';
+	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
+	import type { HookOption } from '$lib/services/hooks.service';
 	import type { Snippet } from 'svelte';
 
 	type Props = {
 		menuItems?: Snippet;
+		/** Manual hooks of the case itself, behind the "Run" button. */
+		hookOptions?: HookOption[];
 	};
 
-	let { menuItems }: Props = $props();
+	let { menuItems, hookOptions = [] }: Props = $props();
 
 	const cases = getContext<CasesContext>(CASES_CTX);
 	const activityPanel = getContext<ActivityPanelContext | undefined>(ACTIVITY_PANEL_CTX);
@@ -1273,6 +1278,31 @@
 			behind as utilities.
 		-->
 		{#if canEdit}
+			{#if caseData?.case_id}
+				<BulkHooksMenu
+					hookType="case"
+					caseId={caseData.case_id}
+					targets={[caseData.case_id]}
+					options={hookOptions}
+					label="Run on this case"
+					align="end"
+				>
+					{#snippet trigger({ props, disabled })}
+						<Button
+							{...props}
+							variant="outline"
+							size="sm"
+							class="h-8 gap-x-1 rounded-sm"
+							{disabled}
+							data-testid="case-run-hooks"
+						>
+							<ZapIcon size={16} />
+							<span class="hidden lg:inline">Run</span>
+						</Button>
+					{/snippet}
+				</BulkHooksMenu>
+			{/if}
+
 			<CaseQuickAddButton />
 
 			<CaseAddDropdown buttonClass="h-8 w-8 rounded-sm p-0 [&_span]:hidden" />
