@@ -157,7 +157,7 @@
 {#if manual.length > 0}
 	<FormSection
 		title="Manual triggers"
-		description="Adds an entry to the menu of the chosen objects. Picking it sends that object to this webhook right away; the condition still applies."
+		description="Adds an entry to the menu of the chosen objects and to their selection bar. Picking it sends the object to this webhook right away — several selected objects go in a single delivery, with data as their list (loop over items to handle both). The condition still applies, once per delivery."
 		testId="webhook-manual-triggers"
 	>
 		{#snippet actions()}

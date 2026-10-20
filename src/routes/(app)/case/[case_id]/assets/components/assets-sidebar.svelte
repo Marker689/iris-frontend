@@ -10,6 +10,7 @@
 	import { CaseAssetsService, type ListCaseAssetsParams } from '$lib/services/case-assets.service';
 	import type { Asset } from '$lib/types/resources/asset';
 	import DownloadModal from '$lib/components/common/DownloadModal.svelte';
+	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
 	import { AVAILABLE_EXPORT_COLUMNS, convertToCSV } from '$lib/utils/asset.utils';
 	import { Button } from '$lib/components/ui/button';
 	import {
@@ -703,6 +704,14 @@
 					</DropdownMenuContent>
 				</DropdownMenu>
 			{/if}
+
+			<BulkHooksMenu
+				hookType="asset"
+				caseId={Number(page.params.case_id)}
+				targets={[...selectedAssets]}
+				disabled={isBulkWorking}
+				onDone={cancelSelect}
+			/>
 
 			<Button
 				size="xs"

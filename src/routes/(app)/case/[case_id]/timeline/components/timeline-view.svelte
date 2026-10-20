@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { formatDayHeading } from '$lib/utils/time-formatter';
 	import type { CaseTimelineEvent } from '$lib/services/case-timeline.service';
+	import type { HookOption } from '$lib/services/hooks.service';
 	import TimelineEventCard from './timeline-event-card.svelte';
 
 	type TimelineGroup = {
@@ -27,6 +28,9 @@
 		onComments: (eventId: number) => void;
 		onDuplicate: (eventId: number) => void;
 		onDelete: (eventId: number) => void;
+		/** Manual hooks of timeline events, listed in each card's menu. */
+		hookOptions?: HookOption[];
+		onRunHook?: (eventId: number, hookOption: HookOption) => void;
 		canEdit?: boolean;
 	};
 
@@ -49,6 +53,8 @@
 		onComments,
 		onDuplicate,
 		onDelete,
+		hookOptions = [],
+		onRunHook = () => {},
 		canEdit = true
 	}: Props = $props();
 
@@ -90,6 +96,8 @@
 		{onComments}
 		{onDuplicate}
 		{onDelete}
+		{hookOptions}
+		{onRunHook}
 		{canEdit}
 	/>
 
@@ -150,6 +158,8 @@
 			{onComments}
 			{onDuplicate}
 			{onDelete}
+			{hookOptions}
+			{onRunHook}
 			{canEdit}
 		/>
 
@@ -194,6 +204,8 @@
 					{onComments}
 					{onDuplicate}
 					{onDelete}
+					{hookOptions}
+					{onRunHook}
 					{canEdit}
 				/>
 
@@ -232,6 +244,8 @@
 					{onComments}
 					{onDuplicate}
 					{onDelete}
+					{hookOptions}
+					{onRunHook}
 					{canEdit}
 				/>
 

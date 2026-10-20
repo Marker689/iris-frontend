@@ -6,7 +6,8 @@
 		HistoryIcon,
 		MessagesSquareIcon,
 		SaveIcon,
-		TrashIcon
+		TrashIcon,
+		ZapIcon
 	} from 'lucide-svelte';
 	import type { Note } from '$lib/types/resources/note';
 	import { stripMentionChipsForExport } from '$lib/components/common/MarkDown/export';
@@ -17,6 +18,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import Badge from '$lib/components/ui/badge/badge.svelte';
 	import ConfirmationDialog from '$lib/components/ui/dialog/ConfirmationDialog.svelte';
+	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
 	import {
 		Tooltip,
 		TooltipContent,
@@ -360,6 +362,14 @@
 		</TooltipProvider>
 
 		{#if canEdit}
+			<BulkHooksMenu hookType="note" caseId={caseIdFromRoute} targets={[note.note_id]} align="end">
+				{#snippet trigger({ props, disabled })}
+					<Button {...props} variant="link" size="xs" title="Run on this note" {disabled}>
+						<ZapIcon />
+					</Button>
+				{/snippet}
+			</BulkHooksMenu>
+
 			<TooltipProvider>
 				<Tooltip>
 					<TooltipTrigger>

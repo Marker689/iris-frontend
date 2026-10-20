@@ -13,6 +13,7 @@
 	} from '$lib/services/case-evidences.service';
 	import type { Evidence, EvidenceType } from '$lib/types/resources/evidence';
 	import DownloadModal from '$lib/components/common/DownloadModal.svelte';
+	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
 	import {
 		AVAILABLE_EVIDENCE_EXPORT_COLUMNS,
 		convertEvidencesToCSV
@@ -447,6 +448,14 @@
 					{/each}
 				</DropdownMenuContent>
 			</DropdownMenu>
+
+			<BulkHooksMenu
+				hookType="evidence"
+				caseId={Number(page.params.case_id)}
+				targets={[...selectedEvidences]}
+				disabled={isBulkWorking}
+				onDone={cancelSelect}
+			/>
 
 			<Button
 				size="xs"

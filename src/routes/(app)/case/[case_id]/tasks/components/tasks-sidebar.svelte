@@ -7,6 +7,7 @@
 	import { CaseTasksService, type ListCaseTasksParams } from '$lib/services/case-tasks.service';
 	import type { Task, TaskStatus } from '$lib/types/resources/task';
 	import DownloadModal from '$lib/components/common/DownloadModal.svelte';
+	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
 	import { AVAILABLE_TASK_EXPORT_COLUMNS, convertTasksToCSV } from '$lib/utils/task.utils';
 	import TaskCard from '$lib/components/common/tasks/TaskCard.svelte';
 	import TaskDataTable from '$lib/components/common/tasks/TaskDataTable.svelte';
@@ -371,6 +372,14 @@
 					{/each}
 				</DropdownMenuContent>
 			</DropdownMenu>
+
+			<BulkHooksMenu
+				hookType="task"
+				caseId={Number(page.params.case_id)}
+				targets={[...selectedTasks]}
+				disabled={isBulkWorking}
+				onDone={cancelSelect}
+			/>
 
 			<Button
 				size="xs"

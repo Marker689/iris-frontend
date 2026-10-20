@@ -6,14 +6,21 @@
 		ListTreeIcon,
 		PlusCircleIcon,
 		RefreshCwIcon,
-		Trash2Icon
+		Trash2Icon,
+		ZapIcon
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
+	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
+	import type { HookOption } from '$lib/services/hooks.service';
 
 	type Props = {
 		selecting: boolean;
 		onToggleSelecting: () => void;
 		onDelete: () => void;
+		caseId: number;
+		selectedIds: number[];
+		hookOptions: HookOption[];
+		onHookDone: () => void;
 		onAddEvent: () => void;
 		onToggleFoldAll: () => void;
 		onRefresh: () => void;
@@ -26,6 +33,10 @@
 		selecting,
 		onToggleSelecting,
 		onDelete,
+		caseId,
+		selectedIds,
+		hookOptions,
+		onHookDone,
 		onAddEvent,
 		onToggleFoldAll,
 		onRefresh,
@@ -54,6 +65,26 @@
 					class="size-8 text-red-500 hover:text-red-700"
 					onclick={onDelete}><Trash2Icon class="size-4" /></Button
 				>
+
+				<BulkHooksMenu
+					hookType="event"
+					{caseId}
+					targets={selectedIds}
+					options={hookOptions}
+					onDone={onHookDone}
+					side="left"
+				>
+					{#snippet trigger({ props, disabled })}
+						<Button
+							{...props}
+							variant="ghost"
+							size="icon"
+							class="size-8"
+							title="Run on the selected events"
+							{disabled}><ZapIcon class="size-4" /></Button
+						>
+					{/snippet}
+				</BulkHooksMenu>
 			{/if}
 
 			<Button

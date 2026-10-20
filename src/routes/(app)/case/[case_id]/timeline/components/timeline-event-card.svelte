@@ -14,6 +14,8 @@
 		Trash2Icon
 	} from 'lucide-svelte';
 	import type { CaseTimelineEvent } from '$lib/services/case-timeline.service';
+	import type { HookOption } from '$lib/services/hooks.service';
+	import { hookOptionKey } from '$lib/utils/hooks';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		DropdownMenu,
@@ -54,6 +56,8 @@
 		onComments: (eventId: number) => void;
 		onDuplicate: (eventId: number) => void;
 		onDelete: (eventId: number) => void;
+		hookOptions?: HookOption[];
+		onRunHook?: (eventId: number, hookOption: HookOption) => void;
 		canEdit?: boolean;
 	};
 
@@ -77,6 +81,8 @@
 		onComments,
 		onDuplicate,
 		onDelete,
+		hookOptions = [],
+		onRunHook = () => {},
 		canEdit = true
 	}: Props = $props();
 
@@ -536,6 +542,14 @@
 								<DropdownMenuItem class="text-red-500" onclick={() => onDelete(event.event_id)}>
 									<Trash2Icon class="mr-2 size-3.5" /> Delete
 								</DropdownMenuItem>
+								{#if hookOptions.length}
+									<Separator />
+									{#each hookOptions as hookOption (hookOptionKey(hookOption))}
+										<DropdownMenuItem onclick={() => onRunHook(event.event_id, hookOption)}>
+											{hookOption.manual_hook_ui_name}
+										</DropdownMenuItem>
+									{/each}
+								{/if}
 							{/if}
 						</DropdownMenuContent>
 					</DropdownMenu>

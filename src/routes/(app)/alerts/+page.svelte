@@ -46,6 +46,8 @@
 	import { UsersService, type MentionableUser } from '$lib/services/users.service';
 	import AlertFilterLabels from './components/AlertFilters/AlertFilterLabels.svelte';
 	import LuceneSearchBar from '$lib/components/common/SearchBar/LuceneSearchBar.svelte';
+	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
+	import { alertHooks } from '$lib/stores/alert-hooks.store.svelte';
 	import { current_user } from '$lib/stores/auth.store';
 	import Button from '$lib/components/ui/button/button.svelte';
 	import { Checkbox } from '$lib/components/ui/checkbox';
@@ -1342,6 +1344,15 @@
 			{/each}
 		</DropdownMenuContent>
 	</DropdownMenu>
+
+	<!-- The cards load the shared alert hooks; this reuses them. -->
+	<BulkHooksMenu
+		hookType="alert"
+		targets={getSelectedAlertIds()}
+		options={alertHooks.options}
+		onDone={cancelSelect}
+		align="end"
+	/>
 
 	<Button variant="destructive" size="xs" onclick={() => (showClose = true)}>Close with note</Button
 	>

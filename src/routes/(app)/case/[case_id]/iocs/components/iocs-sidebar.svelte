@@ -27,6 +27,7 @@
 	import { ChevronDownIcon } from 'lucide-svelte';
 	import { IocTypesService, type IocType } from '$lib/services/ioc-types.service';
 	import DownloadModal from '$lib/components/common/DownloadModal.svelte';
+	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
 	import { AVAILABLE_IOC_EXPORT_COLUMNS, convertIocsToCSV } from '$lib/utils/iocs.utils';
 
 	const caseIocs = getContext<CaseIocsContext>(CASE_IOCS_CTX);
@@ -475,6 +476,14 @@
 					{/each}
 				</DropdownMenuContent>
 			</DropdownMenu>
+
+			<BulkHooksMenu
+				hookType="ioc"
+				caseId={Number(page.params.case_id)}
+				targets={[...selectedIocs]}
+				disabled={isBulkWorking}
+				onDone={cancelSelect}
+			/>
 
 			<Button
 				size="xs"

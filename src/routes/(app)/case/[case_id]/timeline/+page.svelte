@@ -19,6 +19,8 @@
 	import type { Asset } from '$lib/types/resources/asset';
 	import type { Ioc } from '$lib/types/resources/ioc';
 	import { CommentsService } from '$lib/services/comments.service';
+	import { HooksService, type HookOption } from '$lib/services/hooks.service';
+	import { callHook } from '$lib/utils/hooks';
 	import {
 		CASE_TIMELINE_CTX,
 		createCaseTimelineContext,
@@ -98,6 +100,9 @@
 	let eventCategories = $state<EventCategory[]>([]);
 	let caseAssets = $state<Asset[]>([]);
 	let caseIocs = $state<Ioc[]>([]);
+	// Manual hooks of timeline events, loaded once for every card's menu
+	// and the selection's "Run" menu.
+	let hookOptions = $state<HookOption[]>([]);
 	let timelines = $state<CaseTimeline[]>([]);
 	let timelinesLoading = $state<boolean>(true);
 	// Empty set = "show all" (no timeline filter applied). A non-empty
@@ -512,6 +517,19 @@
 		}
 	};
 
+	const loadHookOptions = async () => {
+		const res = await HooksService.list('event', { fetch });
+		hookOptions = Array.isArray(res.data) ? res.data : [];
+	};
+
+	const runEventHook = async (eventId: number, hookOption: HookOption) => {
+		const result = await callHook(Number(page.params.case_id), 'event', [eventId], hookOption);
+		toast({
+			variant: result.status === 'error' ? 'destructive' : 'success',
+			title: result.message
+		});
+	};
+
 	const loadCaseAssets = async () => {
 		const caseId = Number(page.params.case_id);
 		const res = await CaseAssetsService.list(caseId, { per_page: 500 }, { fetch });
@@ -854,6 +872,7 @@
 	$effect(() => {
 		timeline.loadEvents({}, { fetch });
 		loadEventCategories();
+		loadHookOptions();
 		loadCaseAssets();
 		loadCaseIocs();
 		loadCaseTimelines();
@@ -948,6 +967,8 @@
 							onComments={showComments}
 							onDuplicate={duplicateEvent}
 							onDelete={deleteEvent}
+							{hookOptions}
+							onRunHook={runEventHook}
 							{canEdit}
 						/>
 
@@ -976,6 +997,10 @@
 					{selecting}
 					onToggleSelecting={toggleSelecting}
 					onDelete={() => (showConfirmDelete = true)}
+					caseId={Number(page.params.case_id)}
+					selectedIds={[...selected]}
+					{hookOptions}
+					onHookDone={toggleSelecting}
 					onAddEvent={addEvent}
 					onToggleFoldAll={toggleFoldAll}
 					onRefresh={refreshTimeline}
