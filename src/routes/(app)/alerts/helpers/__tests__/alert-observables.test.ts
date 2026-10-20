@@ -14,9 +14,12 @@ import { AlertService } from '$lib/services/alerts.service';
 import {
 	alertAssetChanges,
 	alertAssetForm,
+	alertAssetsCount,
 	alertIocChanges,
 	alertIocForm,
+	alertIocsCount,
 	hasChanges,
+	hasPartialObservables,
 	parseEnrichment,
 	saveAlertAsset,
 	saveAlertIoc
@@ -200,6 +203,27 @@ describe('saveAlertIoc', () => {
 		expect(updated).toBeNull();
 		expect(alert.iocs[0].ioc_description).toBeNull();
 	});
+
+	it('patches the other copies of the alert too', async () => {
+		const full = { alert_id: 10, iocs: [ioc({ ioc_id: 7 })], assets: [] } as unknown as Alert;
+		const listed = {
+			alert_id: 10,
+			iocs: [ioc({ ioc_id: 7 })],
+			iocs_count: 40,
+			assets: []
+		} as unknown as Alert;
+
+		(AlertService.updateIoc as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+			ok: true,
+			status: 200,
+			data: ioc({ ioc_id: 7, ioc_description: 'seen in proxy logs' })
+		});
+
+		await saveAlertIoc(full, 7, { ioc_description: 'seen in proxy logs' }, [listed]);
+
+		expect(full.iocs[0].ioc_description).toBe('seen in proxy logs');
+		expect(listed.iocs[0].ioc_description).toBe('seen in proxy logs');
+	});
 });
 
 describe('saveAlertAsset', () => {
@@ -222,5 +246,30 @@ describe('saveAlertAsset', () => {
 		expect(updated?.asset_description).toBe('jump host');
 		expect(alert.assets[0].asset_description).toBe('jump host');
 		expect(alert.assets[0].alerts).toEqual([{ alert_id: 10 }]);
+	});
+});
+
+describe('summary listings', () => {
+	const listed = (overrides: Partial<Alert> = {}) =>
+		({ alert_id: 10, assets: [asset({ asset_id: 4 })], iocs: [], ...overrides }) as Alert;
+
+	it('counts what the listing left out', () => {
+		const alert = listed({ assets_count: 500, iocs_count: 3 });
+
+		expect(alertAssetsCount(alert)).toBe(500);
+		expect(alertIocsCount(alert)).toBe(3);
+		expect(hasPartialObservables(alert)).toBe(true);
+	});
+
+	it('falls back to the lists of a full alert', () => {
+		const alert = listed();
+
+		expect(alertAssetsCount(alert)).toBe(1);
+		expect(alertIocsCount(alert)).toBe(0);
+		expect(hasPartialObservables(alert)).toBe(false);
+	});
+
+	it('is not partial when the listing held everything', () => {
+		expect(hasPartialObservables(listed({ assets_count: 1, iocs_count: 0 }))).toBe(false);
 	});
 });

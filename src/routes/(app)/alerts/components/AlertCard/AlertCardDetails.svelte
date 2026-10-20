@@ -14,12 +14,18 @@
 	import AlertIocEditDialog from '../alert-ioc-edit-dialog.svelte';
 	import AlertAssetEditDialog from '../alert-asset-edit-dialog.svelte';
 	import { hasChanges, saveAlertAsset, saveAlertIoc } from '../../helpers/alert-observables';
+	import { fullAlertObservables } from '../../helpers/full-alert-observables.svelte';
 
 	let {
 		alert
 	}: {
 		alert: Alert;
 	} = $props();
+
+	// The queue lists only the first few assets and IOCs of an alert; the
+	// expanded card shows them all.
+	const full = fullAlertObservables(() => alert);
+	const observables = $derived(full.alert ?? alert);
 
 	let showRawAlert = $state(false);
 
@@ -62,9 +68,9 @@
 		editedAsset = null;
 	};
 
-	// `saveAlertIoc` patches the row back into `alert` itself, which is
-	// what the tables render — nothing to refetch, and the other views
-	// on the same alert object see the edit too.
+	// `saveAlertIoc` patches the row back into what the tables render and
+	// into `alert` itself — nothing to refetch, and the other views on the
+	// same alert object see the edit too.
 	const saveIoc = async (ioc: Ioc, changes: Parameters<typeof saveAlertIoc>[2]) => {
 		if (!hasChanges(changes)) {
 			closeIocDialog();
@@ -73,7 +79,12 @@
 
 		saving = true;
 
-		const updated = await saveAlertIoc(alert, ioc.ioc_id, changes);
+		const updated = await saveAlertIoc(
+			observables,
+			ioc.ioc_id,
+			changes,
+			observables === alert ? [] : [alert]
+		);
 
 		saving = false;
 
@@ -90,7 +101,12 @@
 
 		saving = true;
 
-		const updated = await saveAlertAsset(alert, asset.asset_id, changes);
+		const updated = await saveAlertAsset(
+			observables,
+			asset.asset_id,
+			changes,
+			observables === alert ? [] : [alert]
+		);
 
 		saving = false;
 
@@ -209,11 +225,11 @@
 	</div>
 
 	<!-- IOCs -->
-	{#if alert.iocs.length}
+	{#if observables.iocs.length}
 		<div class="rounded-lg border border-border/50 bg-muted/30 p-4">
 			<h4 class="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">IOCs</h4>
 			<IocDataTable
-				iocs={alert.iocs}
+				iocs={observables.iocs}
 				showDescription
 				showTags
 				onShowEnrichment={(ioc) => showEnrichment(ioc.ioc_value, ioc.ioc_enrichment)}
@@ -223,13 +239,13 @@
 	{/if}
 
 	<!-- Assets -->
-	{#if alert.assets.length}
+	{#if observables.assets.length}
 		<div class="rounded-lg border border-border/50 bg-muted/30 p-4">
 			<h4 class="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
 				Assets
 			</h4>
 			<AssetDataTable
-				assets={alert.assets}
+				assets={observables.assets}
 				showDescription
 				onShowEnrichment={(asset) => showEnrichment(asset.asset_name, asset.asset_enrichment)}
 				onEdit={editAsset}

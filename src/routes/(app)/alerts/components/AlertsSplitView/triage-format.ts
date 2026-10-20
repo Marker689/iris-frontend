@@ -150,13 +150,15 @@ export const ageVar = (iso: string | null | undefined, now: number = Date.now())
 
 /**
  * The mockup's asset chip collapses a fan-out to a count ("14 hosts")
- * rather than listing names it has no room for.
+ * rather than listing names it has no room for. `total` is the alert's
+ * `assets_count`, for a queue that only listed the first few.
  */
-export const assetLabel = (assets: Asset[] | null | undefined): string => {
+export const assetLabel = (assets: Asset[] | null | undefined, total?: number): string => {
 	const names = (assets ?? []).map((a) => a?.asset_name).filter(Boolean) as string[];
 	if (names.length === 0) return '';
-	if (names.length === 1) return names[0];
-	return `${names.length} hosts`;
+	const count = Math.max(total ?? 0, names.length);
+	if (count === 1) return names[0];
+	return `${count} hosts`;
 };
 
 /**

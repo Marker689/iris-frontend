@@ -577,8 +577,14 @@
 			creation_start_date: toApiDate(next.filters.creation_start_date),
 			creation_end_date: toApiDate(next.filters.creation_end_date, true),
 			page: next.page,
-			per_page: next.per_page
-		};
+			per_page: next.per_page,
+			// An alert can carry hundreds of assets and IOCs, and listing
+			// them all for every row is most of the page's weight. Rows get
+			// the first few; whatever shows an alert in full fetches the rest
+			// (`fullAlertObservables`). Cards opened expanded show them all,
+			// so that layout still asks for everything up front.
+			observables: next.view === 'list' && next.expanded ? 'full' : 'summary'
+		} satisfies FilterAlertsParams;
 
 		try {
 			// The split view's queue lists a cluster as one entry with its

@@ -62,6 +62,13 @@ export interface FilterAlertsParams {
 	 * `GET /api/v2/alerts/search-schema` lists the vocabulary.
 	 */
 	query?: string;
+	/**
+	 * `'summary'` lists only the first few assets and IOCs of each alert,
+	 * with their totals in `assets_count` / `iocs_count`. An alert can carry
+	 * hundreds of each, which a queue row never shows. The default,
+	 * `'full'`, lists them all.
+	 */
+	observables?: 'full' | 'summary';
 }
 
 /** One searchable alias, as `GET /api/v2/alerts/search-schema` describes it. */

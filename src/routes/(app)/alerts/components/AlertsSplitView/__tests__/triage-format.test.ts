@@ -215,6 +215,12 @@ describe('assetLabel', () => {
 		expect(assetLabel([])).toBe('');
 		expect(assetLabel(null)).toBe('');
 	});
+
+	it('counts the assets a summary listing left out', () => {
+		expect(assetLabel([asset('a'), asset('b')], 500)).toBe('500 hosts');
+		expect(assetLabel([asset('DC-02')], 1)).toBe('DC-02');
+		expect(assetLabel([asset('DC-02')], 3)).toBe('3 hosts');
+	});
 });
 
 describe('techniqueLabels / primaryTechnique', () => {

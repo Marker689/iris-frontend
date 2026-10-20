@@ -152,6 +152,25 @@ export const alertAssetChanges = (
 
 export const hasChanges = (changes: object): boolean => Object.keys(changes).length > 0;
 
+type CountedObservables = Pick<Alert, 'assets' | 'iocs' | 'assets_count' | 'iocs_count'>;
+
+/** How many assets `alert` has, including those a summary listing left out. */
+export const alertAssetsCount = (alert: CountedObservables): number =>
+	alert.assets_count ?? alert.assets?.length ?? 0;
+
+/** How many IOCs `alert` has, including those a summary listing left out. */
+export const alertIocsCount = (alert: CountedObservables): number =>
+	alert.iocs_count ?? alert.iocs?.length ?? 0;
+
+/**
+ * Whether `alert` came from a listing asked for `observables: 'summary'`
+ * that cut its assets or IOCs short — anything showing them all has to
+ * fetch the alert itself first.
+ */
+export const hasPartialObservables = (alert: CountedObservables): boolean =>
+	alertAssetsCount(alert) > (alert.assets?.length ?? 0) ||
+	alertIocsCount(alert) > (alert.iocs?.length ?? 0);
+
 /**
  * Writes the server's row back onto the alert. The rows are merged
  * rather than replaced: the alert routes dump the object through the
@@ -172,7 +191,8 @@ const mergeAsset = (alert: Alert, updated: Asset) => {
 };
 
 /**
- * Saves an alert IOC and patches it into `alert` in place. Returns the
+ * Saves an alert IOC and patches it into `alert` in place — and into
+ * `others`, the other copies of the same alert on screen. Returns the
  * server's row, or null after saying why it failed — a silent no-op on
  * a permission or validation error reads as "it saved", and an analyst
  * documenting an observable has to be able to trust that it did.
@@ -180,12 +200,13 @@ const mergeAsset = (alert: Alert, updated: Asset) => {
 export const saveAlertIoc = async (
 	alert: Alert,
 	iocId: number,
-	changes: UpdateAlertIocBody
+	changes: UpdateAlertIocBody,
+	others: Alert[] = []
 ): Promise<Ioc | null> => {
 	const response = await AlertService.updateIoc(alert.alert_id, iocId, changes);
 
 	if (response.ok && !response.error && response.data && typeof response.data !== 'string') {
-		mergeIoc(alert, response.data);
+		for (const copy of [alert, ...others]) mergeIoc(copy, response.data);
 
 		return response.data;
 	}
@@ -203,12 +224,13 @@ export const saveAlertIoc = async (
 export const saveAlertAsset = async (
 	alert: Alert,
 	assetId: number,
-	changes: UpdateAlertAssetBody
+	changes: UpdateAlertAssetBody,
+	others: Alert[] = []
 ): Promise<Asset | null> => {
 	const response = await AlertService.updateAsset(alert.alert_id, assetId, changes);
 
 	if (response.ok && !response.error && response.data && typeof response.data !== 'string') {
-		mergeAsset(alert, response.data);
+		for (const copy of [alert, ...others]) mergeAsset(copy, response.data);
 
 		return response.data;
 	}

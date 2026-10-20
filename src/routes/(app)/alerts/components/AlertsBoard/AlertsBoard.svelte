@@ -137,7 +137,9 @@
 			alert_end_date: toApiDate(filters.alert_end_date, true),
 			creation_start_date: toApiDate(filters.creation_start_date),
 			creation_end_date: toApiDate(filters.creation_end_date, true),
-			per_page: PER_PAGE
+			per_page: PER_PAGE,
+			// Cards never show assets or IOCs, and the board pulls every page.
+			observables: 'summary'
 		};
 
 		// Owner scope belongs to the board, not to the filter panel — see

@@ -41,7 +41,14 @@
 	import { defaultAlertRelationshipsFilters } from '../AlertRelatedGraph';
 	import AlertIocEditDialog from '../alert-ioc-edit-dialog.svelte';
 	import AlertAssetEditDialog from '../alert-asset-edit-dialog.svelte';
-	import { hasChanges, saveAlertAsset, saveAlertIoc } from '../../helpers/alert-observables';
+	import {
+		alertAssetsCount,
+		alertIocsCount,
+		hasChanges,
+		saveAlertAsset,
+		saveAlertIoc
+	} from '../../helpers/alert-observables';
+	import { fullAlertObservables } from '../../helpers/full-alert-observables.svelte';
 	import { getClosedAlertStatusId } from '../../helpers/alert-status';
 	import { clampSplitQueueWidth, SPLIT_QUEUE_KEY_STEP } from './split-resize';
 	import { clusterSelectionState, flattenAlertQueueUnits } from '$lib/utils/alert-queue';
@@ -646,7 +653,12 @@
 
 	// ---- derived detail data -----------------------------------------
 
-	const iocs = $derived(focused?.iocs ?? []);
+	// The queue lists only the first few assets and IOCs of each alert; the
+	// detail pane shows them all, fetched once the cursor rests on a row.
+	const focusedFull = fullAlertObservables(() => focused, 150);
+	const focusedObservables = $derived(focusedFull.alert);
+	const assets = $derived(focusedObservables?.assets ?? []);
+	const iocs = $derived(focusedObservables?.iocs ?? []);
 	const rawEvent = $derived(formatRawEvent(focused?.alert_source_content));
 
 	// ---- observable details ------------------------------------------
@@ -704,7 +716,13 @@
 
 		savingObservable = true;
 
-		const updated = await saveAlertIoc(focused, ioc.ioc_id, changes);
+		const target = focusedObservables ?? focused;
+		const updated = await saveAlertIoc(
+			target,
+			ioc.ioc_id,
+			changes,
+			target === focused ? [] : [focused]
+		);
 
 		savingObservable = false;
 
@@ -721,7 +739,13 @@
 
 		savingObservable = true;
 
-		const updated = await saveAlertAsset(focused, asset.asset_id, changes);
+		const target = focusedObservables ?? focused;
+		const updated = await saveAlertAsset(
+			target,
+			asset.asset_id,
+			changes,
+			target === focused ? [] : [focused]
+		);
 
 		savingObservable = false;
 
@@ -759,7 +783,7 @@
 		{
 			id: 'assets' as Tab,
 			label: 'Assets',
-			count: (focused?.assets?.length ?? 0) > 0 ? focused?.assets?.length : undefined
+			count: focused && alertAssetsCount(focused) > 0 ? alertAssetsCount(focused) : undefined
 		},
 		{
 			id: 'cluster' as Tab,
@@ -767,7 +791,7 @@
 			count: cluster?.alert_ids?.length,
 			dot: cluster != null
 		},
-		{ id: 'iocs' as Tab, label: 'IOCs', count: iocs.length },
+		{ id: 'iocs' as Tab, label: 'IOCs', count: focused ? alertIocsCount(focused) : 0 },
 		{ id: 'raw' as Tab, label: 'Raw event', count: undefined },
 		{ id: 'timeline' as Tab, label: 'Timeline', count: undefined },
 		{ id: 'notes' as Tab, label: 'Notes', count: notes ? 1 : undefined },
@@ -1128,8 +1152,8 @@
 									>
 								</span>
 							{/if}
-							{#if assetLabel(alert.assets)}
-								<span class="chip-mono">{assetLabel(alert.assets)}</span>
+							{#if assetLabel(alert.assets, alert.assets_count)}
+								<span class="chip-mono">{assetLabel(alert.assets, alert.assets_count)}</span>
 							{/if}
 							{#if primaryTechnique(alert)}
 								<span class="chip-mono">{primaryTechnique(alert)}</span>
@@ -1664,11 +1688,11 @@
 								</section>
 							{/if}
 
-							{#if (f.assets?.length ?? 0) > 0}
+							{#if assets.length > 0}
 								<section class="section">
 									<h3 class="section-title">Assets</h3>
 									<div class="asset-list">
-										{#each f.assets as a (a.asset_id)}
+										{#each assets as a (a.asset_id)}
 											<div class="asset-row">
 												<div class="asset-name copy-row">
 													<span class="asset-name-text">{a.asset_name}</span>
@@ -1704,7 +1728,7 @@
 								</section>
 							{/if}
 
-							{#if !f.alert_description && !f.alert_source_link && (!f.alert_context || Object.keys(f.alert_context).length === 0) && (f.assets?.length ?? 0) === 0 && iocs.length === 0}
+							{#if !f.alert_description && !f.alert_source_link && (!f.alert_context || Object.keys(f.alert_context).length === 0) && assets.length === 0 && iocs.length === 0}
 								<p class="section-empty">No overview data for this alert.</p>
 							{/if}
 
@@ -1741,11 +1765,11 @@
 						{#if activeTab === 'assets'}
 							<section class="section">
 								<h3 class="section-title">Assets</h3>
-								{#if (f.assets?.length ?? 0) === 0}
+								{#if assets.length === 0}
 									<p class="section-empty">No assets linked to this alert.</p>
 								{:else}
 									<div class="asset-list">
-										{#each f.assets as a (a.asset_id)}
+										{#each assets as a (a.asset_id)}
 											<div class="asset-row">
 												<div class="obs-head">
 													<div class="obs-main">
@@ -1821,7 +1845,10 @@
 												<span class="cluster-body">
 													<span class="cluster-title">{member.alert_title}</span>
 													<span class="cluster-meta"
-														>{[assetLabel(member.assets), primaryTechnique(member)]
+														>{[
+															assetLabel(member.assets, member.assets_count),
+															primaryTechnique(member)
+														]
 															.filter(Boolean)
 															.join(' · ')}</span
 													>

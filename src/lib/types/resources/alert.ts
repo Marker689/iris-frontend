@@ -33,6 +33,11 @@ export interface Alert {
 	resolution_status: ResolutionStatus;
 
 	assets: Asset[];
+	/**
+	 * How many assets the alert has. Only set by listings asked for
+	 * `observables: 'summary'`, where `assets` holds the first few.
+	 */
+	assets_count?: number;
 
 	cases: number[];
 	comments: number[];
@@ -55,6 +60,8 @@ export interface Alert {
 	alert_source_event_time: string;
 
 	iocs: Ioc[];
+	/** See `assets_count`. */
+	iocs_count?: number;
 
 	modification_history: HistoryData;
 }
