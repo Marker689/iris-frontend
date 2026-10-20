@@ -9,7 +9,9 @@
   being drawn (inputs), so a link can leave or enter on any side.
   Handle ids: the port / `in` on the default side, `<port>@<side>` /
   `in@<side>` elsewhere (see ai-workflow-graph).
-  While a run goes through it, a glow and an icon show its live state.
+  While a run goes through it, a ring and a status mark show its live
+  state: a pulsing dot while it runs or waits, a check or a cross once
+  done.
   The other editors configuring it outline it in their colour, with
   their names.
 -->
@@ -23,7 +25,7 @@
 		useUpdateNodeInternals,
 		type NodeProps
 	} from '@xyflow/svelte';
-	import { CheckIcon, CircleAlertIcon, HourglassIcon, XIcon } from 'lucide-svelte';
+	import { CheckIcon, CircleAlertIcon, XIcon } from 'lucide-svelte';
 	import { formatDateTime } from '$lib/utils/time-formatter';
 	import {
 		DEFAULT_HANDLES,
@@ -80,15 +82,18 @@
 	const peerNames = $derived([...new Set(peers.map((p) => p.name))]);
 
 	const liveState = $derived(editor?.live[id]);
-	// A soft glow around the card (pulsing while it runs or waits) and a
-	// small status icon by the title
-	const LIVE_GLOWS: Record<AiLiveNodeState, string> = {
+	// The card's ring while a run goes through it: lit and glowing while it
+	// runs or waits, plain again once done (the status mark tells the outcome)
+	const LIVE_RINGS: Partial<Record<AiLiveNodeState, string>> = {
 		running:
-			'animate-pulse shadow-[0_0_0_1px_rgb(59_130_246/0.45),0_0_14px_2px_rgb(59_130_246/0.35)]',
+			'ring-2 ring-indigo-500 shadow-[0_0_24px_rgba(99,102,241,0.3)] dark:ring-indigo-400 dark:shadow-[0_0_24px_rgba(129,140,248,0.35)]',
 		waiting:
-			'animate-pulse shadow-[0_0_0_1px_rgb(245_158_11/0.45),0_0_14px_2px_rgb(245_158_11/0.3)]',
-		succeeded: 'shadow-[0_0_0_1px_rgb(16_185_129/0.4),0_0_10px_1px_rgb(16_185_129/0.25)]',
-		failed: 'shadow-[0_0_0_1px_rgb(239_68_68/0.45),0_0_10px_1px_rgb(239_68_68/0.3)]'
+			'ring-2 ring-amber-500 shadow-[0_0_24px_rgba(245,158,11,0.3)] dark:ring-amber-400 dark:shadow-[0_0_24px_rgba(251,191,36,0.3)]',
+		failed: 'ring-2 ring-red-500/70 dark:ring-red-400/70'
+	};
+	const LIVE_DOTS: Partial<Record<AiLiveNodeState, string>> = {
+		running: 'bg-indigo-500 dark:bg-indigo-400',
+		waiting: 'bg-amber-500 dark:bg-amber-400'
 	};
 	const LIVE_TITLES: Record<AiLiveNodeState, string> = {
 		running: 'Running',
@@ -107,7 +112,7 @@
 	const outputSide = $derived(handles.output);
 	const hasInput = $derived(type !== 'trigger');
 	// Room for every port label along a side (outputs may show on the left / right).
-	const minHeight = $derived(Math.max(56, ports.length * 20 + 16));
+	const minHeight = $derived(Math.max(50, ports.length * 20 + 16));
 
 	// Handles carrying an edge stay visible on every side.
 	const connections = useNodeConnections();
@@ -173,19 +178,19 @@
 </script>
 
 <div
-	class={`group relative w-56 rounded-md border bg-card text-card-foreground shadow-sm transition-shadow ${
-		selected ? 'ring-2 ring-primary' : ''
-	} ${errors.length ? 'border-destructive' : ''}`}
+	class={`group relative w-[228px] rounded-xl bg-card text-card-foreground transition-shadow ${
+		selected
+			? 'shadow-sm ring-2 ring-primary'
+			: liveState && LIVE_RINGS[liveState]
+				? LIVE_RINGS[liveState]
+				: errors.length
+					? 'shadow-sm ring-1 ring-destructive'
+					: 'shadow-sm ring-1 ring-slate-200 dark:ring-white/10'
+	}`}
 	style={`min-height: ${minHeight}px${peers.length ? `; outline: 2px solid ${peers[0].color}; outline-offset: 2px` : ''}`}
 	data-testid={`wf-node-${id}`}
 	data-live={liveState}
 >
-	{#if liveState}
-		<span
-			class={`pointer-events-none absolute inset-0 rounded-md transition-shadow ${LIVE_GLOWS[liveState]}`}
-			aria-hidden="true"
-		></span>
-	{/if}
 	{#if hasInput}
 		{#each HANDLE_SIDES as side (side)}
 			<Handle
@@ -198,13 +203,20 @@
 		{/each}
 	{/if}
 
-	<div class={`flex items-start gap-2 p-2 ${PADDING[outputSide]}`}>
-		<span class={`flex size-7 shrink-0 items-center justify-center rounded ${nodeTone(type)}`}>
-			<Icon size={14} />
+	<div class={`flex min-h-[50px] items-center gap-2.5 px-2.5 py-2 ${PADDING[outputSide]}`}>
+		<span
+			class={`grid size-7 shrink-0 place-items-center rounded-lg ${nodeTone(type)}`}
+			title={typeLabel}
+		>
+			<Icon class="size-3.5" />
 		</span>
-		<div class="min-w-0 leading-tight">
-			<div class="truncate text-xs font-medium" title={label}>{label}</div>
-			<div class="truncate text-2xs text-muted-foreground">{typeLabel} · {id}</div>
+		<div class="min-w-0 flex-1 leading-tight">
+			<div
+				class="truncate text-[9.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground"
+			>
+				{typeLabel}
+			</div>
+			<div class="truncate text-[12px] font-medium" title={`${label} · ${id}`}>{label}</div>
 			{#if triggers}
 				<div
 					class="truncate text-2xs text-amber-700 dark:text-amber-300"
@@ -217,25 +229,25 @@
 		</div>
 		{#if liveState}
 			<span
-				class="ml-auto flex size-4 shrink-0 items-center justify-center"
+				class="flex shrink-0 items-center justify-center"
 				title={LIVE_TITLES[liveState]}
 				data-testid={`wf-node-live-${id}`}
 			>
-				{#if liveState === 'running'}
-					<span class="relative flex size-2.5">
-						<span class="absolute inline-flex size-full animate-ping rounded-full bg-blue-500/70"
+				{#if LIVE_DOTS[liveState]}
+					<span class="relative flex size-1.5">
+						<span
+							class={`absolute inline-flex size-full animate-ping rounded-full opacity-75 ${LIVE_DOTS[liveState]}`}
 						></span>
-						<span class="relative inline-flex size-2.5 rounded-full bg-blue-500"></span>
+						<span class={`relative inline-flex size-1.5 rounded-full ${LIVE_DOTS[liveState]}`}
+						></span>
 					</span>
-				{:else if liveState === 'waiting'}
-					<HourglassIcon size={12} class="animate-pulse text-amber-500" />
 				{:else if liveState === 'succeeded'}
-					<span class="flex size-4 items-center justify-center rounded-full bg-emerald-500/15">
-						<CheckIcon size={11} strokeWidth={3} class="text-emerald-600 dark:text-emerald-400" />
+					<span class="grid size-3.5 place-items-center rounded-full bg-emerald-500 text-white">
+						<CheckIcon class="size-2.5" strokeWidth={3} />
 					</span>
 				{:else}
-					<span class="flex size-4 items-center justify-center rounded-full bg-destructive/15">
-						<XIcon size={11} strokeWidth={3} class="text-destructive" />
+					<span class="grid size-3.5 place-items-center rounded-full bg-red-500 text-white">
+						<XIcon class="size-2.5" strokeWidth={3} />
 					</span>
 				{/if}
 			</span>
