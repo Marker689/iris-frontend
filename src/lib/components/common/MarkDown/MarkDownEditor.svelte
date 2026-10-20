@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
-	import DOMPurify from 'dompurify';
-	import { converter } from './converter';
 	import {
 		BoldIcon,
 		CheckIcon,
@@ -31,6 +29,7 @@
 	import { languages } from '@codemirror/language-data';
 	import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 	import { normalizeLegacyContent } from './legacy-content';
+	import { renderMarkdown } from './render-markdown';
 	import { authenticateDatastoreImages } from './authenticate-datastore-images';
 	import { decorateMentionChips } from './decorate-mention-chips';
 	import { highlightCodeBlocks } from './highlight-code-blocks';
@@ -241,9 +240,7 @@
 	// The HTML we render inside {@html …} in view / edit-preview modes.
 	// Derived lazily: while editing it is never read, so typing doesn't
 	// re-render the whole note to HTML on every keystroke.
-	const renderedHtml = $derived(
-		DOMPurify.sanitize(converter.makeHtml(normalizeLegacyContent(shownMarkdown)))
-	);
+	const renderedHtml = $derived(renderMarkdown(shownMarkdown));
 
 	// Non-collab callers (no docName) have their content from the start:
 	// the plain-form/task/evidence/IOC/asset call sites.
@@ -1632,7 +1629,7 @@
 
 	<!--
 		Body wrapper. In 'view' or 'edit-preview' mode we show the rendered
-		markdown via the same DOMPurify+converter pipeline as MarkDownPreview.
+		markdown via the same pipeline as MarkDownPreview (`renderMarkdown`).
 		The editor element stays mounted at all times (just hidden when
 		not in 'edit') so the collab socket and editor state survive transitions
 		without re-init.

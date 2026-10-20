@@ -1,11 +1,9 @@
 <script lang="ts">
-	import DOMPurify from 'dompurify';
 	import { cn } from '$lib/utils';
-	import { converter } from './converter';
 	import { authenticateDatastoreImages } from './authenticate-datastore-images';
 	import { decorateMentionChips } from './decorate-mention-chips';
 	import { highlightCodeBlocks } from './highlight-code-blocks';
-	import { normalizeLegacyContent } from './legacy-content';
+	import { renderMarkdown } from './render-markdown';
 	import { sanitizeUntrustedMarkdown } from './untrusted-markdown';
 
 	// `class` tunes the prose container for a caller whose surroundings
@@ -22,9 +20,7 @@
 	}: { markdown?: string; class?: string; untrusted?: boolean } = $props();
 
 	const safeHtml = $derived(
-		untrusted
-			? sanitizeUntrustedMarkdown(markdown)
-			: DOMPurify.sanitize(converter.makeHtml(normalizeLegacyContent(markdown ?? '')))
+		untrusted ? sanitizeUntrustedMarkdown(markdown) : renderMarkdown(markdown)
 	);
 
 	let containerEl = $state<HTMLDivElement | null>(null);
