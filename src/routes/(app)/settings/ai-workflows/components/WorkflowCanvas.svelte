@@ -560,7 +560,7 @@
 			onpaneclick={() => onSelect(null)}
 			onnodedragstop={() => onChange?.()}
 		>
-			<Background />
+			<Background gap={18} />
 			{#if onCopy}
 				<Panel position="top-left">
 					<div
