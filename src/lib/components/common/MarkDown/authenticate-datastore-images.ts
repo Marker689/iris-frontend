@@ -27,10 +27,10 @@
  *     (when the user holds Alt / Option). The original href stays put
  *     so right-click → copy-link still produces the canonical URL.
  *
- * Pass `{ links: false }` for a ProseMirror surface: it observes its own
- * DOM, so restyling an `<a>` there is read back as an edit and the chip
- * classes, the `title` and the rewritten children land in the link mark
- * — and from there in the shared document.
+ * Pass `{ links: false }` for the image widgets inside the CodeMirror
+ * editor (`markdown-live-preview.ts`): only the `<img>` needs swapping
+ * there, and restyling an `<a>` would rewrite DOM that CodeMirror
+ * manages.
  *
  * Both sweeps are idempotent (rewritten nodes carry a data-flag and
  * are skipped on subsequent runs) and revoke their blob URLs when the

@@ -1,14 +1,13 @@
 /**
- * Mention chips authored in the editor are stored with their full class
- * list baked in, because tiptap serialises the node through
- * `mention-node.ts`'s `renderHTML`:
+ * Mention chips authored in the previous editor (TipTap) were stored with
+ * their full class list baked in, and notes still carry that shape:
  *
  *     <span data-mention data-kind="note" data-id="7" data-label="Runbook"
  *           class="mention-chip … bg-emerald-500/15 …">…</span>
  *
- * Chips written *by the backend* are not. `create_case_from_alert` and
- * `merge_alert_in_case` append the minimal contract shape — data attributes
- * and nothing else:
+ * Chips written now — by the editor (`buildMentionSpan`) or *by the
+ * backend* (`create_case_from_alert`, `merge_alert_in_case`) — are not:
+ * they are the minimal contract shape, data attributes and nothing else:
  *
  *     <span data-mention data-kind="alert" data-id="106"
  *           data-label="Alert #106">#Alert #106</span>
@@ -17,12 +16,13 @@
  * by default) but it lands in the preview as unstyled inline text. This
  * module is the read-side compensation: sweep a rendered container and give
  * every bare `span[data-mention]` the same classes and inline glyph the
- * editor would have produced, so both origins render identically and
- * `ChipHoverHost` — which keys off `.mention-chip` — picks them up.
+ * old chips carry, so both shapes render identically and `ChipHoverHost` —
+ * which keys off `.mention-chip` — picks them up. The editor's chip widgets
+ * (`markdown-live-preview.ts`) are drawn through this same sweep.
  *
  * Idempotent: `.mention-chip` doubles as the processed marker, so re-running
- * over an already-decorated container is a no-op and an editor-authored chip
- * is never touched.
+ * over an already-decorated container is a no-op and a TipTap-era chip is
+ * never touched.
  *
  * Usage:
  *
@@ -35,8 +35,8 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
  * Leading trigger character to strip when falling back to the element's own
- * text for a label. Matches `mention-node.ts`'s `label` parseHTML, which has
- * to cope with chips authored before `data-label` was written.
+ * text for a label. Matches the body fallback in `mention-markup.ts`, which
+ * has to cope with chips authored before `data-label` was written.
  */
 const TRIGGER_CHAR_RE = /^[@#!&%]/;
 
@@ -92,7 +92,7 @@ export const decorateMentionChips = (container: HTMLElement | null | undefined):
 
 		// ChipHoverHost and the editor's delegated handlers both reach chips
 		// through focus as well as hover, so the keyboard path needs the same
-		// role/tabindex the tiptap renderer emits.
+		// role/tabindex the TipTap-era chips were stored with.
 		el.setAttribute('role', 'button');
 		el.setAttribute('tabindex', '0');
 		if (!el.hasAttribute('title')) el.setAttribute('title', label);

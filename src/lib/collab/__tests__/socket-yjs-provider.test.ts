@@ -117,7 +117,10 @@ describe('SocketYjsProvider resync on join', () => {
 
 		socket.connected = true;
 		socket.receive('connect');
-		expect(socket.emitted.at(-1)).toEqual({ event: 'join', data: { doc: DOC } });
+		expect(socket.emitted.at(-1)).toEqual({
+			event: 'join',
+			data: { doc: DOC, format: 'markdown' }
+		});
 		syncInit(serverState);
 
 		expect(serverText(serverState, socket.syncs())).toBe('Seed. Typed offline.');

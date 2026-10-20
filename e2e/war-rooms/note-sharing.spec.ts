@@ -86,7 +86,7 @@ test.describe('War room · note sharing', () => {
 			const body = page.locator('.markdown-editor-body').first();
 			await expect(body).toContainText('Shared from the war room', { timeout: 15_000 });
 			await body.getByRole('textbox').first().dblclick();
-			await expect(page.locator('.ProseMirror').first()).toBeHidden();
+			await expect(page.locator('.cm-content').first()).toBeHidden();
 
 			await banner.getByRole('button', { name: 'Make a local copy' }).click();
 
@@ -100,7 +100,7 @@ test.describe('War room · note sharing', () => {
 			const copyBody = page.locator('.markdown-editor-body').first();
 			await expect(copyBody).toContainText('Shared from the war room', { timeout: 15_000 });
 			await copyBody.getByRole('textbox').first().dblclick();
-			const copyEditor = page.locator('.ProseMirror').first();
+			const copyEditor = page.locator('.cm-content').first();
 			await expect(copyEditor).toBeVisible({ timeout: 15_000 });
 			await expect(copyEditor).toHaveAttribute('contenteditable', 'true');
 		} finally {

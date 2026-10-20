@@ -333,9 +333,9 @@
 }
 
 /*
- * Mention chip layout — the `<span data-mention>` rendered by tiptap
- * (`mention-node.ts`), by `Chip.svelte`, and by the post-render sweep in
- * `decorate-mention-chips.ts`.
+ * Mention chip layout — the `<span data-mention>` rendered by the editor's
+ * chip widgets (`markdown-live-preview.ts`), by `Chip.svelte`, and by the
+ * post-render sweep in `decorate-mention-chips.ts`.
  *
  * These used to be `:global()` rules inside `MarkDownEditor.svelte`, so they
  * only reached pages that imported the editor. That held while chips could

@@ -24,38 +24,41 @@
 		TableIcon,
 		Trash2Icon
 	} from 'lucide-svelte';
-	import { Editor } from '@tiptap/core';
-	import StarterKit from '@tiptap/starter-kit';
-	import Image from '@tiptap/extension-image';
+	import { Annotation, Compartment, EditorState, Prec } from '@codemirror/state';
+	import { EditorView, keymap, placeholder } from '@codemirror/view';
+	import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+	import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+	import { languages } from '@codemirror/language-data';
+	import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 	import { normalizeLegacyContent } from './legacy-content';
 	import { authenticateDatastoreImages } from './authenticate-datastore-images';
 	import { decorateMentionChips } from './decorate-mention-chips';
-	import { ResizableImageNodeView } from './resizable-image';
-	import Placeholder from '@tiptap/extension-placeholder';
-	import { Table } from '@tiptap/extension-table';
-	import { TableRow } from '@tiptap/extension-table-row';
-	import { TableHeader } from '@tiptap/extension-table-header';
-	import { TableCell } from '@tiptap/extension-table-cell';
-	import { Markdown } from 'tiptap-markdown';
+	import { highlightCodeBlocks } from './highlight-code-blocks';
+	import { isInCode, markdownLivePreview } from './markdown-live-preview';
+	import { markdownMentions } from './markdown-mentions';
+	import { markdownTheme } from './markdown-theme';
+	import {
+		activeFormats,
+		deleteTable,
+		insertAtCaret,
+		insertTable,
+		NO_ACTIVE_FORMATS,
+		runTableOp,
+		toggleCodeBlock,
+		toggleHeading,
+		toggleInlineMark,
+		toggleLinePrefix,
+		toggleLink,
+		type ActiveFormats
+	} from './markdown-commands';
+	import { hasStructuredHtml, htmlToMarkdown } from './html-to-markdown';
 	import { ApiService } from '$lib/services/api.service';
 	import { auth } from '$lib/stores/auth.store';
 	import { io, type Socket } from 'socket.io-client';
 	import { socketOrigin } from '$lib/config/api.config';
 	import * as Y from 'yjs';
 	import { Awareness } from 'y-protocols/awareness';
-	import Collaboration from '@tiptap/extension-collaboration';
-	// `extension-collaboration-caret` supersedes `extension-collaboration-cursor`
-	// for tiptap 3.22+. The old package (v3.0.0) was mispublished and pins
-	// against `y-prosemirror`'s ySyncPluginKey directly, while the current
-	// collaboration extension uses `@tiptap/y-tiptap`'s rebranded key. Mixing
-	// the two produces "can't access property 'doc', ystate is undefined"
-	// at cursor-plugin init because the keys don't match. Caret uses the
-	// same y-tiptap import path, so state lookup works.
-	import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 	import { SocketYjsProvider } from '$lib/collab/socket-yjs-provider';
-	import { createMentionNode } from './mention-node';
-	import { isGuardedKey, runKeymapSafely, type KeymapFailure } from './safe-keymap';
-	import { buildSuggestion } from './mentions.svelte';
 	import type { MentionItem } from './MentionList.svelte';
 	import { UsersService, type MentionableUser } from '$lib/services/users.service';
 	import {
@@ -132,28 +135,14 @@
 	let viewMode = $state<ViewMode>(untrack(() => initialMode));
 
 	// In collab mode the parent's `value` prop is empty on mount and only
-	// gets populated by an async fetch that races the Yjs sync-init.
-	// Both the view-mode preview and the "empty" placeholder used to key
-	// off `value`, which is why you'd see the note briefly, then the
-	// placeholder, then a false "unsaved changes" badge. We now:
-	//   * gate the "empty" placeholder behind `hasHydrated` so it never
-	//     flashes before we know whether the doc actually is empty.
-	//   * derive the view-mode preview from an editor-tracked HTML
-	//     snapshot (`viewHtml`) for collab callers, so the parent's
-	//     stale/empty `value` doesn't leak into the display.
-	// `hasHydrated` and `viewHtml` are populated below in the collab
-	// wire-up path (see the `onUpdate` hook and the connectCollab
-	// sync-init handler). Non-collab callers set `viewHtml` from the
-	// showdown-based converter path — same as before this fix.
+	// gets populated by an async fetch that races the Yjs sync-init, so the
+	// view mode never reads `value` there: it renders `docText`, the
+	// editor's own document, kept current by the update listener. The
+	// "empty" placeholder waits for `hasHydrated` so it never flashes
+	// before we know whether the doc actually is empty. Non-collab
+	// callers render `value`.
 	let hasHydrated = $state<boolean>(false);
-	let viewHtml = $state<string>('');
-	let viewIsEmpty = $state<boolean>(true);
-
-	// The HTML we render inside {@html …} in view / edit-preview modes.
-	// Kept as an alias for `viewHtml` so the surrounding markup that
-	// used to read `renderedHtml` continues to work.
-	const renderedHtml = $derived(viewHtml);
-
+	let docText = $state<string>('');
 	// Container for the {@html renderedHtml} preview. We bind it so we
 	// can sweep its `<img>` children and swap any datastore URLs to
 	// bearer-authenticated blob URLs — otherwise the browser fetches the
@@ -161,31 +150,16 @@
 	// the server 401s.
 	let previewContainerEl = $state<HTMLDivElement | null>(null);
 	$effect(() => {
-		void renderedHtml;
-		void viewMode;
+		// The mode is checked first so `renderedHtml` is only computed when
+		// it is shown.
 		if (viewMode !== 'view' && viewMode !== 'edit-preview') return;
+		void renderedHtml;
 		if (!previewContainerEl) return;
-		// Non-collab callers build `viewHtml` with showdown rather than from
-		// tiptap's snapshot, so a chip the backend wrote — data attributes,
-		// no classes — arrives here undecorated. Chips that came back out of
-		// tiptap already carry their classes and the sweep skips them.
+		// Chips are stored as bare data attributes; the sweep gives them
+		// their icon and colours. Code blocks get the editor's colours.
 		decorateMentionChips(previewContainerEl);
+		highlightCodeBlocks(previewContainerEl);
 		const dispose = authenticateDatastoreImages(previewContainerEl);
-		return dispose;
-	});
-
-	// Same problem in the editable surface: TipTap renders inline images
-	// as raw `<img>` and the browser hits the v2 endpoint unauthenticated.
-	// We re-sweep on every value change and on edit-mode entry; the
-	// helper is idempotent so already-swapped `<img>` are skipped. Links
-	// are left alone: ProseMirror would read the chip rewrite back into
-	// the link mark (images are safe, they render through a NodeView).
-	$effect(() => {
-		void value;
-		void viewMode;
-		if (viewMode !== 'edit') return;
-		if (!editorElement) return;
-		const dispose = authenticateDatastoreImages(editorElement, { links: false });
 		return dispose;
 	});
 
@@ -194,7 +168,9 @@
 		if (viewMode === 'view') {
 			viewMode = 'edit';
 			await tick();
-			editor?.commands.focus();
+			// The editor was laid out while hidden.
+			view?.requestMeasure();
+			view?.focus();
 		}
 	};
 
@@ -207,22 +183,19 @@
 	};
 
 	let editorElement = $state<HTMLDivElement | null>(null);
-	// eslint-disable-next-line svelte/valid-compile
-	let editor: Editor | null = null;
+	let view: EditorView | null = null;
 	let uploading = $state(false);
-	// `typingUser` fed the old "X is typing…" hint above the toolbar.
-	// Yjs's CollaborationCursor replaces it with per-user cursor
-	// decorations, but the template block that reads this state is
-	// left in place (null → hidden via `{#if}`) so we don't churn the
-	// toolbar markup in the same commit as the collab swap.
-	let typingUser = $state<string | null>(null);
-	// Reactive flag for the contextual table toolbar. Updated from the tiptap
-	// selection-update hook so Svelte re-renders the toolbar when the caret
-	// moves into or out of a table cell.
-	let inTable = $state(false);
+	// What the caret is in, for the toolbar's pressed buttons and the
+	// contextual table controls.
+	let active = $state<ActiveFormats>(NO_ACTIVE_FORMATS);
+	const readOnlyCompartment = new Compartment();
+	// Marks the changes the component makes itself (the parent resetting
+	// `value`), which are not user edits and must not echo to `onChange`.
+	const External = Annotation.define<boolean>();
 
 	// --- Real-time collaboration (Yjs) -----------------------------------
-	// The editor is CRDT-backed via Yjs + TipTap's Collaboration extension.
+	// The editor is CRDT-backed via Yjs: its document is bound to the
+	// `markdown` Y.Text of the doc by y-codemirror.
 	// The server (`/collab` SocketIO namespace) is a dumb relay: we ship it
 	// opaque Yjs updates and it fans them out to peers on the same doc.
 	// See `iris-frontend/src/lib/collab/socket-yjs-provider.ts` for the
@@ -261,53 +234,49 @@
 							: null
 	);
 
-	// Non-collab callers (no docName): hydrate immediately and drive the
-	// view-mode HTML from the same showdown-converter pipeline used
-	// before this fix. Keeps the legacy plain-form/task/evidence/IOC/
-	// asset call sites working unchanged.
+	// What the view mode shows (see `docText` above).
+	const shownMarkdown = $derived(docName ? docText : (value ?? ''));
+	const viewIsEmpty = $derived(shownMarkdown.trim().length === 0);
+
+	// The HTML we render inside {@html …} in view / edit-preview modes.
+	// Derived lazily: while editing it is never read, so typing doesn't
+	// re-render the whole note to HTML on every keystroke.
+	const renderedHtml = $derived(
+		DOMPurify.sanitize(converter.makeHtml(normalizeLegacyContent(shownMarkdown)))
+	);
+
+	// Non-collab callers (no docName) have their content from the start:
+	// the plain-form/task/evidence/IOC/asset call sites.
 	untrack(() => {
-		if (!docName) {
-			hasHydrated = true;
-			const md = value ?? '';
-			viewHtml = DOMPurify.sanitize(converter.makeHtml(normalizeLegacyContent(md)));
-			viewIsEmpty = md.trim().length === 0;
-		}
+		if (!docName) hasHydrated = true;
 	});
 
-	// Non-collab: keep the preview aligned with the parent's `value` prop
-	// so external state changes (form field updates, restored revisions
-	// on the non-collab path) refresh the view. This is a no-op in
-	// collab mode — that path is fed by `editor.getHTML()` on every
-	// ProseMirror update instead (see the onUpdate hook below).
-	$effect(() => {
-		if (docName) return;
-		const md = value ?? '';
-		viewHtml = DOMPurify.sanitize(converter.makeHtml(normalizeLegacyContent(md)));
-		viewIsEmpty = md.trim().length === 0;
-	});
-
-	// Non-collab: sync the TipTap editor content when the parent resets
-	// `value` from outside (e.g. dialog opens a different event). We only
-	// call setContent when the incoming value wasn't emitted by us — that
-	// way normal user typing (which updates lastEmittedMarkdown) doesn't
-	// trigger a round-trip setContent that would clobber the cursor.
+	// Non-collab: replace the editor content when the parent resets
+	// `value` from outside (e.g. dialog opens a different event). Only
+	// when the incoming value wasn't emitted by us — that way normal user
+	// typing (which updates lastEmittedMarkdown) doesn't round-trip into
+	// a replace that would move the cursor.
 	$effect(() => {
 		if (docName) return;
 		const md = value ?? '';
 		if (md === lastEmittedMarkdown) return;
-		if (!editor) return;
+		if (!view) return;
 		lastEmittedMarkdown = md;
-		editor.commands.setContent(normalizeLegacyContent(md));
+		const next = normalizeLegacyContent(md);
+		if (next === view.state.doc.toString()) return;
+		view.dispatch({
+			changes: { from: 0, to: view.state.doc.length, insert: next },
+			annotations: [External.of(true)]
+		});
 	});
 
 	let socket: Socket | null = null;
 	// `ydoc` and `awareness` are created EAGERLY (in the same tick as the
 	// component's `<script>` runs, before `onMount`) rather than lazily
 	// inside `connectCollab()`, because they need to be non-null when we
-	// construct the TipTap `Editor` — the Collaboration extension binds
-	// the ProseMirror doc to a Y.XmlFragment at extension-init time, and
-	// if we hand it a null document the binding never happens. The
-	// socket/provider are still lazy: those come up in `connectCollab()`.
+	// build the editor — y-codemirror binds the editor to the doc's
+	// `markdown` Y.Text when its extension is created. The socket/provider
+	// are still lazy: those come up in `connectCollab()`.
 	//
 	// `untrack()` mirrors the pattern used above for `initialMode`: we
 	// intentionally want the value of `docName` at construction time,
@@ -315,7 +284,7 @@
 	// the doc-change $effect which tears down and re-creates both.
 	let ydoc: Y.Doc | null = untrack(() => (docName ? new Y.Doc() : null));
 	let provider: SocketYjsProvider | null = null;
-	// Awareness identity for the CollaborationCursor extension. We fill
+	// Awareness identity for the remote carets peers draw. We fill
 	// this in once the server's sync-init hands us the resolved user info.
 	let awareness: Awareness | null = ydoc ? new Awareness(ydoc) : null;
 	// Read-only bit computed from the server's `can_write` on join. The
@@ -333,16 +302,15 @@
 	// them — this signal prevents that from happening client-side too.
 	const effectiveReadOnly = $derived(readOnly || readOnlyFromServer || docReplaced);
 
-	// `onUpdate` fires on every ProseMirror doc change — including the
-	// very first mutation caused by applying the server's initial
-	// `y_state`. If we called `onChange(md)` on that first mutation,
-	// the parent's `draftContent` would drift from its `baseContent`
-	// due to cosmetic differences between the server-column markdown
-	// and what tiptap-markdown renders (whitespace, escape backslashes,
-	// trailing newlines). Parents that derive "unsaved" from
-	// `draft !== base` would then flag every freshly-opened note as
-	// dirty. We hold `onChange` back until the initial `sync-init`
-	// has been applied — after that, every onChange is a user edit.
+	// The update listener fires on every doc change — including the
+	// very first one, applying the server's initial `y_state`. If we
+	// called `onChange(md)` on it, the parent's `draftContent` would
+	// drift from its `baseContent` (the server column can differ from
+	// the live doc, e.g. a legacy note converted on load). Parents that
+	// derive "unsaved" from `draft !== base` would then flag every
+	// freshly-opened note as dirty. We hold `onChange` back until the
+	// initial `sync-init` has been applied — after that, every onChange
+	// is a user edit.
 	//
 	// Non-collab callers (no docName, e.g. task/evidence forms) don't
 	// go through `sync-init` at all, so we default the flag to true
@@ -352,15 +320,9 @@
 	// caller wraps this component in `{#key <id>}` so a docName swap
 	// forces a full remount, which is when this initialiser re-runs.
 	let readyForOnChange = $state<boolean>(untrack(() => !docName));
-	// Last markdown we handed the parent via `onChange`. Guards against
-	// echo emissions: y-prosemirror often fires a second `onUpdate` right
-	// after the initial `sync-init` replay (a housekeeping flush that
-	// re-serialises the same state). Without this guard, that second
-	// tick would call `onChange(md)` with a string identical to the one
-	// we suppressed the first time, and the parent's `draftContent`
-	// would suddenly diverge from `baseContent` — the phantom "unsaved
-	// changes" you'd see on every freshly-loaded note. Comparing string
-	// equality is cheap next to the ProseMirror-to-markdown render.
+	// Last markdown we handed the parent via `onChange` (or received from
+	// it). Guards against echo emissions: a change that leaves the text
+	// as it was must not flip the parent's dirty flag.
 	let lastEmittedMarkdown: string | null = null;
 
 	const connectCollab = () => {
@@ -411,36 +373,29 @@
 				// cursor extension renders them, so a malicious peer can't
 				// pretend to be someone else here. `color` is presentational
 				// only and we pass it through as-is.
+				const color = pickCursorColor(user.id ?? 0);
 				awareness?.setLocalStateField('user', {
 					name: user.name ?? 'user',
 					userId: user.id,
-					color: pickCursorColor(user.id ?? 0)
+					color,
+					colorLight: `${color}33`
 				});
-				// No cold-start seeding path anymore. The server owns the
+				// No cold-start seeding path. The server owns the
 				// authoritative Y.Doc (see `iris_engine/collab/render.py`
 				// and `business/collab.ensure_snapshot`) — by the time this
-				// callback fires, the server has already sent us the
-				// y_state bytes and `SocketYjsProvider` has applied them.
-				// The editor's XmlFragment is populated correctly; any
-				// client-side `commands.setContent()` here would produce
-				// content duplication.
+				// callback fires, `SocketYjsProvider` has applied the
+				// server's y_state, and y-codemirror has already copied the
+				// `markdown` text into the editor. Inserting anything here
+				// would duplicate the content.
 				//
-				// From here on, onUpdate → onChange is a real user edit.
+				// From here on, a doc change → onChange is a real user edit.
 				// See `readyForOnChange` at the top of the module for the
 				// reason we gated it in the first place.
+				if (view) {
+					docText = view.state.doc.toString();
+					lastEmittedMarkdown = docText;
+				}
 				readyForOnChange = true;
-				// The view-mode mirror is fed from `onUpdate`, NOT from
-				// here. sync-init runs at the socket-message boundary —
-				// before y-prosemirror has flushed the applied Y-state
-				// into ProseMirror's document — so reading
-				// `editor.storage.markdown.getMarkdown()` right now would
-				// return an empty string and (via `lastEmittedMarkdown`)
-				// silently swallow the subsequent onUpdate that carries
-				// the real content. `hasHydrated` still flips true here
-				// so the view-mode template stops showing the loading
-				// skeleton; the next `onUpdate` (y-prosemirror's
-				// post-sync flush) populates the mirror before the next
-				// paint.
 				hasHydrated = true;
 			},
 			onPermissionDenied: () => {
@@ -528,29 +483,28 @@
 		return null;
 	};
 
-	const handleImageUpload = async (file: File) => {
-		if (!editor || !canUploadImages) return;
+	const handleImageUpload = async (file: File, at?: number) => {
+		if (!view || !canUploadImages) return;
 
 		uploading = true;
 		try {
 			const url = await uploadImage(file);
-			if (url) {
-				editor
-					.chain()
-					.focus()
-					.setImage({ src: url, alt: file.name || 'image' })
-					.run();
+			if (url && view) {
+				const alt = (file.name || 'image').replace(/[[\]]/g, '');
+				if (at !== undefined) {
+					view.dispatch({ selection: { anchor: Math.min(at, view.state.doc.length) } });
+				}
+				insertAtCaret(view, `![${alt}](${url})`);
 			}
 		} finally {
 			uploading = false;
 		}
 	};
 
-	// Heuristic: does this text contain markdown syntax we want to interpret
-	// rather than insert literally? Headings, lists, tables, fenced code, blockquotes,
-	// bold/italic, inline code, links — we parse anything that has a telltale
-	// markdown token. Plain prose without any markdown falls through to the
-	// default paste path.
+	// Heuristic: is this text markdown source? Then it is pasted as is,
+	// even when the clipboard also carries an HTML rendering of it (e.g.
+	// copying from a code view on GitHub) — converting that HTML back
+	// would only lose fidelity.
 	const looksLikeMarkdown = (text: string): boolean => {
 		if (!text) return false;
 		return (
@@ -567,11 +521,11 @@
 		);
 	};
 
-	const handlePaste = (_view: unknown, event: ClipboardEvent) => {
+	const handlePaste = (event: ClipboardEvent, target: EditorView): boolean => {
 		const items = event.clipboardData?.items;
 		const clipboard = event.clipboardData;
 
-		// 1. Image files on the clipboard — upload and insert as <img>.
+		// 1. Image files on the clipboard — upload and insert as an image.
 		//    Covers: screenshots (Cmd-Shift-4), "copy image" from browsers,
 		//    pasting a file from the OS file manager.
 		if (items && canUploadImages) {
@@ -585,30 +539,24 @@
 			}
 		}
 
-		// 2. Markdown source pasted as text. Browsers often include an HTML
-		//    representation alongside plain text (e.g. copying from GitHub's
-		//    rendered view), which makes tiptap-markdown's built-in
-		//    clipboardTextParser bail out — it only runs when there's no HTML.
-		//    So we look at text/plain ourselves and, if it contains markdown
-		//    syntax, route it through the markdown parser.
-		if (editor && clipboard) {
-			const text = clipboard.getData('text/plain');
-			if (text && looksLikeMarkdown(text)) {
-				event.preventDefault();
-				// Parse with inline:false so block elements (headings, tables,
-				// fenced code, lists) are produced as blocks rather than being
-				// unwrapped into inline content.
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				const parsed = (editor.storage as any).markdown.parser.parse(text);
-				editor.chain().focus().insertContent(parsed).run();
-				return true;
-			}
-		}
-
-		return false;
+		// 2. Rich text — a web page, a document, an IRIS preview — comes in
+		//    as markdown, so its headings, lists, tables, links and chips
+		//    survive. Plain text, markdown source and anything pasted into
+		//    code go in as typed (CodeMirror's own paste).
+		if (!clipboard) return false;
+		const html = clipboard.getData('text/html');
+		const text = clipboard.getData('text/plain');
+		if (!html || looksLikeMarkdown(text)) return false;
+		if (isInCode(target.state, target.state.selection.main.head)) return false;
+		if (!hasStructuredHtml(html)) return false;
+		const md = htmlToMarkdown(html);
+		if (!md) return false;
+		event.preventDefault();
+		insertAtCaret(target, md);
+		return true;
 	};
 
-	const handleDrop = (_view: unknown, event: DragEvent) => {
+	const handleDrop = (event: DragEvent, target: EditorView): boolean => {
 		if (!canUploadImages) return false;
 
 		const files = event.dataTransfer?.files;
@@ -617,7 +565,8 @@
 		for (const file of files) {
 			if (file.type.startsWith('image/')) {
 				event.preventDefault();
-				handleImageUpload(file);
+				const at = target.posAtCoords({ x: event.clientX, y: event.clientY }) ?? undefined;
+				handleImageUpload(file, at);
 				return true;
 			}
 		}
@@ -948,11 +897,9 @@
 
 	// --- Chip click popover ---
 	//
-	// Single delegated handler on the editor body. Works for both:
+	// Delegated handlers on the editor body. Work for both:
 	//   - view/preview HTML rendered via {@html renderedHtml}
-	//   - tiptap atomic mention nodes in edit mode
-	// Atomic mentions still bubble click events normally; we preventDefault
-	// so the click doesn't move the cursor to the chip's left edge.
+	//   - the chip widgets the live preview draws in edit mode
 
 	let popoverHandle: { destroy: () => void } | null = null;
 
@@ -1263,275 +1210,91 @@
 		input.click();
 	};
 
-	/**
-	 * A keymap handler threw while building its transaction. Nothing was
-	 * dispatched, so the note is intact and the caret hasn't moved — but the
-	 * keystroke was lost, and saying so beats leaving the user to wonder why
-	 * Enter stopped working.
-	 *
-	 * The Sentry import is dynamic so the SDK doesn't land in the editor
-	 * chunk; this path runs at most once per stuck keystroke.
-	 */
-	const reportKeymapFailure = ({ error, depth, path }: KeymapFailure) => {
-		console.error('[markdown-editor] keymap transform failed', { error, depth, path });
-
-		toast({
-			title: 'That line break could not be applied',
-			description: 'The note is unchanged. Try placing the cursor outside the current block.',
-			variant: 'destructive'
-		});
-
-		void import('@sentry/sveltekit')
-			.then((Sentry) => {
-				Sentry.captureException(error, {
-					tags: { component: 'markdown-editor', collab: docName ? 'yes' : 'no' },
-					// The minified frames in the raw report are unattributable on
-					// their own; the node path is what makes it reproducible.
-					extra: { selectionDepth: depth, nodePath: path.join(' > '), docName }
-				});
-			})
-			.catch(() => {
-				// Reporting is best-effort — never let it mask the original error.
-			});
-	};
+	const askLinkUrl = () => window.prompt('URL');
 
 	// --- Editor setup ---
 	onMount(() => {
-		editor = new Editor({
-			element: editorElement,
-			extensions: [
-				StarterKit.configure({
-					heading: { levels: [1, 2, 3] },
-					// Yjs's Collaboration extension supplies its own undo/redo
-					// via `y-prosemirror` — running both would double-apply
-					// undo transactions. StarterKit v3 renamed the toggle to
-					// `undoRedo`; disabling it is the officially documented
-					// setup for collab-enabled TipTap editors.
-					undoRedo: false,
-					// StarterKit v3 ships Link. Configure it here instead of
-					// registering a second Link extension — which triggers a
-					// `Duplicate extension names found: ['link']` warning and
-					// the second registration wins unpredictably.
-					link: {
-						openOnClick: false,
-						HTMLAttributes: { class: 'text-blue-500 underline' }
-					}
-				}),
-				// Real-time CRDT sync. The Collaboration extension binds
-				// the editor's ProseMirror state to a `Y.XmlFragment` on
-				// the Y.Doc; every local edit becomes an outbound Yjs
-				// update, every remote update is applied without ever
-				// touching the raw editor state.
-				...(ydoc
-					? [
-							// `field: 'prosemirror'` matches the XmlFragment name
-							// the server writes to in `iris_engine/collab/render.py`
-							// (see `_PROSEMIRROR_FIELD`). y-tiptap defaults to
-							// `'default'` — if we accept that, the editor pulls
-							// from an empty fragment and the note stays blank
-							// even though `y_state` was applied to the doc. Yes,
-							// really: y-prosemirror uses NAMED XmlFragments
-							// inside the Y.Doc as its ProseMirror-bound root,
-							// and both sides have to agree on the name.
-							Collaboration.configure({ document: ydoc, field: 'prosemirror' }),
-							...(awareness
-								? [
-										CollaborationCaret.configure({
-											// The extension expects a provider-shaped object with
-											// `.awareness`. We're not using Hocuspocus — we've got
-											// our own Socket.IO transport — so we pass a plain
-											// wrapper. Only `.awareness` is read at runtime.
-											provider: { awareness } as never,
-											// Seed the local awareness user with a null-safe default;
-											// `sync-init` fires a moment later and overwrites this
-											// with the server-attested identity via
-											// `setLocalStateField('user', ...)`.
-											user: { name: 'user', color: pickCursorColor(0) }
-										})
-									]
-								: [])
-						]
-					: []),
-				// Image node extended with:
-				//  - a `width` attribute so users can resize and round-trip
-				//    (serialized as <img width> since markdown ![]() has no
-				//    width syntax — tiptap-markdown ships markdown-it with
-				//    html: true so raw <img> tags survive both load and save).
-				//  - a NodeView that renders a corner drag handle on hover.
-				Image.extend({
-					addAttributes() {
-						return {
-							...this.parent?.(),
-							width: {
-								default: null,
-								parseHTML: (element) =>
-									element.getAttribute('width') || element.style.width || null,
-								renderHTML: (attributes) => {
-									if (!attributes.width) return {};
-									// Expose as both the `width` attribute (markdown-it friendly)
-									// and inline style so it renders consistently.
-									return {
-										width: attributes.width,
-										style: `width: ${attributes.width}`
-									};
-								}
-							}
-						};
-					},
-					addNodeView() {
-						return ResizableImageNodeView;
-					}
-				}).configure({
-					inline: true,
-					allowBase64: false
-				}),
-				Placeholder.configure({
-					placeholder: 'Write a comment…'
-				}),
-				// GitHub-flavored tables. `resizable` lets users drag column widths.
-				Table.configure({ resizable: true }),
-				TableRow,
-				TableHeader,
-				TableCell,
-				// transformPastedText: parse raw markdown strings pasted as plain text
-				//   (so "# heading" becomes an H1 instead of a literal "# heading").
-				// transformCopiedText: copy selections back out as markdown, matching
-				//   how users expect to round-trip content.
-				// breaks: treat a single newline inside a paragraph as a line break
-				//   instead of a space. CommonMark collapses them, which mangles the
-				//   `key: value` / one-host-per-line content analysts paste in from
-				//   scanners and EDR consoles. Mirrored server-side by the softbreak →
-				//   hardBreak mapping in `iris_engine/collab/render.py` and in the
-				//   showdown preview by `simpleLineBreaks` in `./converter.ts`.
-				Markdown.configure({
-					transformPastedText: true,
-					transformCopiedText: true,
-					breaks: true
-				}),
-				// @ users AND war-room teams — same trigger, same node, kind
-				// discriminator on the chip (`user` vs `team`) drives styling
-				// and notification fan-out on the backend.
-				createMentionNode(
-					'userMention',
-					'user',
-					buildSuggestion('@', { nodeName: 'userMention', fetchItems: fetchUserItems }),
-					['user', 'team']
-				),
-				// # case objects (assets / iocs / notes / tasks / datastore /
-				// alerts) all share one trigger. The suggestion item's `kind`
-				// drives chip rendering and which detail panel/route opens on
-				// click. `alert` rides this node rather than getting its own:
-				// a second suggestion plugin bound to `#` would double-fire on
-				// every keystroke.
-				createMentionNode(
-					'caseMention',
-					'asset',
-					buildSuggestion('#', { nodeName: 'caseMention', fetchItems: fetchCaseItems }),
-					['asset', 'ioc', 'note', 'task', 'datastore', 'alert']
-				)
-			],
-			// In collab mode (docName set) the initial content is seeded
-			// from the server's `sync-init` payload — starting with `value`
-			// here would race the Yjs replay and produce a brief flash of
-			// stale content before the doc syncs in. Non-collab callers
-			// still get their prop content immediately.
-			content: docName ? '' : normalizeLegacyContent(value ?? ''),
-			// Initial editability. `effectiveReadOnly` is reactive; we
-			// wire a `$effect` below to keep TipTap in sync when the
-			// server flips the read-only flag mid-session (e.g. an ACL
-			// revocation while the editor is open).
-			editable: !effectiveReadOnly,
-			editorProps: {
-				attributes: {
-					// Tight `py-1` + `first:mt-0` on headings keeps the first
-					// block flush to the toolbar without sacrificing vertical
-					// rhythm between subsequent blocks.
-					class:
-						'outline-none min-h-[5rem] px-3 py-1 text-sm leading-normal prose prose-sm dark:prose-invert max-w-none [&_p]:my-1.5 [&_p]:text-sm [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-lg [&_h2]:mt-2.5 [&_h2]:mb-1 [&_h2]:text-base [&_h3]:mt-2 [&_h3]:mb-0.5 [&_h3]:text-sm [&_h3]:font-semibold [&_ul]:my-1.5 [&_ol]:my-1.5 [&_li]:my-0 [&_li]:text-sm [&_blockquote]:my-2 [&_blockquote]:text-sm [&_pre]:my-2 [&_pre]:text-xs [&_code]:text-xs [&>:first-child]:mt-0'
-				},
-				handleKeyDown: (view, event) => {
-					if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-						onSave();
-						return true;
-					}
+		if (!editorElement) return;
 
-					if ((event.metaKey || event.ctrlKey) && event.key === 's') {
-						event.preventDefault();
-						onSave();
-						return true;
-					}
+		const collab = ydoc ? ydoc.getText('markdown') : null;
 
-					// Plain Enter runs through the guard so a failed
-					// `splitBlock` degrades to "the key did nothing" instead of
-					// throwing out of ProseMirror's dispatch. See safe-keymap.ts.
-					if (isGuardedKey(event)) {
-						return runKeymapSafely(view, event, reportKeymapFailure);
-					}
-
-					return false;
-				},
-				handlePaste,
-				handleDrop
-			},
-			// Yjs owns wire sync via the Collaboration extension +
-			// `ydoc.on('update')` in the provider. This hook only
-			// mirrors the current markdown rendering to the parent so
-			// its `value` prop / save-badge logic keeps working; the
-			// server derives its own markdown from the authoritative
-			// Y.Doc when it flushes to the source column (see
-			// `iris_engine/collab/render.py`).
-			onUpdate: ({ editor: e }) => {
-				// Always refresh the view-mode HTML snapshot from the
-				// current ProseMirror doc, INCLUDING the initial onUpdate
-				// y-prosemirror fires when it flushes the server's
-				// y_state. That first flush is how view-only viewers
-				// ever see content — if we bail out early here, the
-				// view stays permanently blank.
-				viewHtml = e.getHTML();
-				viewIsEmpty = e.isEmpty;
-				// The parent-visible `onChange` emission is a separate
-				// concern: we gate it on `readyForOnChange` so the
-				// initial hydration doesn't look like a user edit and
-				// doesn't flip the parent's dirty flag.
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				const md = (e.storage as any).markdown.getMarkdown() as string;
-				if (!readyForOnChange) {
-					// Record what we just rendered so the immediate
-					// post-hydration flush (y-prosemirror often emits a
-					// second identical onUpdate one tick after sync-init)
-					// is treated as an echo and skipped below.
-					lastEmittedMarkdown = md;
-					return;
-				}
-				// Skip echo emissions: identical markdown means no user
-				// edit happened; passing it to `onChange` would
-				// spuriously flip the parent's dirty flag.
-				if (md === lastEmittedMarkdown) return;
-				lastEmittedMarkdown = md;
-				onChange(md);
-			},
-			onSelectionUpdate: ({ editor: e }) => {
-				// Tracks whether the caret is inside a table so we can reveal
-				// the row/column controls contextually.
-				inTable = e.isActive('table');
-			}
+		view = new EditorView({
+			parent: editorElement,
+			state: EditorState.create({
+				// In collab mode the content comes from the server's
+				// `sync-init`: y-codemirror fills the editor when the y_state
+				// is applied. Non-collab callers get their prop content now.
+				doc: docName ? '' : normalizeLegacyContent(value ?? ''),
+				extensions: [
+					// Before the default keymap, so Mod-Enter saves rather
+					// than inserting a blank line.
+					Prec.highest(
+						keymap.of([
+							{ key: 'Mod-Enter', run: () => (onSave(), true) },
+							{ key: 'Mod-s', run: () => (onSave(), true), preventDefault: true },
+							{ key: 'Mod-b', run: (v) => toggleInlineMark(v, '**') },
+							{ key: 'Mod-i', run: (v) => toggleInlineMark(v, '*') },
+							{ key: 'Mod-k', run: (v) => toggleLink(v, askLinkUrl) }
+						])
+					),
+					// Yjs has its own undo manager in collab mode: CodeMirror's
+					// history would undo the peers' edits too.
+					...(collab && awareness
+						? [
+								yCollab(collab, awareness, { undoManager: new Y.UndoManager(collab) }),
+								keymap.of(yUndoManagerKeymap)
+							]
+						: [history(), keymap.of(historyKeymap)]),
+					keymap.of([...defaultKeymap, indentWithTab]),
+					markdown({ base: markdownLanguage, codeLanguages: languages }),
+					markdownLivePreview(),
+					markdownMentions({ users: fetchUserItems, caseObjects: fetchCaseItems }),
+					markdownTheme(),
+					EditorView.lineWrapping,
+					placeholder('Write a comment…'),
+					readOnlyCompartment.of(readOnlyExtensions(effectiveReadOnly)),
+					EditorView.domEventHandlers({ paste: handlePaste, drop: handleDrop }),
+					EditorView.updateListener.of((update) => {
+						if (update.docChanged || update.selectionSet || update.focusChanged) {
+							active = activeFormats(update.state);
+						}
+						if (!update.docChanged) return;
+						const md = update.state.doc.toString();
+						// The view mode in collab renders this, including the
+						// content the server's y_state brings in.
+						if (docName) docText = md;
+						if (update.transactions.some((tr) => tr.annotation(External))) return;
+						if (!readyForOnChange) {
+							// The initial sync: not an edit. See `readyForOnChange`.
+							lastEmittedMarkdown = md;
+							return;
+						}
+						if (md === lastEmittedMarkdown) return;
+						lastEmittedMarkdown = md;
+						onChange(md);
+					})
+				]
+			})
 		});
 
 		if (docName) {
 			connectCollab();
 			// Intentionally no safety-net seed: the server is the sole
-			// source of truth for editor content in Option A. If
-			// `sync-init` never arrives, the editor stays empty and the
-			// `[collab] connect_error` log tells operators why. Falling
-			// back to `value` from the parent would be the bug that
-			// produced content duplication in the previous design.
+			// source of truth for editor content. If `sync-init` never
+			// arrives, the editor stays empty and the `[collab]
+			// connect_error` log tells operators why. Falling back to
+			// `value` from the parent would duplicate content once the
+			// doc does sync.
 		}
 	});
 
-	// The Collaboration extension binds the ProseMirror doc to a
-	// specific Y.XmlFragment at extension-init time (in `new Editor`);
-	// swapping the Y.Doc afterwards does NOT rebind, and quietly leaves
-	// the editor pointing at a dead fragment. Parent pages already wrap
+	function readOnlyExtensions(readOnly: boolean) {
+		return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
+	}
+
+	// y-codemirror binds the editor to one Y.Text when its extension is
+	// created; swapping the Y.Doc afterwards does NOT rebind, and quietly
+	// leaves the editor pointing at a dead doc. Parent pages already wrap
 	// this component in `{#key <id>}` so navigating between notes /
 	// sitreps forces a full remount, which is the only reliable way to
 	// swap docs. We assert that the docName never mutates under our
@@ -1552,20 +1315,21 @@
 		joinedDoc = current;
 	});
 
-	// Keep TipTap's editable state in lockstep with the effective
+	// Keep the editor's editable state in lockstep with the effective
 	// read-only signal. This covers three transitions:
 	//   1. Caller flips `readOnly` prop (e.g. a parent switches modes).
 	//   2. Server reports `can_write=false` at join time.
 	//   3. Server sends a mid-session `permission-denied` after an
 	//      ACL change.
-	// TipTap's `setEditable(false)` refuses local mutations at the
-	// ProseMirror layer, so Yjs never sees an update to forward. Belt
-	// AND braces — the server also drops writes from unauthorised users
-	// via `resolve_doc` on every incoming `sync` message.
+	// A read-only editor refuses local edits, so Yjs never sees an
+	// update to forward. Belt AND braces — the server also drops writes
+	// from unauthorised users via `resolve_doc` on every incoming `sync`
+	// message.
 	$effect(() => {
-		if (!editor) return;
-		editor.setEditable(!effectiveReadOnly);
-		if (effectiveReadOnly && viewMode !== 'view') {
+		const readOnlyNow = effectiveReadOnly;
+		if (!view) return;
+		view.dispatch({ effects: readOnlyCompartment.reconfigure(readOnlyExtensions(readOnlyNow)) });
+		if (readOnlyNow && viewMode !== 'view') {
 			// If we were in edit mode when access was revoked, fall back
 			// to the read-only rendered view so the user isn't staring
 			// at a locked-out editable surface.
@@ -1579,21 +1343,27 @@
 	// keep passing `savedAt` for their save-badge UI; we no longer
 	// re-broadcast on it.
 	//
-	// `value` prop → editor content sync is also gone for collab mode:
-	// Yjs is the source of truth once we've joined a doc, and blindly
-	// calling `setContent` here would clobber concurrent remote edits.
-	// The one-time cold-start seeding lives in `onSyncInit` above.
-	// Non-collab callers (no docName) get their content via `content:`
-	// in the Editor constructor, which is unchanged.
+	// There is no `value` prop → editor content sync in collab mode:
+	// Yjs is the source of truth once we've joined a doc, and replacing
+	// the text here would clobber concurrent remote edits.
 
 	onDestroy(() => {
 		closePopover();
+		// The editor first: y-codemirror unhooks from the Y.Text and the
+		// awareness before they are destroyed.
+		view?.destroy();
+		view = null;
 		disconnectCollab();
-		editor?.destroy();
 	});
 
-	const btn = (active: boolean) =>
-		`rounded p-1 transition-colors ${active ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`;
+	// Toolbar actions go through here so a click with no editor (not
+	// mounted yet) is a no-op.
+	const run = (command: (v: EditorView) => unknown) => {
+		if (view) command(view);
+	};
+
+	const btn = (pressed: boolean) =>
+		`rounded p-1 transition-colors ${pressed ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`;
 </script>
 
 <div class="markdown-editor-shell flex flex-col">
@@ -1607,7 +1377,11 @@
 		(selection highlights, tables, resize handles), and Tailwind's `bg-*`
 		utilities were being painted over in practice. The scoped rules use
 		the raw HSL variables and `isolation: isolate` on the shell so paint
-		order is unambiguous regardless of what the ProseMirror DOM sets.
+		order is unambiguous regardless of what the editor DOM sets.
+
+		Mousedown on the toolbar is cancelled so a click doesn't take the
+		focus out of the editor — unfocused, the live preview hides the
+		markdown syntax the caret is on.
 	-->
 	{#if docReplaced}
 		<div
@@ -1645,24 +1419,33 @@
 		<div
 			class="markdown-editor-toolbar flex items-center gap-0.5 rounded-md border border-border px-1.5 py-1"
 			style="position: sticky; top: -1rem; z-index: 10; background-color: hsl(var(--muted)); isolation: isolate;"
+			role="toolbar"
+			tabindex="-1"
+			onmousedown={(e) => e.preventDefault()}
 		>
 			<button
-				class={btn(editor?.isActive('bold') ?? false)}
-				onclick={() => editor?.chain().focus().toggleBold().run()}
+				type="button"
+				title="Bold"
+				class={btn(active.bold)}
+				onclick={() => run((v) => toggleInlineMark(v, '**'))}
 			>
 				<BoldIcon size="12" />
 			</button>
 
 			<button
-				class={btn(editor?.isActive('italic') ?? false)}
-				onclick={() => editor?.chain().focus().toggleItalic().run()}
+				type="button"
+				title="Italic"
+				class={btn(active.italic)}
+				onclick={() => run((v) => toggleInlineMark(v, '*'))}
 			>
 				<ItalicIcon size="12" />
 			</button>
 
 			<button
-				class={btn(editor?.isActive('strike') ?? false)}
-				onclick={() => editor?.chain().focus().toggleStrike().run()}
+				type="button"
+				title="Strikethrough"
+				class={btn(active.strike)}
+				onclick={() => run((v) => toggleInlineMark(v, '~~'))}
 			>
 				<StrikethroughIcon size="12" />
 			</button>
@@ -1670,22 +1453,28 @@
 			<div class="mx-0.5 h-3.5 w-px bg-border/50"></div>
 
 			<button
-				class={btn(editor?.isActive('heading', { level: 1 }) ?? false)}
-				onclick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
+				type="button"
+				title="Heading 1"
+				class={btn(active.heading === 1)}
+				onclick={() => run((v) => toggleHeading(v, 1))}
 			>
 				<Heading1Icon size="12" />
 			</button>
 
 			<button
-				class={btn(editor?.isActive('heading', { level: 2 }) ?? false)}
-				onclick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
+				type="button"
+				title="Heading 2"
+				class={btn(active.heading === 2)}
+				onclick={() => run((v) => toggleHeading(v, 2))}
 			>
 				<Heading2Icon size="12" />
 			</button>
 
 			<button
-				class={btn(editor?.isActive('heading', { level: 3 }) ?? false)}
-				onclick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
+				type="button"
+				title="Heading 3"
+				class={btn(active.heading === 3)}
+				onclick={() => run((v) => toggleHeading(v, 3))}
 			>
 				<Heading3Icon size="12" />
 			</button>
@@ -1693,29 +1482,37 @@
 			<div class="mx-0.5 h-3.5 w-px bg-border/50"></div>
 
 			<button
-				class={btn(editor?.isActive('bulletList') ?? false)}
-				onclick={() => editor?.chain().focus().toggleBulletList().run()}
+				type="button"
+				title="Bulleted list"
+				class={btn(active.bulletList)}
+				onclick={() => run((v) => toggleLinePrefix(v, 'bullet'))}
 			>
 				<ListIcon size="12" />
 			</button>
 
 			<button
-				class={btn(editor?.isActive('orderedList') ?? false)}
-				onclick={() => editor?.chain().focus().toggleOrderedList().run()}
+				type="button"
+				title="Numbered list"
+				class={btn(active.orderedList)}
+				onclick={() => run((v) => toggleLinePrefix(v, 'ordered'))}
 			>
 				<ListOrderedIcon size="12" />
 			</button>
 
 			<button
-				class={btn(editor?.isActive('blockquote') ?? false)}
-				onclick={() => editor?.chain().focus().toggleBlockquote().run()}
+				type="button"
+				title="Quote"
+				class={btn(active.blockquote)}
+				onclick={() => run((v) => toggleLinePrefix(v, 'quote'))}
 			>
 				<QuoteIcon size="12" />
 			</button>
 
 			<button
-				class={btn(editor?.isActive('codeBlock') ?? false)}
-				onclick={() => editor?.chain().focus().toggleCodeBlock().run()}
+				type="button"
+				title="Code block"
+				class={btn(active.codeBlock)}
+				onclick={() => run(toggleCodeBlock)}
 			>
 				<CodeIcon size="12" />
 			</button>
@@ -1723,17 +1520,18 @@
 			<div class="mx-0.5 h-3.5 w-px bg-border/50"></div>
 
 			<button
-				class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-				onclick={() => {
-					const url = window.prompt('URL');
-					if (url) editor?.chain().focus().setLink({ href: url }).run();
-				}}
+				type="button"
+				title={active.link ? 'Remove link' : 'Link'}
+				class={btn(active.link)}
+				onclick={() => run((v) => toggleLink(v, askLinkUrl))}
 			>
 				<LinkIcon size="12" />
 			</button>
 
 			{#if canUploadImages}
 				<button
+					type="button"
+					title="Insert image"
 					class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					disabled={uploading}
 					onclick={triggerFileInput}
@@ -1743,65 +1541,66 @@
 			{/if}
 
 			<button
-				class={btn(editor?.isActive('table') ?? false)}
+				type="button"
+				class={btn(active.table)}
 				title="Insert table"
-				onclick={() =>
-					editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+				onclick={() => run(insertTable)}
 			>
 				<TableIcon size="12" />
 			</button>
 
-			{#if inTable}
+			{#if active.table}
 				<div class="mx-0.5 h-3.5 w-px bg-border/50"></div>
 
 				<button
+					type="button"
 					class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					title="Add row below"
-					onclick={() => editor?.chain().focus().addRowAfter().run()}
+					onclick={() => run((v) => runTableOp(v, 'addRowAfter'))}
 				>
 					<Rows3Icon size="12" />
 					<span class="sr-only">Add row</span>
 				</button>
 
 				<button
+					type="button"
 					class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					title="Delete row"
-					onclick={() => editor?.chain().focus().deleteRow().run()}
+					onclick={() => run((v) => runTableOp(v, 'deleteRow'))}
 				>
 					<Rows3Icon size="12" class="text-red-500" />
 					<span class="sr-only">Delete row</span>
 				</button>
 
 				<button
+					type="button"
 					class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					title="Add column after"
-					onclick={() => editor?.chain().focus().addColumnAfter().run()}
+					onclick={() => run((v) => runTableOp(v, 'addColumnAfter'))}
 				>
 					<Columns3Icon size="12" />
 					<span class="sr-only">Add column</span>
 				</button>
 
 				<button
+					type="button"
 					class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					title="Delete column"
-					onclick={() => editor?.chain().focus().deleteColumn().run()}
+					onclick={() => run((v) => runTableOp(v, 'deleteColumn'))}
 				>
 					<Columns3Icon size="12" class="text-red-500" />
 					<span class="sr-only">Delete column</span>
 				</button>
 
 				<button
+					type="button"
 					class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					title="Delete table"
-					onclick={() => editor?.chain().focus().deleteTable().run()}
+					onclick={() => run(deleteTable)}
 				>
 					<Trash2Icon size="12" class="text-red-500" />
 					<span class="sr-only">Delete table</span>
 				</button>
-			{/if}
-
-			{#if typingUser}
-				<span class="ml-auto text-2xs text-muted-foreground">{typingUser} is typing…</span>
 			{/if}
 
 			<div class="ml-auto flex items-center gap-0.5">
@@ -1834,7 +1633,7 @@
 	<!--
 		Body wrapper. In 'view' or 'edit-preview' mode we show the rendered
 		markdown via the same DOMPurify+converter pipeline as MarkDownPreview.
-		The tiptap editor element stays mounted at all times (just hidden when
+		The editor element stays mounted at all times (just hidden when
 		not in 'edit') so the collab socket and editor state survive transitions
 		without re-init.
 	-->
@@ -1934,7 +1733,7 @@
 	 * Editor shell creates its own stacking context so sticky z-index
 	 * values inside stay coherent regardless of what the surrounding
 	 * page does. Without `isolation: isolate` the prose content could
-	 * paint over the sticky toolbar if an ancestor or ProseMirror's
+	 * paint over the sticky toolbar if an ancestor or the editor's
 	 * own styles introduced a competing stacking context.
 	 */
 	.markdown-editor-shell {
@@ -1962,86 +1761,6 @@
 	.markdown-editor-body {
 		position: relative;
 		z-index: 0;
-	}
-
-	:global(.tiptap p.is-editor-empty:first-child::before) {
-		content: attr(data-placeholder);
-		float: left;
-		pointer-events: none;
-		height: 0;
-		color: hsl(var(--muted-foreground) / 0.5);
-	}
-
-	:global(.tiptap img) {
-		max-width: 100%;
-		height: auto;
-		border-radius: 0.375rem;
-	}
-
-	/* The resizable image wrapper replaces the default <img> node via a
-	   custom NodeView. When it's selected, show a subtle outline to hint
-	   that it's an interactive element. */
-	:global(.tiptap .resizable-image-wrapper.ProseMirror-selectednode img) {
-		outline: 2px solid hsl(var(--primary));
-		outline-offset: 2px;
-	}
-
-	:global(.tiptap .resizable-image-wrapper:hover .resizable-image-handle),
-	:global(.tiptap .resizable-image-wrapper.ProseMirror-selectednode .resizable-image-handle) {
-		opacity: 1 !important;
-	}
-
-	/* Table rendering — prosemirror-tables wraps each <table> in a scrollable
-	   wrapper and needs border-collapse for cells to line up. */
-	:global(.tiptap .tableWrapper) {
-		overflow-x: auto;
-		margin: 0.75rem 0;
-	}
-
-	:global(.tiptap table) {
-		border-collapse: collapse;
-		table-layout: fixed;
-		width: 100%;
-		margin: 0;
-	}
-
-	:global(.tiptap table td),
-	:global(.tiptap table th) {
-		border: 1px solid hsl(var(--border));
-		padding: 0.35rem 0.5rem;
-		vertical-align: top;
-		position: relative;
-		min-width: 3rem;
-	}
-
-	:global(.tiptap table th) {
-		background: hsl(var(--muted) / 0.5);
-		font-weight: 600;
-		text-align: left;
-	}
-
-	/* Highlight selected cells so users see what they're editing. */
-	:global(.tiptap table .selectedCell::after) {
-		content: '';
-		position: absolute;
-		inset: 0;
-		background: hsl(var(--primary) / 0.15);
-		pointer-events: none;
-	}
-
-	/* Column-resize handle rendered by prosemirror-tables when resizable: true. */
-	:global(.tiptap table .column-resize-handle) {
-		position: absolute;
-		right: -2px;
-		top: 0;
-		bottom: 0;
-		width: 4px;
-		background: hsl(var(--primary) / 0.5);
-		pointer-events: none;
-	}
-
-	:global(.tiptap.resize-cursor) {
-		cursor: col-resize;
 	}
 
 	/* NOTE: the `.mention-chip` layout rules used to live here as `:global()`
@@ -2078,63 +1797,5 @@
 	:global(.markdown-editor-body) {
 		overflow-wrap: anywhere;
 		word-break: break-word;
-	}
-
-	/*
-	 * Remote-cursor styling for `@tiptap/extension-collaboration-caret`.
-	 *
-	 * Without these rules the extension inserts unstyled `<span class=
-	 * "collaboration-carets__caret">` + `<div class=".__label">` nodes
-	 * into the text flow. Every keystroke triggers a re-render (see the
-	 * awareness event chain) and the unstyled label ends up briefly
-	 * pushing surrounding text around — which reads as "text blinking
-	 * because it comes and goes." Positioning the label absolutely
-	 * anchors it out of the flow and stops the flicker.
-	 *
-	 * The `border-color` and `background-color` are picked from the
-	 * `user.color` attribute the client sets when it seeds local
-	 * awareness (see `pickCursorColor(user.id)`). The extension writes
-	 * that color as an inline style on the caret span, so we don't need
-	 * to hardcode anything here — we only own the layout.
-	 */
-	:global(.collaboration-carets__caret) {
-		position: relative;
-		border-left: 1px solid;
-		border-right: 1px solid;
-		margin-left: -1px;
-		margin-right: -1px;
-		pointer-events: none;
-		word-break: normal;
-	}
-
-	:global(.collaboration-carets__label) {
-		position: absolute;
-		top: -1.4em;
-		left: -1px;
-		padding: 0.1rem 0.4rem;
-		border-radius: 3px 3px 3px 0;
-		font-size: 0.7rem;
-		font-weight: 500;
-		line-height: 1;
-		color: white;
-		white-space: nowrap;
-		user-select: none;
-		/* Keep the label above the sticky toolbar layer but below modal
-		   dialogs. Also fade to make rapid cursor movement feel less
-		   twitchy without hiding presence entirely. */
-		z-index: 5;
-		opacity: 0.9;
-		transition: opacity 100ms ease;
-	}
-
-	/*
-	 * Optional selection tint for a remote peer's ProseMirror selection.
-	 * y-prosemirror's default selectionBuilder returns
-	 * `{ nodeName: 'span', class: 'ProseMirror-yjs-selection', style: ...}`.
-	 * The inline style already sets background-color; we only need to
-	 * keep it from swallowing pointer events on our own content.
-	 */
-	:global(.ProseMirror-yjs-selection) {
-		pointer-events: none;
 	}
 </style>

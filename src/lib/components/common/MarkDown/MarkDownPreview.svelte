@@ -4,6 +4,7 @@
 	import { converter } from './converter';
 	import { authenticateDatastoreImages } from './authenticate-datastore-images';
 	import { decorateMentionChips } from './decorate-mention-chips';
+	import { highlightCodeBlocks } from './highlight-code-blocks';
 	import { normalizeLegacyContent } from './legacy-content';
 	import { sanitizeUntrustedMarkdown } from './untrusted-markdown';
 
@@ -40,13 +41,21 @@
 	});
 
 	// Chips the backend wrote (alert links appended by escalate/merge) carry
-	// the data attributes but none of the utility classes tiptap bakes in,
+	// the data attributes but none of the utility classes TipTap used to bake in,
 	// so they'd render as bare text here. Decorate them post-render, which
 	// also makes them visible to any enclosing ChipHoverHost.
 	$effect(() => {
 		void safeHtml;
 		if (!containerEl || untrusted) return;
 		decorateMentionChips(containerEl);
+	});
+
+	// Fenced code in the editor's colours. Text only, so the untrusted
+	// profile gets it too.
+	$effect(() => {
+		void safeHtml;
+		if (!containerEl) return;
+		highlightCodeBlocks(containerEl);
 	});
 </script>
 

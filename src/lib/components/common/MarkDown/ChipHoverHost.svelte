@@ -7,7 +7,7 @@
   Usage:
     Wrap any subtree that contains .mention-chip elements with this host.
     Each chip must carry data-kind / data-id / data-label, matching the
-    format emitted by mention-node.ts.
+    format emitted by buildMentionSpan (mention-markup.ts).
 -->
 <script lang="ts">
 	import { getContext, mount, unmount, type Snippet } from 'svelte';

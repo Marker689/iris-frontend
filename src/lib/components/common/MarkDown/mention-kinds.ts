@@ -1,16 +1,16 @@
 /**
  * The single kind→appearance table behind every mention chip.
  *
- * This used to be copy-pasted four ways — `KIND_STYLE` in `mention-node.ts`,
+ * This used to be copy-pasted four ways — `KIND_STYLE` in the TipTap node,
  * `colorFor` in `Chip.svelte`, `styleFor` in `MentionPopover.svelte` and the
  * suggestion-list icons — which meant adding a kind was four edits in four
  * files that silently drifted apart (`Chip.svelte` never learned about
  * `team`, for one). Everything now reads from here, so a new kind is one
  * entry plus its lucide glyph in `./mention-icons`.
  *
- * Deliberately free of Svelte and lucide imports: `mention-node.ts` is a
- * plain TS module handed to tiptap's schema, and it renders its chip as a
- * ProseMirror DOM spec — raw SVG path data, not a component. The lucide
+ * Deliberately free of Svelte and lucide imports: the preview sweep in
+ * `decorate-mention-chips.ts`, which also draws the editor's chip widgets,
+ * builds plain DOM — raw SVG path data, not a component. The lucide
  * component per kind lives in the sibling `./mention-icons` so importing
  * this table never drags the icon pack into the editor bundle.
  */
@@ -107,9 +107,9 @@ export const isMentionKind = (value: string | null | undefined): value is Mentio
 /**
  * Appearance for a kind read off a `data-kind` attribute, i.e. a string that
  * has been round-tripped through markdown and may well be garbage or a kind
- * written by a newer backend. Falls back to `user` — the same fallback the
- * tiptap node uses — so an unknown kind renders as a plain chip instead of
- * throwing halfway through a ProseMirror render.
+ * written by a newer backend. Falls back to `user` — the same fallback
+ * `buildMentionSpan` uses — so an unknown kind renders as a plain chip
+ * instead of throwing halfway through a render.
  */
 export const mentionKindStyle = (kind: string | null | undefined): MentionKindStyle =>
 	isMentionKind(kind) ? MENTION_KIND_STYLE[kind] : MENTION_KIND_STYLE.user;
@@ -117,16 +117,16 @@ export const mentionKindStyle = (kind: string | null | undefined): MentionKindSt
 /**
  * Trigger character a chip of this kind is authored with, and which the
  * stored markup carries in its text body. Mirrors the strip pattern in
- * `mention-node.ts`'s `label` parseHTML.
+ * `mention-markup.ts`'s body-label fallback.
  */
 export const mentionTriggerChar = (kind: MentionKind): '@' | '#' =>
 	kind === 'user' || kind === 'team' ? '@' : '#';
 
 /**
  * Classes every chip carries regardless of kind. Kept next to the colour
- * table so the tiptap node, `Chip.svelte` and the preview sweep can't drift
- * on padding/typography either. The layout rules behind `.mention-chip`
- * itself live in `src/app.css`.
+ * table so the editor's chip widgets, `Chip.svelte` and the preview sweep
+ * can't drift on padding/typography either. The layout rules behind
+ * `.mention-chip` itself live in `src/app.css`.
  */
 export const MENTION_CHIP_BASE_CLASSES =
 	'mention-chip mention-chip-clickable inline-flex items-center gap-0.5 rounded px-1 py-0 text-xs font-medium cursor-pointer';

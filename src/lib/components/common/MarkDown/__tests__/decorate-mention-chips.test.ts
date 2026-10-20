@@ -51,9 +51,9 @@ describe('decorateMentionChips', () => {
 		expect(chip.textContent).toBe('Alert #106');
 	});
 
-	it('leaves an editor-authored chip untouched', () => {
-		// tiptap bakes the classes in, so the sweep must not re-enter and
-		// blow away the nodes ProseMirror is tracking.
+	it('leaves an already-decorated chip untouched', () => {
+		// TipTap-era chips were stored with the classes baked in, so the
+		// sweep must not re-enter and rebuild their children.
 		const container = render(
 			'<span data-mention data-kind="note" data-id="7" data-label="Runbook" ' +
 				'class="mention-chip mention-chip-clickable bg-emerald-500/15">' +
@@ -109,7 +109,7 @@ describe('decorateMentionChips', () => {
 
 	it('falls back to the text body when data-label is missing', () => {
 		// Chips written before `data-label` existed, and the shape
-		// `mention-node.ts`'s parseHTML already compensates for.
+		// `mention-markup.ts`'s body-label fallback already compensates for.
 		const container = render('<span data-mention data-kind="ioc" data-id="4">#evil.com</span>');
 
 		decorateMentionChips(container);

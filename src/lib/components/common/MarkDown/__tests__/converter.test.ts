@@ -1,22 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Editor } from '@tiptap/core';
-import StarterKit from '@tiptap/starter-kit';
-import { Markdown } from 'tiptap-markdown';
 import { converter, renderHardBreaks } from '../converter';
 
 const html = (md: string) => converter.makeHtml(md).replace(/\n/g, '');
-
-/** Markdown TipTap saves for `content` (same Markdown options as the editor). */
-const tiptapMarkdown = (content: string) => {
-	const editor = new Editor({
-		extensions: [StarterKit, Markdown.configure({ breaks: true })],
-		content
-	});
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const md = (editor.storage as any).markdown.getMarkdown() as string;
-	editor.destroy();
-	return md;
-};
 
 describe('renderHardBreaks', () => {
 	it('turns a hard break into a <br> joining the lines', () => {
@@ -81,25 +66,24 @@ describe('renderHardBreaks', () => {
 
 describe('converter', () => {
 	it('shows no backslash for an empty line typed in the editor', () => {
-		const md = tiptapMarkdown('<p>confirmed.<br><br><strong>Source</strong>: x</p>');
-		expect(md).toBe('confirmed.\\\n\\\n**Source**: x');
+		// Notes written by the previous (TipTap) editor stored line breaks this way.
+		const md = 'confirmed.\\\n\\\n**Source**: x';
 		expect(html(md)).toBe('<p>confirmed.<br><br><strong>Source</strong>: x</p>');
 	});
 
 	it('keeps a line break inside italics', () => {
-		const md = tiptapMarkdown('<p><em>discovered with a<br>valid record</em></p>');
+		const md = '*discovered with a\\\nvalid record*';
 		expect(html(md)).toBe('<p><em>discovered with a<br>valid record</em></p>');
 	});
 
 	it('keeps a line break in a quote', () => {
-		const md = tiptapMarkdown('<blockquote><p>quoted<br>more</p></blockquote>');
+		const md = '> quoted\\\n> more';
 		expect(html(md)).toBe('<blockquote>  <p>quoted<br>more</p></blockquote>');
 	});
 
 	it('keeps code in a nested list intact', () => {
-		const md = tiptapMarkdown(
-			'<ul><li><p>a</p><ul><li><p>b</p><ul><li><p>c<br>cont</p><pre><code>ls \\\n-la</code></pre></li></ul></li></ul></li></ul>'
-		);
+		const md =
+			'- a\n\n  - b\n\n    - c\\\n      cont\n\n      ```\n      ls \\\n      -la\n      ```';
 		const out = converter.makeHtml(md);
 		expect(out).toContain('c<br>      cont');
 		expect(out).toMatch(/<code>\s*ls \\\n\s*-la\n<\/code>/);

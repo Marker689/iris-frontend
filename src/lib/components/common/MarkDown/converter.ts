@@ -1,6 +1,7 @@
 import Showdown from 'showdown';
 
-// Fences may sit in a list (TipTap indents them past 3 spaces) or a quote.
+// Fences may sit in a list (the previous editor, TipTap, indented them past
+// 3 spaces) or a quote.
 const FENCE_RE = /^\s*(?:>\s?)*\s*(`{3,}|~{3,})/;
 const FENCE_CLOSE_RE = /^\s*(?:>\s?)*\s*(`{3,}|~{3,})\s*$/;
 const QUOTE_RE = /^\s*(?:>\s?)+/;
@@ -9,9 +10,9 @@ const INDENTED_RE = /^(?: {4}|\t)/;
 const TABLE_DELIMITER_RE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/;
 
 /**
- * Render the hard breaks TipTap writes — a backslash ending a line
- * (`"line one\\\nline two"`), valid CommonMark that showdown doesn't
- * know — as `<br>`, joining the two lines.
+ * Render the hard breaks the previous editor (TipTap) wrote — a backslash
+ * ending a line (`"line one\\\nline two"`), valid CommonMark that showdown
+ * doesn't know — as `<br>`, joining the two lines.
  *
  * Joining rather than leaving a bare newline for `simpleLineBreaks`:
  * showdown applies `simpleLineBreaks` neither inside `*…*` / `**…**`

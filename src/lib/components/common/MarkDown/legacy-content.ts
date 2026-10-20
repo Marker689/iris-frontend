@@ -122,8 +122,8 @@ const stripFontAwesomeTags = (text: string): string => {
  *
  * Also:
  *  - Strip backticks that legacy content wrapped around the alt text
- *    (e.g. ``!\[`file.png`\](url)``). Tiptap's image node does not preserve
- *    alt markup, and the backticks were purely cosmetic.
+ *    (e.g. ``!\[`file.png`\](url)``). The previous editor's (TipTap) image
+ *    node did not preserve alt markup, and the backticks were purely cosmetic.
  *  - Strip the non-standard `=WxH%` size suffix inside the URL parens
  *    (e.g. `![alt](url =60%x40%)`) — this is a markdown-it-imsize extension
  *    that the default parser doesn't understand, so it breaks the URL match

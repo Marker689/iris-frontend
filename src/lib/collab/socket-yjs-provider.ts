@@ -245,7 +245,10 @@ export class SocketYjsProvider {
 
 	private emitJoin() {
 		if (this.destroyed) return;
-		this.socket.emit('join', { doc: this.docName });
+		// `format` tells the server this client edits the markdown source
+		// (`Y.Text` 'markdown'); it refuses joins from editors that predate
+		// it, which would write to the legacy tree nobody reads anymore.
+		this.socket.emit('join', { doc: this.docName, format: 'markdown' });
 	}
 
 	private handleSyncInit(data: {

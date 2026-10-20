@@ -1,11 +1,12 @@
 <!--
   Inline chip matching the visual + data-attribute shape of mention chips
-  rendered by `mention-node.ts`. Use whenever you want to display a reference
-  to a case object (asset, ioc, note, task, alert, user) inside non-tiptap UI
-  and have ChipHoverHost wire up the hover popover and detail dialogs for it.
+  rendered in the markdown editor and preview. Use whenever you want to
+  display a reference to a case object (asset, ioc, note, task, alert, user)
+  outside markdown content and have ChipHoverHost wire up the hover popover
+  and detail dialogs for it.
 
   Colours and glyph come from the shared `./mention-kinds` table, so this
-  stays pixel-identical to the chips tiptap renders and to the ones the
+  stays pixel-identical to the editor's chip widgets and to the ones the
   preview sweep decorates.
 -->
 <script lang="ts">

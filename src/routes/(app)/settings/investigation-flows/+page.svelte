@@ -618,7 +618,7 @@
 										Description — what the analyst should do and check
 									</p>
 									{#key step.step_id}
-										<div class="[&_.tiptap]:min-h-[50vh]">
+										<div class="[&_.cm-content]:min-h-[50vh]">
 											<MarkDownEditor
 												value={step.step_description ?? ''}
 												onChange={(v: string) => {

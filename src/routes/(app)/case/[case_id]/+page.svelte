@@ -623,7 +623,7 @@
 							-->
 							<div class="max-h-[40vh] overflow-y-auto">
 								<!--
-								  Type scale mirrors MarkDownEditor's ProseMirror class
+								  Type scale mirrors MarkDownEditor's preview classes
 								  (MarkDownEditor.svelte) so the note reads at the same
 								  size as the summary directly beneath it. Left to its
 								  own `prose prose-sm` defaults it renders noticeably

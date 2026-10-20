@@ -2,13 +2,14 @@
  * Lucide glyph per mention kind, for the consumers that render Svelte
  * components — the suggestion list, `Chip.svelte` and `MentionPopover`.
  *
- * Split out of `./mention-kinds` on purpose: the tiptap node in
- * `mention-node.ts` renders through a ProseMirror DOM spec and only ever
- * wants the raw path data, so it must be able to import the colour table
- * without pulling `lucide-svelte` in behind it. The two files are expected
- * to stay key-for-key identical — `MENTION_KIND_ICON` is typed against
- * `MentionKind`, so adding a kind to one and forgetting the other is a
- * type error rather than a missing glyph at runtime.
+ * Split out of `./mention-kinds` on purpose: the preview sweep in
+ * `decorate-mention-chips.ts`, which also draws the editor's chip widgets,
+ * builds plain DOM and only ever wants the raw path data, so it must be
+ * able to import the colour table without pulling `lucide-svelte` in
+ * behind it. The two files are expected to stay key-for-key identical —
+ * `MENTION_KIND_ICON` is typed against `MentionKind`, so adding a kind to
+ * one and forgetting the other is a type error rather than a missing glyph
+ * at runtime.
  */
 
 import {
