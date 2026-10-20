@@ -79,7 +79,7 @@
 >
 	{#if current}
 		<Dialog.Content
-			class="grid-cols-[minmax(0,1fr)] sm:max-w-xl"
+			class="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-xl"
 			data-testid="ai-question-popup"
 			onInteractOutside={(e) => e.preventDefault()}
 		>
