@@ -330,6 +330,11 @@
 	ul {
 		@apply list-disc pl-4;
 	}
+
+	/* Same blue as the editor's link text (markdown-theme.ts). */
+	a:not(.mention-chip) {
+		@apply text-[#3b82f6] underline underline-offset-2 hover:text-[#2563eb];
+	}
 }
 
 /*
