@@ -30,7 +30,7 @@
 	import { loadAlertStatuses } from '../helpers/alert-status';
 	import { mergeAlerts } from '../helpers/alerts-merge';
 	import { closeAlerts } from '../helpers/alerts-close';
-	import { assignAlertsToOwner, reassignAlertOwner } from '../helpers/alerts-assign';
+	import { assignAlertsToOwner, reassignAlertOwner, unassignAlert } from '../helpers/alerts-assign';
 	import { unlinkAlertCase } from '../helpers/alert-unlink';
 
 	const alerts = getContext<AlertsContext>(ALERTS_CTX);
@@ -99,6 +99,13 @@
 		const nextOwnerId = $current_user?.id;
 
 		const [updated] = await assignAlertsToOwner({ updateAlert }, [alert.alert_id], nextOwnerId);
+		if (!updated) {
+			refreshAlert();
+		}
+	};
+
+	const unassign = async (alert: Alert) => {
+		const updated = await unassignAlert({ updateAlert }, alert.alert_id);
 		if (!updated) {
 			refreshAlert();
 		}
@@ -195,6 +202,7 @@
 				{alertStatuses}
 				onAssign={() => assign(alert)}
 				onAssignToCurrentUser={() => assignToCurrentUser(alert)}
+				onUnassign={() => unassign(alert)}
 				onSetStatus={(s) => setStatus(s)}
 				onShowInvestigationFlow={() =>
 					investigationFlowPanel.open({

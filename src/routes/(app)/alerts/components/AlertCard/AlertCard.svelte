@@ -50,6 +50,7 @@
 		onExpandedChange,
 		onAssign,
 		onAssignToCurrentUser,
+		onUnassign,
 		onSetStatus,
 		onShowEdit,
 		onShowHistory,
@@ -68,6 +69,7 @@
 		onExpandedChange?: (v: boolean) => void;
 		onAssign: () => void;
 		onAssignToCurrentUser: () => void;
+		onUnassign: () => void;
 		onSetStatus: (status_id: number) => void;
 		onShowEdit: () => void;
 		onShowHistory: () => void;
@@ -289,6 +291,10 @@
 							>
 
 							<DropdownMenuItem onclick={() => onAssign()}>Assign</DropdownMenuItem>
+
+							{#if alert.alert_owner_id != null}
+								<DropdownMenuItem onclick={() => onUnassign()}>Unassign</DropdownMenuItem>
+							{/if}
 						</DropdownMenuContent>
 					</DropdownMenu>
 

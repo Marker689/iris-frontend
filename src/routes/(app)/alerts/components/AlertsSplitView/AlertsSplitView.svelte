@@ -136,6 +136,7 @@
 		onSelectAll: (checked: boolean) => void;
 		onAssignToMe: (alert: Alert) => void;
 		onAssign: (alert: Alert) => void;
+		onUnassign: (alert: Alert) => void;
 		onEscalate: (alert: Alert) => void;
 		onMerge: (alert: Alert) => void;
 		onClose: (alert: Alert) => void;
@@ -205,6 +206,7 @@
 		onSelectAll,
 		onAssignToMe,
 		onAssign,
+		onUnassign,
 		onEscalate,
 		onMerge,
 		onClose,
@@ -1366,6 +1368,17 @@
 											showAssignMenu = false;
 										}}>Assign to…</button
 									>
+									{#if f.alert_owner_id != null}
+										<button
+											type="button"
+											class="menu-item"
+											role="menuitem"
+											onclick={() => {
+												onUnassign(f);
+												showAssignMenu = false;
+											}}>Unassign</button
+										>
+									{/if}
 								</div>
 							{/if}
 						</div>

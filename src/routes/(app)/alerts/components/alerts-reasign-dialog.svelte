@@ -8,6 +8,7 @@
 	import SelectContent from '$lib/components/ui/select/select-content.svelte';
 	import SelectItem from '$lib/components/ui/select/select-item.svelte';
 	import SelectTrigger from '$lib/components/ui/select/select-trigger.svelte';
+	import { UNASSIGNED_OWNER_VALUE } from '../helpers/alerts-assign';
 
 	type Props = {
 		open: boolean;
@@ -22,6 +23,13 @@
 	let users = $state<MentionableUser[]>([]);
 
 	const DEFAULT_VALUE = 'Select user';
+	const UNASSIGNED_LABEL = 'Unassigned';
+
+	const triggerLabel = $derived(
+		ownerId === UNASSIGNED_OWNER_VALUE
+			? UNASSIGNED_LABEL
+			: (users.find((user) => Number(user.user_id) === Number(ownerId))?.user_name ?? DEFAULT_VALUE)
+	);
 
 	// `/api/v2/users/mentionable` is auth-gated but not admin-gated, so
 	// standard analysts (who can't call `/manage/users`) can still
@@ -55,13 +63,13 @@
 			<div class="text-sm font-medium">New Owner</div>
 
 			<Select value={ownerId} onValueChange={onOwnerIdChange} type="single">
-				<SelectTrigger
-					>{users.find((user) => Number(user.user_id) === Number(ownerId))?.user_name ??
-						DEFAULT_VALUE}</SelectTrigger
-				>
+				<SelectTrigger>{triggerLabel}</SelectTrigger>
 
 				<SelectContent>
 					<SelectItem value="">{DEFAULT_VALUE}</SelectItem>
+					<SelectItem value={UNASSIGNED_OWNER_VALUE}>
+						<span class="italic text-muted-foreground">{UNASSIGNED_LABEL}</span>
+					</SelectItem>
 
 					{#each users as u (u.user_id)}
 						<SelectItem value={String(u.user_id)}>
@@ -74,7 +82,9 @@
 
 		<Dialog.Footer class="flex gap-2">
 			<Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
-			<Button disabled={ownerId === ''} onclick={onConfirm}>Assign</Button>
+			<Button disabled={ownerId === ''} onclick={onConfirm}>
+				{ownerId === UNASSIGNED_OWNER_VALUE ? 'Unassign' : 'Assign'}
+			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

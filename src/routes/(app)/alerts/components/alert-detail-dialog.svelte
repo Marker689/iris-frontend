@@ -41,7 +41,7 @@
 	import AlertsCloseDialog from './alerts-close-dialog.svelte';
 	import AlertsMergeDialog, { type MergeAlertPayload } from './alerts-merge-dialog.svelte';
 	import AlertsReasignDialog from './alerts-reasign-dialog.svelte';
-	import { assignAlertsToOwner, reassignAlertOwner } from '../helpers/alerts-assign';
+	import { assignAlertsToOwner, reassignAlertOwner, unassignAlert } from '../helpers/alerts-assign';
 	import { closeAlerts } from '../helpers/alerts-close';
 	import { mergeAlerts } from '../helpers/alerts-merge';
 	import { unlinkAlertCase } from '../helpers/alert-unlink';
@@ -143,6 +143,10 @@
 		if (ownerId == null) return;
 
 		await assignAlertsToOwner({ updateAlert }, [target.alert_id], ownerId);
+	};
+
+	const unassign = async (target: Alert) => {
+		await unassignAlert({ updateAlert }, target.alert_id);
 	};
 
 	const assign = async (target: Alert) => {
@@ -293,6 +297,7 @@
 					alwaysExpanded
 					onAssign={() => assign(current)}
 					onAssignToCurrentUser={() => assignToCurrentUser(current)}
+					onUnassign={() => unassign(current)}
 					onSetStatus={(status_id) => setStatus(status_id)}
 					onShowEdit={() => (showEdit = true)}
 					onShowHistory={() => (showHistory = true)}

@@ -113,7 +113,7 @@
 	} from './helpers/alerts-layout';
 	import { mergeAlerts } from './helpers/alerts-merge';
 	import { closeAlerts } from './helpers/alerts-close';
-	import { assignAlertsToOwner, reassignAlertOwner } from './helpers/alerts-assign';
+	import { assignAlertsToOwner, reassignAlertOwner, unassignAlert } from './helpers/alerts-assign';
 	import { unlinkAlertCase } from './helpers/alert-unlink';
 	import {
 		parseAlertSort,
@@ -912,7 +912,7 @@
 	const openReassignDialog = (alert?: Alert) => {
 		if (alert) {
 			reassignAlert = alert;
-			reassignOwnerId = String(alert.alert_owner_id);
+			reassignOwnerId = String(alert.alert_owner_id ?? '');
 		}
 
 		reassignOpen = true;
@@ -991,6 +991,13 @@
 		const nextOwnerId = $current_user?.id;
 
 		const [updated] = await assignAlertsToOwner({ updateAlert }, [alert.alert_id], nextOwnerId);
+		if (!updated) {
+			await refreshAlerts();
+		}
+	};
+
+	const unassign = async (alert: Alert) => {
+		const updated = await unassignAlert({ updateAlert }, alert.alert_id);
 		if (!updated) {
 			await refreshAlerts();
 		}
@@ -1699,6 +1706,7 @@
 				onQueueWidthChange={(split_queue_width) => saveLayout({ ...layout, split_queue_width })}
 				onAssignToMe={assignToCurrentUser}
 				onAssign={openReassignDialog}
+				onUnassign={unassign}
 			>
 				{#snippet filterBar()}
 					{@render filterChips()}
@@ -1782,6 +1790,7 @@
 										onExpandedChange={(v) => (expanded = { ...expanded, [alert.alert_id]: v })}
 										onAssign={() => assign(alert)}
 										onAssignToCurrentUser={() => assignToCurrentUser(alert)}
+										onUnassign={() => unassign(alert)}
 										onSetStatus={(status) => {
 											selected = { ...selected, [alert.alert_id]: true };
 
