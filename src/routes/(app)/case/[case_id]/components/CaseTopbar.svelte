@@ -1016,8 +1016,8 @@
 
 		<!--
 			Linked-alerts indicator: count is loaded eagerly on case change
-			and shown both as a red badge on the bell and as an inline
-			"N linked alerts" label when there's horizontal room. The popover
+			and shown as a bare count next to the bell — the words
+			live in the tooltip and the popover header. The popover
 			lists up to ALERTS_PER_PAGE alerts; the footer link jumps to the
 			Alerts page pre-filtered by this case.
 		-->
@@ -1042,13 +1042,11 @@
 				<Popover.Trigger
 					class="inline-flex items-center gap-1 rounded-sm bg-transparent text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 					aria-label={`${linkedAlertsTotal} linked alert${linkedAlertsTotal === 1 ? '' : 's'}`}
+					title={`${linkedAlertsTotal} linked alert${linkedAlertsTotal === 1 ? '' : 's'}`}
 				>
 					<BellIcon size={14} />
 					<span class="tabular-nums">
 						{linkedAlertsTotal > 99 ? '99+' : linkedAlertsTotal}
-					</span>
-					<span class="hidden sm:inline">
-						linked alert{linkedAlertsTotal === 1 ? '' : 's'}
 					</span>
 				</Popover.Trigger>
 				<Popover.Content align="end" class="w-80 p-0">
@@ -1233,10 +1231,10 @@
 				<Popover.Trigger
 					class="inline-flex h-7 items-center gap-1 rounded-sm border border-red-500/30 bg-red-500/10 px-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-red-300 sm:px-2"
 					aria-label="War rooms this case is attached to"
+					title={`In ${warRooms.length} war room${warRooms.length === 1 ? '' : 's'}`}
 				>
 					<ShieldAlert size={13} />
 					<span class="tabular-nums">{warRooms.length}</span>
-					<span class="hidden md:inline">War room{warRooms.length === 1 ? '' : 's'}</span>
 				</Popover.Trigger>
 				<Popover.Content align="end" class="w-64 p-0">
 					<div class="border-b px-3 py-2 text-xs font-semibold">
