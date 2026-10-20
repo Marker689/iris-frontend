@@ -1,9 +1,9 @@
 <!--
-  Section-aware quick-add button. Sits next to the generic "Add Item"
-  dropdown in the case topbar and lets the user create the kind of item
-  that matches the page they're on (Add Note on /notes, Add Task on
-  /tasks, etc). Renders nothing on routes where there's no obvious
-  "primary add" (case home, graph, war-room, activity).
+  The case topbar's add button. A split button: the main half creates the
+  kind of item that matches the page (Add Note on /notes, Add Task on
+  /tasks, etc), the chevron opens the menu of everything that can be
+  added to a case. On routes with no obvious "primary add" (case home,
+  graph, war-room, activity) it is a single "Add" button opening that menu.
 -->
 <script lang="ts">
 	import { getContext } from 'svelte';
@@ -15,9 +15,16 @@
 		DatabaseIcon,
 		FileIcon,
 		FileLock2Icon,
-		PlusIcon
+		PlusIcon,
+		ChevronDownIcon
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuItem,
+		DropdownMenuTrigger
+	} from '$lib/components/ui/dropdown-menu';
 	import {
 		CASE_ASSETS_CTX,
 		type CaseAssetsContext
@@ -107,23 +114,82 @@
 	};
 
 	const action = $derived(section ? SECTION_ACTIONS[section] : null);
+
+	// DataStore lives in a side panel — open it and the upload dialog together
+	// so the user sees the new file land in the tree right after upload.
+	const newDatastoreFile = () => {
+		datastorePanel.open();
+		caseDatastore.ui.showAddFileModal = true;
+	};
+
+	const ADD_ITEMS: SectionAction[] = [
+		{ label: 'Note', Icon: FileIcon, run: () => newNote(caseNotes) },
+		{ label: 'Task', Icon: CheckCheckIcon, run: () => newTask(caseTasks) },
+		{ label: 'Asset', Icon: ComputerIcon, run: () => newAsset(caseAssets) },
+		{ label: 'IOC', Icon: BiohazardIcon, run: () => newIoc(caseIocs) },
+		{ label: 'Evidence', Icon: FileLock2Icon, run: () => newEvidence(caseEvidences) },
+		{ label: 'DataStore file', Icon: DatabaseIcon, run: newDatastoreFile }
+	];
 </script>
 
-{#if action}
-	<!--
-	  Primary variant so the section's "Add X" CTA stands out from the
-	  surrounding outline buttons (DataStore, Activity, generic Add Item).
-	  This is the one button users will reach for most often on each
-	  section page; the brand color makes it discoverable.
-	-->
-	<Button
-		variant="default"
-		size="sm"
-		class="h-8 gap-x-1 rounded-sm"
-		data-tour="case-quick-add"
-		onclick={() => void action.run()}
-	>
-		<action.Icon size={16} />
-		<span class="hidden lg:inline">{action.label}</span>
-	</Button>
-{/if}
+<!--
+  Primary variant so the "Add" CTA stands out from the surrounding outline
+  buttons (Run, DataStore, Activity). This is the one button users will
+  reach for most often on each section page; the brand color makes it
+  discoverable.
+-->
+<div class="inline-flex h-8 shrink-0 items-stretch">
+	{#if action}
+		<Button
+			variant="default"
+			size="sm"
+			class="h-8 gap-x-1 rounded-sm rounded-r-none"
+			data-tour="case-quick-add"
+			onclick={() => void action.run()}
+		>
+			<action.Icon size={16} />
+			<span class="hidden lg:inline">{action.label}</span>
+		</Button>
+	{/if}
+
+	<DropdownMenu>
+		<DropdownMenuTrigger>
+			{#snippet child({ props })}
+				{#if action}
+					<Button
+						{...props}
+						variant="default"
+						size="sm"
+						class="h-8 rounded-sm rounded-l-none border-l border-primary-foreground/20 px-2"
+						aria-label="Add to the case"
+						data-testid="case-add-menu"
+					>
+						<ChevronDownIcon size={14} />
+					</Button>
+				{:else}
+					<Button
+						{...props}
+						variant="default"
+						size="sm"
+						class="h-8 gap-x-1 rounded-sm"
+						data-tour="case-quick-add"
+						data-testid="case-add-menu"
+					>
+						<PlusIcon size={16} />
+						<span class="hidden lg:inline">Add</span>
+						<ChevronDownIcon size={14} class="opacity-70" />
+					</Button>
+				{/if}
+			{/snippet}
+		</DropdownMenuTrigger>
+
+		<DropdownMenuContent align="end" side="bottom" class="min-w-[180px]">
+			{#each ADD_ITEMS as item (item.label)}
+				<DropdownMenuItem onclick={() => void item.run()}>
+					<item.Icon class="mr-2 h-4 w-4" />
+					<span>{item.label}</span>
+				</DropdownMenuItem>
+			{/each}
+		</DropdownMenuContent>
+	</DropdownMenu>
+</div>

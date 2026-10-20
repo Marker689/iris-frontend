@@ -21,6 +21,7 @@
 		Tag,
 		Unlink2,
 		UserRound,
+		ChevronDownIcon,
 		ZapIcon
 	} from 'lucide-svelte';
 	import { goto } from '$app/navigation';
@@ -72,7 +73,6 @@
 		CASE_ACCESS_CTX,
 		type CaseAccessContext
 	} from '$lib/contexts/case-access.context.svelte';
-	import CaseAddDropdown from './CaseAddDropdown.svelte';
 	import CaseExportDialog from './CaseExportDialog.svelte';
 	import CaseQuickAddButton from './CaseQuickAddButton.svelte';
 	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
@@ -154,7 +154,7 @@
 
 		const containerWidth = el.clientWidth;
 		const gapPx = 4;
-		const overflowChipPx = 36;
+		const overflowChipPx = 30;
 
 		const tagChips = Array.from(el.querySelectorAll<HTMLElement>('[data-tag-chip]'));
 
@@ -734,13 +734,16 @@
 			</Popover.Root>
 		</div>
 
-		<!-- Inline metadata: only on md+ to keep small screens uncluttered. -->
-		<div
-			class="hidden flex-wrap items-center gap-x-1 gap-y-0.5 text-2xs text-muted-foreground md:flex"
-		>
+		<!--
+		  Inline metadata, then the tags: only on md+ to keep small screens
+		  uncluttered. The tags take whatever the metadata leaves and
+		  collapse the rest into a +N popover, so the row never wraps and
+		  the title above keeps the full width up to the right cluster.
+		-->
+		<div class="hidden min-w-0 items-center gap-x-1 text-2xs text-muted-foreground md:flex">
 			{#if caseData?.case_customer?.customer_name}
 				<span
-					class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted"
+					class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted"
 				>
 					<Building2 size={11} class="opacity-70" />
 					<span class="max-w-[14rem] truncate">{caseData.case_customer.customer_name}</span>
@@ -750,7 +753,7 @@
 			{#if caseData?.case_soc_id}
 				<span class="opacity-30">·</span>
 				<span
-					class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted"
+					class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted"
 				>
 					<FileDigit size={11} class="opacity-70" />
 					<span class="max-w-[12rem] truncate">SOC #{caseData.case_soc_id}</span>
@@ -760,7 +763,7 @@
 			{#if caseData?.owner?.user_name}
 				<span class="opacity-30">·</span>
 				<span
-					class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted"
+					class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted"
 				>
 					<UserRound size={11} class="opacity-70" />
 					<span class="max-w-[10rem] truncate">{caseData.owner.user_name}</span>
@@ -770,66 +773,64 @@
 			{#if formattedDate}
 				<span class="opacity-30">·</span>
 				<span
-					class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted"
+					class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted"
 				>
 					<Clock size={11} class="opacity-70" />
 					<span>{formattedDate}</span>
 				</span>
 			{/if}
-		</div>
-	</div>
 
-	<!-- Tags: show as many as fit, collapse the rest into a clickable +N popover. -->
-	{#if caseData?.tags?.length}
-		{@const totalTags = caseData.tags.length}
-		<div
-			bind:this={tagsContainerEl}
-			class="hidden min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden md:flex"
-		>
-			{#each caseData.tags as tag, i}
+			{#if caseData?.tags?.length}
+				{@const totalTags = caseData.tags.length}
+				<span class="opacity-30">·</span>
 				<div
-					data-tag-chip
-					class="flex shrink-0 items-center gap-1 rounded-full border bg-muted/50 px-2.5 py-1 text-xs"
-					class:hidden={i >= visibleTagCount}
+					bind:this={tagsContainerEl}
+					class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
 				>
-					<Tag size={12} class="opacity-70" />
-					<span class="max-w-[10rem] truncate">{tag.tag_title}</span>
-				</div>
-			{/each}
-
-			{#if visibleTagCount < totalTags}
-				<Popover.Root>
-					<Popover.Trigger>
+					{#each caseData.tags as tag, i}
 						<div
-							class="shrink-0 cursor-pointer rounded-full border bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
+							data-tag-chip
+							class="flex shrink-0 items-center gap-1 rounded-full border bg-muted/50 px-2 py-px text-2xs text-foreground/80"
+							class:hidden={i >= visibleTagCount}
 						>
-							+{totalTags - visibleTagCount}
+							<Tag size={10} class="opacity-70" />
+							<span class="max-w-[10rem] truncate">{tag.tag_title}</span>
 						</div>
-					</Popover.Trigger>
-					<Popover.Content align="start" class="w-64 p-3">
-						<div class="mb-2 text-xs font-semibold">Tags</div>
-						<div class="flex flex-wrap gap-1">
-							{#each caseData.tags as tag}
-								<div
-									class="flex items-center gap-1 rounded-full border bg-muted/50 px-2.5 py-1 text-xs"
-								>
-									<Tag size={12} class="opacity-70" />
-									<span class="max-w-[10rem] truncate">{tag.tag_title}</span>
+					{/each}
+
+					{#if visibleTagCount < totalTags}
+						<Popover.Root>
+							<Popover.Trigger
+								class="shrink-0 rounded-full border bg-muted/50 px-2 py-px text-2xs text-muted-foreground transition-colors hover:bg-muted"
+								aria-label="All tags"
+							>
+								+{totalTags - visibleTagCount}
+							</Popover.Trigger>
+							<Popover.Content align="start" class="w-64 p-3">
+								<div class="mb-2 text-xs font-semibold">Tags</div>
+								<div class="flex flex-wrap gap-1">
+									{#each caseData.tags as tag}
+										<div
+											class="flex items-center gap-1 rounded-full border bg-muted/50 px-2.5 py-1 text-xs"
+										>
+											<Tag size={12} class="opacity-70" />
+											<span class="max-w-[10rem] truncate">{tag.tag_title}</span>
+										</div>
+									{/each}
 								</div>
-							{/each}
-						</div>
-					</Popover.Content>
-				</Popover.Root>
+							</Popover.Content>
+						</Popover.Root>
+					{/if}
+				</div>
 			{/if}
 		</div>
-	{/if}
+	</div>
 
 	<!--
 		Right cluster: status/severity grouped, then action buttons.
 		Side-panel toggles (DataStore, Activity) are icon-only to shed
 		bar width — their labels live in tooltips. The generic "Add Item"
-		dropdown is now folded into the "…" overflow since the
-		section-aware quick-add already covers the primary create flow.
+		menu lives in the chevron of the section-aware Add button.
 	-->
 	<!--
 	  Right cluster: status/severity pills + linked-alerts, followers,
@@ -1272,10 +1273,10 @@
 		<div class="mx-0.5 hidden h-5 w-px bg-border sm:block" aria-hidden="true"></div>
 
 		<!--
-			Section-aware "Add X" comes first so the primary CTA sits closest
-			to the case context (state pill + alerts) and reads as part of the
-			same conceptual group. DataStore/Activity panel toggles trail
-			behind as utilities.
+			Actions first — Run ▾ (the case's manual hooks) and the Add X ▾
+			split button, whose chevron holds everything else that can be added
+			— so they sit closest to the case context. DataStore/Activity panel
+			toggles trail behind as utilities.
 		-->
 		{#if canEdit}
 			{#if caseData?.case_id}
@@ -1298,14 +1299,13 @@
 						>
 							<ZapIcon size={16} />
 							<span class="hidden lg:inline">Run</span>
+							<ChevronDownIcon size={14} class="opacity-70" />
 						</Button>
 					{/snippet}
 				</BulkHooksMenu>
 			{/if}
 
 			<CaseQuickAddButton />
-
-			<CaseAddDropdown buttonClass="h-8 w-8 rounded-sm p-0 [&_span]:hidden" />
 		{/if}
 
 		{#if datastorePanel}
