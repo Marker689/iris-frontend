@@ -9,6 +9,7 @@ export type HookObjectType =
 	| 'event'
 	| 'task'
 	| 'evidence'
+	| 'datastore_file'
 	| 'global_task'
 	| 'alert';
 

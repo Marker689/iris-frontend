@@ -104,6 +104,7 @@
 		{ value: 'note', label: 'Note', entity: 'case' },
 		{ value: 'event', label: 'Timeline event', entity: 'case' },
 		{ value: 'evidence', label: 'Evidence', entity: 'case' },
+		{ value: 'datastore_file', label: 'Datastore file', entity: 'case' },
 		{ value: 'task', label: 'Task', entity: 'case' }
 	];
 	const menuItems = MENUS.map(({ value, label }) => ({ value, label }));

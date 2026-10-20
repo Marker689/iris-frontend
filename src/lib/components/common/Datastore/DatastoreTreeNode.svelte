@@ -31,10 +31,13 @@
 		MoreHorizontalIcon
 	} from 'lucide-svelte';
 	import type { DataStoreTree, DataStoreTreeNode } from '$lib/types/resources/datastore';
+	import type { HookOption } from '$lib/services/hooks.service';
+	import { hookOptionKey } from '$lib/utils/hooks';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuItem,
+		DropdownMenuSeparator,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
 	import Self from './DatastoreTreeNode.svelte';
@@ -61,8 +64,11 @@
 		dropTargetFolderId?: number | null;
 		/** Show the ROOT tag on the root folder. */
 		showRootBadge?: boolean;
+		/** Manual module hooks, webhooks and workflows offered on files. */
+		fileHookOptions?: HookOption[];
 		onFolderAction: (action: FolderAction, folderId: number) => void;
 		onFileAction: (action: FileAction, fileId: number) => void;
+		onFileHook?: (hookOption: HookOption, fileId: number) => void;
 		onContextMenuFolder?: (folderId: number, isRoot: boolean, x: number, y: number) => void;
 		onContextMenuFile?: (fileId: number, x: number, y: number) => void;
 		onMove?: (source: DragSource, targetFolderId: number) => void;
@@ -79,8 +85,10 @@
 		filter = '',
 		dropTargetFolderId = null,
 		showRootBadge = true,
+		fileHookOptions = [],
 		onFolderAction,
 		onFileAction,
+		onFileHook,
 		onContextMenuFolder,
 		onContextMenuFile,
 		onMove,
@@ -323,8 +331,10 @@
 						depth={depth + 1}
 						{filter}
 						{dropTargetFolderId}
+						{fileHookOptions}
 						{onFolderAction}
 						{onFileAction}
+						{onFileHook}
 						{onContextMenuFolder}
 						{onContextMenuFile}
 						{onMove}
@@ -417,6 +427,14 @@
 						<DropdownMenuItem class="text-destructive" onclick={() => onFileAction('delete', id)}>
 							Delete file
 						</DropdownMenuItem>
+						{#if fileHookOptions.length > 0}
+							<DropdownMenuSeparator />
+							{#each fileHookOptions as hookOption (hookOptionKey(hookOption))}
+								<DropdownMenuItem onclick={() => onFileHook?.(hookOption, id)}>
+									{hookOption.manual_hook_ui_name}
+								</DropdownMenuItem>
+							{/each}
+						{/if}
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</li>

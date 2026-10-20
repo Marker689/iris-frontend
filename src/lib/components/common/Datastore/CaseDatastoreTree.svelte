@@ -3,6 +3,8 @@
   panel and by each attached case in the war-room panel:
   - Click row → dropdown of actions (preview, download, copy link, …)
   - Right-click row → the same actions in a menu at the cursor
+  - Both file menus list the manual hooks (modules, webhooks, workflows)
+    registered on `datastore_file`
   - Drag a file/folder onto another folder → moves it
   - Drag external files from the OS onto a folder → uploads them there
 
@@ -14,7 +16,7 @@
   shows the case there instead of a header above it).
 -->
 <script lang="ts">
-	import { setContext } from 'svelte';
+	import { onMount, setContext } from 'svelte';
 	import {
 		CASE_DATASTORE_CTX,
 		type CaseDatastoreContext
@@ -35,6 +37,8 @@
 		datastoreUploadFiles
 	} from '$lib/components/common/Datastore/datastore-actions';
 	import type { DataStoreFile } from '$lib/types/resources/datastore';
+	import { HooksService, type HookOption } from '$lib/services/hooks.service';
+	import { callHook, hookOptionKey } from '$lib/utils/hooks';
 
 	type Props = {
 		datastore: CaseDatastoreContext;
@@ -166,6 +170,24 @@
 		}
 	};
 
+	// --- Manual hooks ---
+	// Modules, webhooks and workflows subscribed to
+	// `on_manual_trigger_datastore_file`, listed under the file actions.
+	let fileHookOptions = $state<HookOption[]>([]);
+
+	onMount(async () => {
+		const response = await HooksService.list('datastore_file');
+		fileHookOptions = Array.isArray(response.data) ? response.data : [];
+	});
+
+	const runFileHook = async (hookOption: HookOption, fileId: number) => {
+		const result = await callHook(caseId, 'datastore_file', [fileId], hookOption);
+		toast({
+			variant: result.status === 'error' ? 'destructive' : 'success',
+			title: result.message
+		});
+	};
+
 	// --- Context menu ---
 	// One floating menu controlled by `contextMenu`; the tree dispatches
 	// folder/file targets via callbacks. Positioned at the click point and
@@ -271,8 +293,10 @@
 			{selectedFileId}
 			{dropTargetFolderId}
 			{filter}
+			{fileHookOptions}
 			onFolderAction={handleFolderAction}
 			onFileAction={handleFileAction}
+			onFileHook={runFileHook}
 			onContextMenuFolder={(id, isRoot, x, y) =>
 				openContextMenu({ kind: 'folder', id, isRoot }, x, y)}
 			onContextMenuFile={(id, x, y) => openContextMenu({ kind: 'file', id }, x, y)}
@@ -397,6 +421,21 @@
 			>
 				Delete file
 			</button>
+			{#if fileHookOptions.length > 0}
+				<div class="my-1 border-t border-border" role="separator"></div>
+				{#each fileHookOptions as hookOption (hookOptionKey(hookOption))}
+					<button
+						type="button"
+						class="block w-full px-3 py-1.5 text-left hover:bg-muted"
+						onclick={() => {
+							closeContextMenu();
+							runFileHook(hookOption, target.id);
+						}}
+					>
+						{hookOption.manual_hook_ui_name}
+					</button>
+				{/each}
+			{/if}
 		{/if}
 	</div>
 {/if}
