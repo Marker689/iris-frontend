@@ -1178,13 +1178,11 @@
 					? 'border-amber-500/40 bg-amber-50 text-amber-700 dark:border-amber-500/50 dark:bg-amber-950/40 dark:text-amber-300'
 					: 'border-border text-muted-foreground hover:text-foreground'}"
 				aria-label={isFollowing ? 'Unfollow case' : 'Follow case'}
+				title={`${isFollowing ? 'You follow this case' : 'Follow this case'} · ${followers?.length ?? 0} follower${followers?.length === 1 ? '' : 's'}`}
 				aria-pressed={isFollowing}
 			>
 				<Star size={13} class={isFollowing ? 'fill-current' : ''} />
 				<span class="tabular-nums">{followers?.length ?? 0}</span>
-				<span class="hidden md:inline">
-					{isFollowing ? 'Following' : 'Follow'}
-				</span>
 			</Popover.Trigger>
 			<Popover.Content align="end" class="w-64 p-0">
 				<div class="flex items-center justify-between gap-2 border-b px-3 py-2">
