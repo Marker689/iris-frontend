@@ -558,9 +558,16 @@
 				  intercept the sticky `<thead>` and anchor it to a
 				  wrapper that doesn't scroll vertically, so column
 				  headers wouldn't freeze with page scroll.
+
+				  `table-fixed` for the same reason the table can't
+				  scroll: under auto layout a long unbreakable token in a
+				  description (run UUIDs, step ids…) sets the column's
+				  min-content width and pushes the table past the centred
+				  column. Fixed layout pins widths from the <th>s and
+				  hands Activity whatever is left.
 				-->
 					<div class="border-t border-border/60">
-						<table class="w-full text-sm">
+						<table class="w-full table-fixed text-sm">
 							<!--
 						  Sticky table header parked below the sticky
 						  bar above. That bar lost the card's `p-6` when the
@@ -619,7 +626,7 @@
 											-->
 												<a
 													href={`/case/${row.case_id}`}
-													class="truncate text-primary hover:underline"
+													class="line-clamp-2 break-words text-primary hover:underline"
 													title={row.case_name}
 												>
 													{row.case_name}
@@ -648,7 +655,10 @@
 										</td>
 										<td class="px-3 py-2 text-xs">
 											<div class="flex items-start gap-2">
-												<span class="line-clamp-2 flex-1" title={row.activity_desc ?? ''}>
+												<span
+													class="line-clamp-2 min-w-0 flex-1 [overflow-wrap:anywhere]"
+													title={row.activity_desc ?? ''}
+												>
 													{row.activity_desc ?? '—'}
 												</span>
 												{#if (row.occurrences ?? 1) > 1}
