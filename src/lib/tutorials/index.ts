@@ -1,6 +1,7 @@
 import type { Tutorial } from './types';
 import { alertTriageKeyboardTutorial } from './catalogue/alert-triage-keyboard';
 import { automateWithApiTutorial } from './catalogue/automate-with-api';
+import { createAWorkflowTutorial } from './catalogue/create-a-workflow';
 import { firstInvestigationTutorial } from './catalogue/first-investigation';
 import { powerUserShortcutsTutorial } from './catalogue/power-user-shortcuts';
 import { reportAndCloseTutorial } from './catalogue/report-and-close';
@@ -14,6 +15,7 @@ export const TUTORIALS: Tutorial[] = [
 	reportAndCloseTutorial,
 	powerUserShortcutsTutorial,
 	automateWithApiTutorial,
+	createAWorkflowTutorial,
 	trackVulnerabilityTutorial,
 	writeATutorialTutorial
 ];
