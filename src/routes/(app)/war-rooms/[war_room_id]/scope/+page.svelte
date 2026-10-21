@@ -88,6 +88,10 @@
 	import ScopeRecordVulnerabilityDialog from './components/scope-record-vulnerability-dialog.svelte';
 	import ScopeTrackVulnerabilityDialog from './components/scope-track-vulnerability-dialog.svelte';
 	import ScopeRegistryAttachDialog from './components/scope-registry-attach-dialog.svelte';
+	import TrackerTabs from './components/trackers/tracker-tabs.svelte';
+	import TrackerPanel from './components/trackers/tracker-panel.svelte';
+	import { TrackersState } from './components/trackers/trackers-state.svelte';
+	import { trackerIdFromTab, type TrackerTabKey } from '$lib/services/war-room-trackers.service';
 	import VulnerabilityFormDialog from '$lib/components/vulnerabilities/VulnerabilityFormDialog.svelte';
 	import {
 		canCreateVulnerability,
@@ -121,8 +125,10 @@
 		type ScopeOutcome
 	} from './components/helpers';
 
-	type Tab = 'assets' | 'iocs' | 'customers' | 'vulnerabilities' | 'staging';
-	const TABS: { key: Tab; label: string; icon: typeof Server }[] = [
+	type FixedTab = 'assets' | 'iocs' | 'customers' | 'vulnerabilities' | 'staging';
+	// Plus one `tracker-<id>` tab per war-room tracker.
+	type Tab = FixedTab | TrackerTabKey;
+	const TABS: { key: FixedTab; label: string; icon: typeof Server }[] = [
 		{ key: 'assets', label: 'Assets', icon: Server },
 		{ key: 'iocs', label: 'IOCs', icon: Bug },
 		{ key: 'customers', label: 'Customers', icon: Building2 },
@@ -149,11 +155,29 @@
 
 	const tabFromUrl = (): Tab => {
 		const t = page.url.searchParams.get('tab');
+		if (trackerIdFromTab(t) !== null) return t as TrackerTabKey;
 		return t === 'customers' || t === 'iocs' || t === 'vulnerabilities' || t === 'staging'
 			? t
 			: 'assets';
 	};
 	let tab = $state<Tab>(tabFromUrl());
+
+	const isAdmin = $derived(userCtx?.can('server_administrator') ?? false);
+	const trackers = new TrackersState(() => warRoomId);
+	const isTrackerTab = $derived(trackerIdFromTab(tab) !== null);
+	const activeTracker = $derived(trackers.tracker(trackerIdFromTab(tab)));
+	$effect(() => {
+		void warRoomId;
+		untrack(() => {
+			trackers.reset();
+			void trackers.reload();
+		});
+	});
+	// A tracker tab whose tracker is gone (deleted, bad URL) falls back to Assets.
+	$effect(() => {
+		if (trackers.loaded && isTrackerTab && !activeTracker) untrack(() => selectTab('assets'));
+	});
+	useWarRoomLive(['trackers'], () => void trackers.reload());
 	let assetView = $state<'table' | 'board'>(
 		page.url.searchParams.get('view') === 'board' ? 'board' : 'table'
 	);
@@ -583,6 +607,7 @@
 			loadStaging(),
 			loadAttached(),
 			loadCustomers(),
+			trackers.loadTrackers(),
 			canReadVulns ? loadMatrix() : null
 		]);
 	});
@@ -644,7 +669,7 @@
 	);
 	const truncatedLimit = $derived(tab === 'assets' ? assetsRes?.limit : iocsRes?.limit);
 
-	const tabCount = (key: Tab): number | null => {
+	const tabCount = (key: FixedTab): number | null => {
 		if (key === 'assets') {
 			return assetsRes ? (assetsRes.total ?? assets.length) + visibleAttached.length : null;
 		}
@@ -1050,6 +1075,13 @@
 					{/if}
 				</button>
 			{/each}
+			<TrackerTabs
+				store={trackers}
+				active={tab}
+				onSelect={(t) => selectTab(t as Tab)}
+				{canWrite}
+				{isAdmin}
+			/>
 		</div>
 
 		{#if tab === 'assets'}
@@ -1169,7 +1201,7 @@
 		{/if}
 	</div>
 
-	{#if tab !== 'staging' && tab !== 'customers'}
+	{#if tab !== 'staging' && tab !== 'customers' && !isTrackerTab}
 		<div class="flex flex-wrap items-center gap-2 rounded-md border bg-card/40 px-3 py-2">
 			<div class="relative min-w-[240px] flex-1">
 				<Search
@@ -1349,7 +1381,13 @@
 		</div>
 	{/if}
 
-	{#if tab === 'customers'}
+	{#if isTrackerTab}
+		{#if activeTracker}
+			<TrackerPanel store={trackers} tracker={activeTracker} {canWrite} {isAdmin} />
+		{:else}
+			<Skeleton class="h-40 w-full" />
+		{/if}
+	{:else if tab === 'customers'}
 		{#if loadingCustomers}
 			<div class="flex flex-col gap-2">
 				{#each Array(3) as _, i (i)}

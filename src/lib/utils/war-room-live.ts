@@ -32,7 +32,8 @@ export const WAR_ROOM_LIVE_TOPICS = [
 	'datastore',
 	'sitreps',
 	'notes',
-	'chat'
+	'chat',
+	'trackers'
 ] as const;
 
 export type WarRoomLiveTopic = (typeof WAR_ROOM_LIVE_TOPICS)[number];
@@ -66,6 +67,20 @@ interface Subscriber {
 
 export function isWarRoomLiveTopic(topic: unknown): topic is WarRoomLiveTopic {
 	return (WAR_ROOM_LIVE_TOPICS as readonly unknown[]).includes(topic);
+}
+
+// Pushes sent under another name than their topic.
+const TOPIC_ALIASES: Record<string, WarRoomLiveTopic> = {
+	trackers_changed: 'trackers'
+};
+
+/** The topic of a push name, aliases resolved; null when unknown. */
+export function resolveWarRoomLiveTopic(topic: unknown): WarRoomLiveTopic | null {
+	if (isWarRoomLiveTopic(topic)) return topic;
+	if (typeof topic === 'string' && Object.hasOwn(TOPIC_ALIASES, topic)) {
+		return TOPIC_ALIASES[topic];
+	}
+	return null;
 }
 
 export function createWarRoomLiveHub(
@@ -127,7 +142,8 @@ export function createWarRoomLiveHub(
 			};
 		},
 		dispatch(topic) {
-			if (isWarRoomLiveTopic(topic)) push([topic]);
+			const resolved = resolveWarRoomLiveTopic(topic);
+			if (resolved) push([resolved]);
 		},
 		dispatchAll() {
 			push(WAR_ROOM_LIVE_TOPICS);

@@ -3,6 +3,7 @@ import {
 	WAR_ROOM_LIVE_TOPICS,
 	createWarRoomLiveHub,
 	isWarRoomLiveTopic,
+	resolveWarRoomLiveTopic,
 	type WarRoomLiveTopic
 } from '../war-room-live';
 
@@ -53,6 +54,19 @@ describe('war-room live hub', () => {
 		await vi.advanceTimersByTimeAsync(100);
 		expect(tasks).not.toHaveBeenCalled();
 		expect(scope).toHaveBeenCalledTimes(1);
+	});
+
+	it('resolves the trackers_changed push onto the trackers topic', async () => {
+		expect(resolveWarRoomLiveTopic('trackers')).toBe('trackers');
+		expect(resolveWarRoomLiveTopic('trackers_changed')).toBe('trackers');
+		expect(resolveWarRoomLiveTopic('nope')).toBeNull();
+		const h = hub();
+		const handler = vi.fn();
+		h.subscribe(['trackers'], handler);
+		h.dispatch('trackers_changed');
+		await vi.advanceTimersByTimeAsync(100);
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect([...handler.mock.calls[0][0]]).toEqual(['trackers']);
 	});
 
 	it('ignores unknown topics', async () => {
