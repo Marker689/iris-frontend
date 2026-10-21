@@ -22,7 +22,8 @@ export type ChatMessageKind =
 	| 'pin'
 	| 'decision'
 	| 'priority'
-	| 'poll';
+	| 'poll'
+	| 'tracker';
 
 export interface ChatReactionUser {
 	user_id: number;

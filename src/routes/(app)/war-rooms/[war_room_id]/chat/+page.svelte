@@ -42,6 +42,7 @@
 		Pin,
 		PinOff,
 		ListChecks,
+		ClipboardCheck,
 		Plus,
 		Search,
 		Send,
@@ -206,6 +207,7 @@
 		{ key: 'tasks', label: 'Tasks', kinds: ['task_assigned', 'task_completed'] as const },
 		{ key: 'sitreps', label: 'SitReps', kinds: ['sitrep_published'] as const },
 		{ key: 'notes', label: 'Notes / Pins', kinds: ['note', 'pin'] as const },
+		{ key: 'trackers', label: 'Trackers', kinds: ['tracker'] as const },
 		{ key: 'system', label: 'System', kinds: ['system'] as const },
 		{
 			key: 'case_link',
@@ -1845,6 +1847,8 @@
 				return Pin;
 			case 'decision':
 				return Gavel;
+			case 'tracker':
+				return ClipboardCheck;
 			case 'priority':
 				return AlertOctagon;
 			case 'system':
@@ -1876,6 +1880,8 @@
 				return 'text-violet-600 dark:text-violet-400';
 			case 'decision':
 				return 'text-indigo-600 dark:text-indigo-400';
+			case 'tracker':
+				return 'text-teal-600 dark:text-teal-400';
 			case 'priority':
 				return 'text-red-600 dark:text-red-400';
 			default:

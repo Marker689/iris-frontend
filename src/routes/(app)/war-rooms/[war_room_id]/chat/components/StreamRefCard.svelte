@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
 	import {
+		ClipboardCheckIcon,
 		ClipboardListIcon,
 		ExternalLink,
 		FileTextIcon,
@@ -22,6 +23,7 @@
 		TooltipTrigger
 	} from '$lib/components/ui/tooltip';
 	import type { WarRoomCaseAttachment } from '$lib/services/war-rooms.service';
+	import { trackerTabKey } from '$lib/services/war-room-trackers.service';
 
 	type Props = {
 		warRoomId: number;
@@ -83,6 +85,14 @@
 				label: `Note #${refId}`,
 				Icon: FileTextIcon,
 				cls: 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:border-sky-400/40 dark:bg-sky-500/15 dark:text-sky-200'
+			};
+		}
+		if (refType === 'war_room_tracker' && refId != null) {
+			return {
+				href: `/war-rooms/${warRoomId}/scope?tab=${trackerTabKey(refId)}`,
+				label: 'Tracker',
+				Icon: ClipboardCheckIcon,
+				cls: 'border-teal-500/40 bg-teal-500/10 text-teal-700 dark:border-teal-400/40 dark:bg-teal-500/15 dark:text-teal-200'
 			};
 		}
 		if (refType === 'case' && (refId != null || refCaseId != null)) {
