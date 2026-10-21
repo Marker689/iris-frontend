@@ -43,6 +43,7 @@
 		createCaseDatastoreContext,
 		type CaseDatastoreContext
 	} from '$lib/contexts/case-datastore.context.svelte';
+	import { DATASTORE_CTX, type DatastoreContext } from '$lib/contexts/datastore.context';
 	import {
 		CASE_ACCESS_CTX,
 		createCaseAccessContext,
@@ -109,6 +110,7 @@
 	setContext<CaseTasksContext>(CASE_TASKS_CTX, caseTasks);
 	setContext<CaseEvidencesContext>(CASE_EVIDENCES_CTX, caseEvidences);
 	setContext<CaseDatastoreContext>(CASE_DATASTORE_CTX, caseDatastore);
+	setContext<DatastoreContext>(DATASTORE_CTX, caseDatastore);
 	setContext<CaseAccessContext>(CASE_ACCESS_CTX, caseAccess);
 
 	const commentsPanel = createCommentsPanelContext();

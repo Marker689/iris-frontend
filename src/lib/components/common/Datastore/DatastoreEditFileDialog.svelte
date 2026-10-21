@@ -1,10 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import { RotateCwIcon, SaveIcon, UploadIcon } from 'lucide-svelte';
-	import {
-		CASE_DATASTORE_CTX,
-		type CaseDatastoreContext
-	} from '$lib/contexts/case-datastore.context.svelte';
+	import { DATASTORE_CTX, type DatastoreContext } from '$lib/contexts/datastore.context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -21,7 +18,9 @@
 
 	let { open = $bindable(), file, onOpenChange }: Props = $props();
 
-	const datastore = getContext<CaseDatastoreContext>(CASE_DATASTORE_CTX);
+	const datastore = getContext<DatastoreContext>(DATASTORE_CTX);
+	// IOC / evidence flags and the encryption password only exist on cases.
+	const isCase = $derived(datastore.kind === 'case');
 
 	let filename = $state('');
 	let description = $state('');
@@ -62,9 +61,11 @@
 					file_original_name: filename.trim(),
 					file_description: description,
 					file_tags: tags,
-					file_password: password,
-					file_is_ioc: isIoc,
-					file_is_evidence: isEvidence
+					...(isCase && {
+						file_password: password,
+						file_is_ioc: isIoc,
+						file_is_evidence: isEvidence
+					})
 				},
 				replaceFile ?? undefined
 			);
@@ -102,22 +103,26 @@
 					<label for="ds-edit-tags" class="text-sm font-medium">Tags</label>
 					<Input id="ds-edit-tags" bind:value={tags} placeholder="comma,separated" class="mt-1" />
 				</div>
-				<div>
-					<label for="ds-edit-password" class="text-sm font-medium">Encryption password</label>
-					<Input id="ds-edit-password" bind:value={password} class="mt-1" />
-				</div>
+				{#if isCase}
+					<div>
+						<label for="ds-edit-password" class="text-sm font-medium">Encryption password</label>
+						<Input id="ds-edit-password" bind:value={password} class="mt-1" />
+					</div>
+				{/if}
 			</div>
 
-			<div class="flex flex-wrap items-center gap-4 text-sm">
-				<label class="flex items-center gap-2">
-					<Checkbox bind:checked={isIoc} />
-					<span>Mark as IOC</span>
-				</label>
-				<label class="flex items-center gap-2">
-					<Checkbox bind:checked={isEvidence} />
-					<span>Mark as Evidence</span>
-				</label>
-			</div>
+			{#if isCase}
+				<div class="flex flex-wrap items-center gap-4 text-sm">
+					<label class="flex items-center gap-2">
+						<Checkbox bind:checked={isIoc} />
+						<span>Mark as IOC</span>
+					</label>
+					<label class="flex items-center gap-2">
+						<Checkbox bind:checked={isEvidence} />
+						<span>Mark as Evidence</span>
+					</label>
+				</div>
+			{/if}
 
 			<div class="rounded-lg border border-dashed bg-muted/30 p-3">
 				<label class="flex cursor-pointer items-center gap-2 text-sm">

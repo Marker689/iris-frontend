@@ -3,9 +3,9 @@
  * behave the same: open / save a file fetched with the bearer token, copy
  * the links that paste into notes, summaries and sitreps (the markdown
  * renderer turns them into an authenticated image or file chip), and
- * upload dropped files into a case folder.
+ * upload dropped files into a datastore folder.
  */
-import type { CaseDatastoreContext } from '$lib/contexts/case-datastore.context.svelte';
+import type { DatastoreContext } from '$lib/contexts/datastore.context';
 import { toast } from '$lib/stores/toast.store';
 
 export const datastoreCopyToClipboard = async (text: string, label: string): Promise<void> => {
@@ -58,7 +58,7 @@ export const datastoreDownloadBlobUrl = (url: string | null, filename: string): 
 };
 
 export const datastoreUploadFiles = async (
-	datastore: CaseDatastoreContext,
+	datastore: DatastoreContext,
 	folderId: number,
 	files: FileList
 ): Promise<void> => {

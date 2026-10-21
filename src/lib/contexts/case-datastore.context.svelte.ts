@@ -1,4 +1,5 @@
 import type { ApiOptions } from '$lib/services/api.service';
+import type { DatastoreUIState } from '$lib/contexts/datastore.context';
 import { CaseDatastoreService } from '$lib/services/case-datastore.service';
 import type {
 	CreateFolderBody,
@@ -16,13 +17,6 @@ import type {
 export const CASE_DATASTORE_CTX = Symbol('case-datastore');
 
 type Status = 'idle' | 'loading' | 'error';
-
-type UIState = {
-	selectedFolderId?: number;
-	selectedFileId?: number;
-	showAddFileModal: boolean;
-	showAddFolderModal: boolean;
-};
 
 // Walk the tree dict returned by the backend and return the matching folder
 // node, or null. Files use `f-<id>` keys, folders use `d-<id>`.
@@ -68,7 +62,7 @@ export const createCaseDatastoreContext = (getCaseId: () => number | null) => {
 
 	const fileById = $state<Record<number, DataStoreFile>>({});
 
-	const ui = $state<UIState>({
+	const ui = $state<DatastoreUIState>({
 		selectedFolderId: undefined,
 		selectedFileId: undefined,
 		showAddFileModal: false,
@@ -267,6 +261,16 @@ export const createCaseDatastoreContext = (getCaseId: () => number | null) => {
 		ui.selectedFileId = id;
 	};
 
+	const fetchFileBlobUrl = async (fileId: number) => {
+		const caseId = getCaseId();
+		return caseId === null ? null : CaseDatastoreService.fetchFileBlobUrl(caseId, fileId);
+	};
+
+	const getViewUrl = (fileId: number) => CaseDatastoreService.getViewUrl(getCaseId() ?? 0, fileId);
+
+	const getMarkdownLink = (fileId: number, label: string) =>
+		CaseDatastoreService.getMarkdownLink(getCaseId() ?? 0, fileId, label);
+
 	const reset = () => {
 		tree.data = {};
 		tree.rootId = null;
@@ -280,6 +284,7 @@ export const createCaseDatastoreContext = (getCaseId: () => number | null) => {
 	};
 
 	return {
+		kind: 'case' as const,
 		tree,
 		fileById,
 		ui,
@@ -299,6 +304,9 @@ export const createCaseDatastoreContext = (getCaseId: () => number | null) => {
 		deleteFile,
 		selectFolder,
 		selectFile,
+		fetchFileBlobUrl,
+		getViewUrl,
+		getMarkdownLink,
 		reset
 	};
 };

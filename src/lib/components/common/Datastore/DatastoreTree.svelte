@@ -1,27 +1,25 @@
 <!--
-  A case's DataStore tree with its full behaviour, shared by the case
-  panel and by each attached case in the war-room panel:
+  A DataStore tree with its full behaviour, shared by the case panel, by
+  each attached case in the war-room panel and by the war room's own
+  datastore:
   - Click row → dropdown of actions (preview, download, copy link, …)
   - Right-click row → the same actions in a menu at the cursor
   - Both file menus list the manual hooks (modules, webhooks, workflows)
-    registered on `datastore_file`
+    registered on `datastore_file` — case datastores only
   - Drag a file/folder onto another folder → moves it
   - Drag external files from the OS onto a folder → uploads them there
 
   Everything goes through the `datastore` passed in, which is also
-  provided as the case datastore context below so the dialogs act on
-  this case even when several trees are on screen. `withAddDialogs`
-  mounts the add-file / add-folder dialogs; the case layout already
-  mounts its own. `rootLabel` renames the root folder (the war room
-  shows the case there instead of a header above it).
+  provided as the datastore context below so the dialogs act on this
+  datastore even when several trees are on screen. Drags only move
+  within one tree: `caseId` scopes them (the war room passes none).
+  `withAddDialogs` mounts the add-file / add-folder dialogs; the case
+  layout already mounts its own. `rootLabel` renames the root folder
+  (the war room shows the case there instead of a header above it).
 -->
 <script lang="ts">
 	import { onMount, setContext } from 'svelte';
-	import {
-		CASE_DATASTORE_CTX,
-		type CaseDatastoreContext
-	} from '$lib/contexts/case-datastore.context.svelte';
-	import { CaseDatastoreService } from '$lib/services/case-datastore.service';
+	import { DATASTORE_CTX, type DatastoreContext } from '$lib/contexts/datastore.context';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { toast } from '$lib/stores/toast.store';
 	import DatastoreTreeNode, {
@@ -41,8 +39,8 @@
 	import { callHook, hookOptionKey } from '$lib/utils/hooks';
 
 	type Props = {
-		datastore: CaseDatastoreContext;
-		caseId: number;
+		datastore: DatastoreContext;
+		caseId?: number;
 		filter?: string;
 		withAddDialogs?: boolean;
 		emptyMessage?: string;
@@ -59,7 +57,7 @@
 	}: Props = $props();
 
 	// svelte-ignore state_referenced_locally
-	setContext<CaseDatastoreContext>(CASE_DATASTORE_CTX, datastore);
+	setContext<DatastoreContext>(DATASTORE_CTX, datastore);
 
 	const selectedFileId = $derived<number | undefined>(datastore.ui.selectedFileId);
 
@@ -131,12 +129,12 @@
 				datastore.selectFile(fileId);
 				return;
 			case 'preview': {
-				const fetched = await CaseDatastoreService.fetchFileBlobUrl(caseId, fileId);
+				const fetched = await datastore.fetchFileBlobUrl(fileId);
 				datastoreOpenBlobUrl(fetched?.url ?? null);
 				return;
 			}
 			case 'download': {
-				const fetched = await CaseDatastoreService.fetchFileBlobUrl(caseId, fileId);
+				const fetched = await datastore.fetchFileBlobUrl(fileId);
 				datastoreDownloadBlobUrl(
 					fetched?.url ?? null,
 					file?.file_original_name ?? fetched?.filename ?? ''
@@ -144,14 +142,11 @@
 				return;
 			}
 			case 'copy-link':
-				await datastoreCopyToClipboard(CaseDatastoreService.getViewUrl(caseId, fileId), 'Link');
+				await datastoreCopyToClipboard(datastore.getViewUrl(fileId), 'Link');
 				return;
 			case 'copy-markdown': {
 				const label = file?.file_original_name ?? `File #${fileId}`;
-				await datastoreCopyToClipboard(
-					CaseDatastoreService.getMarkdownLink(caseId, fileId, label),
-					'Markdown link'
-				);
+				await datastoreCopyToClipboard(datastore.getMarkdownLink(fileId, label), 'Markdown link');
 				return;
 			}
 			case 'edit':
@@ -173,14 +168,17 @@
 	// --- Manual hooks ---
 	// Modules, webhooks and workflows subscribed to
 	// `on_manual_trigger_datastore_file`, listed under the file actions.
+	// Hooks run against a case, so the war-room datastore has none.
 	let fileHookOptions = $state<HookOption[]>([]);
 
 	onMount(async () => {
+		if (datastore.kind !== 'case' || caseId === undefined) return;
 		const response = await HooksService.list('datastore_file');
 		fileHookOptions = Array.isArray(response.data) ? response.data : [];
 	});
 
 	const runFileHook = async (hookOption: HookOption, fileId: number) => {
+		if (caseId === undefined) return;
 		const result = await callHook(caseId, 'datastore_file', [fileId], hookOption);
 		toast({
 			variant: result.status === 'error' ? 'destructive' : 'success',

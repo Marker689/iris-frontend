@@ -1,10 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import { RotateCwIcon, SaveIcon } from 'lucide-svelte';
-	import {
-		CASE_DATASTORE_CTX,
-		type CaseDatastoreContext
-	} from '$lib/contexts/case-datastore.context.svelte';
+	import { DATASTORE_CTX, type DatastoreContext } from '$lib/contexts/datastore.context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -17,7 +14,7 @@
 
 	let { open = $bindable(), onOpenChange }: Props = $props();
 
-	const datastore = getContext<CaseDatastoreContext>(CASE_DATASTORE_CTX);
+	const datastore = getContext<DatastoreContext>(DATASTORE_CTX);
 
 	let folderName = $state('');
 	let isSaving = $state(false);

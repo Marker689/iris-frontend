@@ -13,11 +13,35 @@ export interface WarRoomDatastoreFile {
 	uploaded_at: string | null;
 	uploaded_by_id: number | null;
 	tags: string | null;
+	/** Folder holding the file, null for the root. */
+	file_parent_id: number | null;
 }
 
 export interface WarRoomDatastoreListing {
 	files: WarRoomDatastoreFile[];
 	attached_case_ids: number[];
+}
+
+export interface WarRoomDatastoreFolder {
+	path_id: number;
+	path_name: string;
+	path_parent_id: number | null;
+	path_is_root: boolean;
+	war_room_id: number;
+}
+
+// Same shape as the case datastore tree: folders under `d-<id>` keys with
+// `children`, files under `f-<id>` keys.
+export type WarRoomDatastoreTreeNode =
+	| { type: 'directory'; name: string; is_root?: boolean; children: WarRoomDatastoreTree }
+	| ({ type: 'file' } & WarRoomDatastoreFile);
+
+export type WarRoomDatastoreTree = Record<string, WarRoomDatastoreTreeNode>;
+
+export interface WarRoomDatastoreFileFields {
+	filename?: string;
+	description?: string;
+	tags?: string;
 }
 
 // FormData requests bypass ApiService (which forces JSON); we mirror the
@@ -137,5 +161,104 @@ export class WarRoomDatastoreService {
 		options: ApiOptions = {}
 	): Promise<RequestResponse<null>> {
 		return ApiService.delete<null>(`/war-rooms/${warRoomId}/datastore/${fileId}`, options);
+	}
+
+	// ------------------------------------------------------------------
+	// Folders — same endpoints and bodies as the case datastore.
+	// ------------------------------------------------------------------
+	static getTree(
+		warRoomId: number,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<WarRoomDatastoreTree>> {
+		return ApiService.get(`/war-rooms/${warRoomId}/datastore/tree`, options);
+	}
+
+	static createFolder(
+		warRoomId: number,
+		body: { parent_node: number; folder_name: string },
+		options: ApiOptions = {}
+	): Promise<RequestResponse<WarRoomDatastoreFolder>> {
+		return ApiService.post(`/war-rooms/${warRoomId}/datastore/folders`, body, options);
+	}
+
+	static renameFolder(
+		warRoomId: number,
+		folderId: number,
+		body: { folder_name: string },
+		options: ApiOptions = {}
+	): Promise<RequestResponse<WarRoomDatastoreFolder>> {
+		return ApiService.post(
+			`/war-rooms/${warRoomId}/datastore/folders/${folderId}/rename`,
+			body,
+			options
+		);
+	}
+
+	static moveFolder(
+		warRoomId: number,
+		folderId: number,
+		body: { destination_node: number },
+		options: ApiOptions = {}
+	): Promise<RequestResponse<WarRoomDatastoreFolder>> {
+		return ApiService.post(
+			`/war-rooms/${warRoomId}/datastore/folders/${folderId}/move`,
+			body,
+			options
+		);
+	}
+
+	static deleteFolder(
+		warRoomId: number,
+		folderId: number,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<null>> {
+		return ApiService.delete<null>(
+			`/war-rooms/${warRoomId}/datastore/folders/${folderId}`,
+			options
+		);
+	}
+
+	static uploadToFolder(
+		warRoomId: number,
+		folderId: number,
+		file: File,
+		fields: WarRoomDatastoreFileFields = {}
+	): Promise<RequestResponse<WarRoomDatastoreFile>> {
+		const form = new FormData();
+		form.append('file', file, file.name);
+		if (fields.filename) form.append('filename', fields.filename);
+		if (fields.description) form.append('description', fields.description);
+		if (fields.tags) form.append('tags', fields.tags);
+		return multipart<WarRoomDatastoreFile>(
+			`/api/v2/war-rooms/${warRoomId}/datastore/folders/${folderId}/files`,
+			form
+		);
+	}
+
+	/** Fields left undefined are left as they are; `file` replaces the contents. */
+	static updateFile(
+		warRoomId: number,
+		fileId: number,
+		fields: WarRoomDatastoreFileFields,
+		file?: File
+	): Promise<RequestResponse<WarRoomDatastoreFile>> {
+		const form = new FormData();
+		for (const [key, value] of Object.entries(fields)) {
+			if (value !== undefined) form.append(key, value);
+		}
+		if (file) form.append('file', file, file.name);
+		return multipart<WarRoomDatastoreFile>(
+			`/api/v2/war-rooms/${warRoomId}/datastore/${fileId}`,
+			form
+		);
+	}
+
+	static moveFile(
+		warRoomId: number,
+		fileId: number,
+		body: { destination_node: number },
+		options: ApiOptions = {}
+	): Promise<RequestResponse<WarRoomDatastoreFile>> {
+		return ApiService.post(`/war-rooms/${warRoomId}/datastore/${fileId}/move`, body, options);
 	}
 }

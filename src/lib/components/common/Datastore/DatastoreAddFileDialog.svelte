@@ -1,11 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import { RotateCwIcon, UploadIcon, FileIcon } from 'lucide-svelte';
-	import { page } from '$app/state';
-	import {
-		CASE_DATASTORE_CTX,
-		type CaseDatastoreContext
-	} from '$lib/contexts/case-datastore.context.svelte';
+	import { DATASTORE_CTX, type DatastoreContext } from '$lib/contexts/datastore.context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -20,8 +16,9 @@
 
 	let { open = $bindable(), onOpenChange }: Props = $props();
 
-	const datastore = getContext<CaseDatastoreContext>(CASE_DATASTORE_CTX);
-	const caseId = $derived(Number(page.params.case_id));
+	const datastore = getContext<DatastoreContext>(DATASTORE_CTX);
+	// IOC / evidence flags and the encryption password only exist on cases.
+	const isCase = $derived(datastore.kind === 'case');
 
 	let selectedFile = $state<File | null>(null);
 	let filename = $state('');
@@ -76,17 +73,16 @@
 					file_original_name: filename.trim(),
 					file_description: description,
 					file_tags: tags,
-					file_password: password || undefined,
-					file_is_ioc: isIoc,
-					file_is_evidence: isEvidence
+					...(isCase && {
+						file_password: password || undefined,
+						file_is_ioc: isIoc,
+						file_is_evidence: isEvidence
+					})
 				},
 				selectedFile
 			);
 			if (!created) throw new Error('Upload failed');
 			toast({ title: 'File uploaded', variant: 'success' });
-			// Make sure the side panel is showing so the user sees the new file
-			// land in the tree right after the dialog closes.
-			void caseId;
 			close();
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Unknown error';
@@ -146,34 +142,38 @@
 					<label for="ds-file-tags" class="text-sm font-medium">Tags</label>
 					<Input id="ds-file-tags" bind:value={tags} placeholder="comma,separated" class="mt-1" />
 				</div>
-				<div>
-					<label for="ds-file-password" class="text-sm font-medium">Encryption password</label>
-					<Input
-						id="ds-file-password"
-						bind:value={password}
-						placeholder="(optional)"
-						type="text"
-						class="mt-1"
-					/>
-				</div>
+				{#if isCase}
+					<div>
+						<label for="ds-file-password" class="text-sm font-medium">Encryption password</label>
+						<Input
+							id="ds-file-password"
+							bind:value={password}
+							placeholder="(optional)"
+							type="text"
+							class="mt-1"
+						/>
+					</div>
+				{/if}
 			</div>
 
-			<div class="flex flex-wrap items-center gap-4">
-				<label class="flex items-center gap-2 text-sm">
-					<Checkbox bind:checked={isIoc} />
-					<span>
-						<FileIcon size={12} class="mr-1 inline opacity-60" />
-						Mark as IOC (auto-encrypted)
-					</span>
-				</label>
-				<label class="flex items-center gap-2 text-sm">
-					<Checkbox bind:checked={isEvidence} />
-					<span>
-						<FileIcon size={12} class="mr-1 inline opacity-60" />
-						Mark as Evidence
-					</span>
-				</label>
-			</div>
+			{#if isCase}
+				<div class="flex flex-wrap items-center gap-4">
+					<label class="flex items-center gap-2 text-sm">
+						<Checkbox bind:checked={isIoc} />
+						<span>
+							<FileIcon size={12} class="mr-1 inline opacity-60" />
+							Mark as IOC (auto-encrypted)
+						</span>
+					</label>
+					<label class="flex items-center gap-2 text-sm">
+						<Checkbox bind:checked={isEvidence} />
+						<span>
+							<FileIcon size={12} class="mr-1 inline opacity-60" />
+							Mark as Evidence
+						</span>
+					</label>
+				</div>
+			{/if}
 
 			<p class="text-xs text-muted-foreground">
 				Will be uploaded to folder #{targetFolderId ?? '—'}.

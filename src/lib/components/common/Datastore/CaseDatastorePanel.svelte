@@ -38,7 +38,7 @@
 		TooltipTrigger
 	} from '$lib/components/ui/tooltip';
 	import { toast } from '$lib/stores/toast.store';
-	import CaseDatastoreTree from '$lib/components/common/Datastore/CaseDatastoreTree.svelte';
+	import DatastoreTree from '$lib/components/common/Datastore/DatastoreTree.svelte';
 	import { datastoreUploadFiles } from '$lib/components/common/Datastore/datastore-actions';
 
 	const panel = getContext<DatastorePanelContext>(DATASTORE_PANEL_CTX);
@@ -73,7 +73,7 @@
 	$effect(() => {
 		if (!panel.state.open) return;
 		const handler = (e: KeyboardEvent) => {
-			// An open context menu catches Escape first (see CaseDatastoreTree).
+			// An open context menu catches Escape first (see DatastoreTree).
 			if (e.key === 'Escape') panel.close();
 		};
 		document.addEventListener('keydown', handler);
@@ -224,7 +224,7 @@
 			ondropcapture={() => (bodyDropActive = false)}
 		>
 			{#key caseId}
-				<CaseDatastoreTree
+				<DatastoreTree
 					{datastore}
 					{caseId}
 					filter={searchTerm}

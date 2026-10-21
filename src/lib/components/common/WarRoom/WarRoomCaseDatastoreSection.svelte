@@ -1,13 +1,13 @@
 <!--
   One attached case in the war-room datastore panel: the case's own tree,
-  with the same actions as the case panel (`CaseDatastoreTree`), its root
+  with the same actions as the case panel (`DatastoreTree`), its root
   folder labelled with the case. Each section owns a case datastore
   context, so edits, moves and uploads go to that case.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { createCaseDatastoreContext } from '$lib/contexts/case-datastore.context.svelte';
-	import CaseDatastoreTree from '$lib/components/common/Datastore/CaseDatastoreTree.svelte';
+	import DatastoreTree from '$lib/components/common/Datastore/DatastoreTree.svelte';
 
 	type Props = {
 		caseId: number;
@@ -36,5 +36,5 @@
 	{#if !hasTree}
 		<p class="truncate px-1.5 py-1 text-sm" title={caseName}>{label}</p>
 	{/if}
-	<CaseDatastoreTree {datastore} {caseId} {filter} rootLabel={label} withAddDialogs />
+	<DatastoreTree {datastore} {caseId} {filter} rootLabel={label} withAddDialogs />
 </section>

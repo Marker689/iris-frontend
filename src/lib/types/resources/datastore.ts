@@ -21,7 +21,8 @@ export interface DataStoreFile {
 	file_parent_id: number;
 	file_sha256: string | null;
 	added_by_user_id: number | null;
-	file_case_id: number;
+	/** Null for files of a war-room datastore. */
+	file_case_id: number | null;
 	modification_history: Record<string, unknown> | null;
 }
 
