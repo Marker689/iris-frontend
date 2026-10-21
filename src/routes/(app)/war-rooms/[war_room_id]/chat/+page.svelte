@@ -2836,18 +2836,24 @@
 															{actor}
 														</span>
 													{/if}
-													<!--
+													{#if m.kind === 'tracker'}
+														<!-- Tracker lines quote names and IOC values verbatim:
+														     plain text, never markdown links, chips or mentions. -->
+														<span>{m.body ?? ''}</span>
+													{:else}
+														<!--
 												  `inline` so the generated one-liner keeps
 												  flowing after the actor pill instead of
 												  dropping onto its own row.
 												-->
-													<ChatMessageBody
-														body={m.body ?? ''}
-														attachments={m.attachments}
-														{warRoomId}
-														onAttachmentClick={openPreview}
-														inline
-													/>
+														<ChatMessageBody
+															body={m.body ?? ''}
+															attachments={m.attachments}
+															{warRoomId}
+															onAttachmentClick={openPreview}
+															inline
+														/>
+													{/if}
 												</span>
 												<!--
 											  Reference card: a clickable chip pointing at the
