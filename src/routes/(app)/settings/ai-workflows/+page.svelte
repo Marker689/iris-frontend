@@ -4,7 +4,9 @@
   / share / move to category actions, the category column (drop a row on a
   category to move it), the workflow library and the JSON authoring guide. The editor
   lives at `./[id]` (`./new` to create), runs at `./runs`. A workflow shared
-  with one of the user's groups (`can_edit` false) can be viewed and run only.
+  with one of the user's groups can be viewed and run (`can_edit` false), or
+  edited too (`can_manage` false: its owner alone activates, shares, files,
+  exports, publishes or deletes it).
 -->
 <script lang="ts">
 	import { getContext, untrack } from 'svelte';
@@ -91,13 +93,21 @@
 	let shareOpen = $state(false);
 	let importing = $state(false);
 
-	/** Write permission on a workflow the user owns (or administers). */
+	/** Write permission on a workflow the user owns, administers or may edit. */
 	const canEdit = (workflow: AiWorkflowSummary) => canWrite && workflow.can_edit !== false;
+	/** Write permission on a workflow the user owns (or administers). */
+	const canManage = (workflow: AiWorkflowSummary) =>
+		canEdit(workflow) && workflow.can_manage !== false;
 
 	function onShared(updated: AiWorkflow) {
 		workflows = workflows.map((w) =>
 			w.id === updated.id
-				? { ...w, shared_group_ids: updated.shared_group_ids, shared_groups: updated.shared_groups }
+				? {
+						...w,
+						shared_group_ids: updated.shared_group_ids,
+						shared_edit_group_ids: updated.shared_edit_group_ids,
+						shared_groups: updated.shared_groups
+					}
 				: w
 		);
 	}
@@ -133,7 +143,7 @@
 	}
 
 	function dragWorkflow(workflow: AiWorkflowSummary, e: DragEvent) {
-		if (!canEdit(workflow) || !e.dataTransfer) return;
+		if (!canManage(workflow) || !e.dataTransfer) return;
 		e.dataTransfer.setData(CATEGORY_DRAG_TYPE, String(workflow.id));
 		e.dataTransfer.effectAllowed = 'move';
 	}
@@ -440,13 +450,13 @@
 											<tr
 												class="border-t hover:bg-muted/20"
 												data-testid={`wf-row-${workflow.id}`}
-												draggable={canEdit(workflow)}
+												draggable={canManage(workflow)}
 												ondragstart={(e) => dragWorkflow(workflow, e)}
 											>
 												<td class="px-3 py-2">
 													<Switch
 														checked={workflow.is_active}
-														disabled={!canEdit(workflow) || toggling[workflow.id]}
+														disabled={!canManage(workflow) || toggling[workflow.id]}
 														onCheckedChange={(v: boolean) => toggleActive(workflow, v)}
 														aria-label={`Activate ${workflow.name}`}
 													/>
@@ -501,7 +511,10 @@
 													<div class="truncate">{userLabel(workflow.owner)}</div>
 													{#if workflow.shared_groups?.length}
 														{@const groupNames = workflow.shared_groups
-															.map((g) => g.name ?? `#${g.id}`)
+															.map(
+																(g) =>
+																	`${g.name ?? `#${g.id}`}${workflow.shared_edit_group_ids?.includes(g.id) ? ' (edit)' : ''}`
+															)
 															.join(', ')}
 														<div
 															class="flex items-center gap-1 truncate text-2xs text-muted-foreground"
@@ -568,7 +581,7 @@
 														>
 															<PencilIcon size={13} />
 														</Button>
-														{#if workflow.can_edit !== false}
+														{#if workflow.can_manage !== false && workflow.can_edit !== false}
 															<Button
 																variant="ghost"
 																size="icon"
@@ -580,7 +593,7 @@
 																<DownloadIcon size={13} />
 															</Button>
 														{/if}
-														{#if canEdit(workflow)}
+														{#if canManage(workflow)}
 															<Button
 																variant="ghost"
 																size="icon"
@@ -679,6 +692,7 @@
 		workflowId={shareTarget.id}
 		workflowName={shareTarget.name}
 		groupIds={shareTarget.shared_group_ids ?? []}
+		editGroupIds={shareTarget.shared_edit_group_ids ?? []}
 		{onShared}
 	/>
 {/if}

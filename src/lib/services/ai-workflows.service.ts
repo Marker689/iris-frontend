@@ -187,11 +187,18 @@ export interface AiWorkflowSummary {
 	/** Groups whose members may see the workflow and run it, as themselves. */
 	shared_group_ids?: number[];
 	shared_groups?: AiGroupRef[];
+	/** Those of `shared_group_ids` whose members may also edit it. */
+	shared_edit_group_ids?: number[];
 	/**
-	 * The caller may change the workflow (owner or administrator); false
-	 * when it is only shared with one of their groups.
+	 * The caller may edit the workflow (owner, administrator, or shared
+	 * with them for editing); false when it is only shared to view and run.
 	 */
 	can_edit?: boolean;
+	/**
+	 * The caller may also set its limits, share, file, export, publish or
+	 * delete it (owner or administrator).
+	 */
+	can_manage?: boolean;
 	created_at?: string | null;
 	updated_at?: string | null;
 }
@@ -793,9 +800,14 @@ export class AiWorkflowsService {
 	static async setSharing(
 		id: number,
 		groupIds: number[],
+		editGroupIds: number[],
 		options: ApiOptions = {}
 	): Promise<RequestResponse<AiWorkflow>> {
-		return ApiService.put<AiWorkflow>(`${BASE}/${id}/sharing`, { group_ids: groupIds }, options);
+		return ApiService.put<AiWorkflow>(
+			`${BASE}/${id}/sharing`,
+			{ group_ids: groupIds, edit_group_ids: editGroupIds },
+			options
+		);
 	}
 
 	/** The groups a workflow can be shared with. */

@@ -158,10 +158,13 @@
 
 	let workflow = $state<AiWorkflow | null>(null);
 	// Shared with one of the user's groups: they view and run it, as
-	// themselves; only its owner (or an administrator) changes it.
+	// themselves, and edit it when shared for editing; only its owner (or
+	// an administrator) sets its limits, shares, exports or publishes it.
 	const sharedWithMe = $derived(workflow?.can_edit === false);
 	const canEdit = $derived(canWrite && !sharedWithMe);
 	const readOnly = $derived(!canEdit);
+	const canManage = $derived(canEdit && workflow?.can_manage !== false);
+	const limitsLocked = $derived(readOnly || !canManage);
 	let shareOpen = $state(false);
 
 	function onShared(updated: AiWorkflow) {
@@ -169,6 +172,7 @@
 		workflow = {
 			...workflow,
 			shared_group_ids: updated.shared_group_ids,
+			shared_edit_group_ids: updated.shared_edit_group_ids,
 			shared_groups: updated.shared_groups
 		};
 	}
@@ -1089,7 +1093,7 @@
 		<label class="ml-2 flex items-center gap-1.5 text-xs">
 			<Switch
 				checked={form.is_active}
-				disabled={readOnly || loading}
+				disabled={limitsLocked || loading}
 				onCheckedChange={(v: boolean) => (form.is_active = v)}
 				data-testid="wf-active"
 			/>
@@ -1127,7 +1131,7 @@
 				<BracesIcon size={12} class="mr-1" /> JSON
 			</Button>
 			{#if workflow}
-				{#if !sharedWithMe}
+				{#if canManage}
 					<Button
 						variant="outline"
 						size="sm"
@@ -1139,7 +1143,7 @@
 						<DownloadIcon size={12} class="mr-1" /> Export
 					</Button>
 				{/if}
-				{#if canEdit}
+				{#if canManage}
 					<Button
 						variant="outline"
 						size="sm"
@@ -1233,6 +1237,14 @@
 							Read-only: editing needs the “Workflows write” permission.
 						{/if}
 					</p>
+				{:else if !canManage}
+					<p
+						class="border-b bg-muted/30 px-4 py-1.5 text-2xs text-muted-foreground"
+						data-testid="wf-shared-editor"
+					>
+						Shared with you for editing: your tests and runs act as you, its triggers as its owner.
+						Its activation, customer scope, budgets, write allowlist and sharing stay its owner's.
+					</p>
 				{/if}
 				{#if remoteDeleted}
 					<p
@@ -1303,7 +1315,7 @@
 									]}
 									values={form.customer_scope.map(String)}
 									placeholder="All customers"
-									disabled={readOnly}
+									disabled={limitsLocked}
 									onChange={(v) => (form.customer_scope = v.map(Number))}
 									testId="wf-customer-scope"
 								/>
@@ -1313,7 +1325,7 @@
 								<span class={LABEL_CLASS}>Suggestions are shown to</span>
 								<select
 									class={SELECT_CLASS}
-									disabled={readOnly}
+									disabled={limitsLocked}
 									bind:value={form.suggestion_audience}
 								>
 									{#each Object.entries(SUGGESTION_AUDIENCE_LABELS) as [value, text] (value)}
@@ -1333,7 +1345,7 @@
 										type="number"
 										min="1"
 										class="h-8 text-xs"
-										disabled={readOnly}
+										disabled={limitsLocked}
 										bind:value={form.max_runs_per_hour}
 									/>
 								</label>
@@ -1343,7 +1355,7 @@
 										type="number"
 										min="0"
 										class="h-8 text-xs"
-										disabled={readOnly}
+										disabled={limitsLocked}
 										bind:value={form.token_budget_per_run}
 									/>
 								</label>
@@ -1355,7 +1367,7 @@
 									items={writeTools}
 									values={form.write_tool_allowlist}
 									placeholder="None: every write is a suggestion"
-									disabled={readOnly}
+									disabled={limitsLocked}
 									onChange={(v) => (form.write_tool_allowlist = v)}
 									testId="wf-write-allowlist"
 								/>
@@ -1380,7 +1392,7 @@
 									<span class={LABEL_CLASS}>Owner (event / cron / webhook runs act as them)</span>
 									<select
 										class={SELECT_CLASS}
-										disabled={readOnly}
+										disabled={limitsLocked}
 										value={form.owner_id === null ? '' : String(form.owner_id)}
 										onchange={(e) => {
 											const v = (e.currentTarget as HTMLSelectElement).value;
@@ -1407,15 +1419,21 @@
 							{#if workflow}
 								<div class="flex flex-col gap-1" data-testid="wf-sharing">
 									<span class={LABEL_CLASS}
-										>Shared with (members view it, and run it as themselves)</span
+										>Shared with (members view it and run it as themselves; “edit”: they may edit it
+										too)</span
 									>
 									<div class="flex items-center gap-2">
 										<span class="min-w-0 flex-1 truncate text-2xs text-muted-foreground">
 											{workflow.shared_groups?.length
-												? workflow.shared_groups.map((g) => g.name ?? `#${g.id}`).join(', ')
+												? workflow.shared_groups
+														.map(
+															(g) =>
+																`${g.name ?? `#${g.id}`}${workflow?.shared_edit_group_ids?.includes(g.id) ? ' (edit)' : ''}`
+														)
+														.join(', ')
 												: 'Nobody (private)'}
 										</span>
-										{#if canEdit}
+										{#if canManage}
 											<Button
 												variant="outline"
 												size="sm"
@@ -1734,6 +1752,7 @@
 		workflowId={workflow.id}
 		workflowName={workflow.name}
 		groupIds={workflow.shared_group_ids ?? []}
+		editGroupIds={workflow.shared_edit_group_ids ?? []}
 		{onShared}
 	/>
 {/if}
