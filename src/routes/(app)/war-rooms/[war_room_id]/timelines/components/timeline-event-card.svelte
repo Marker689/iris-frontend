@@ -357,7 +357,7 @@
 										<span
 											class="rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0 text-2xs font-medium uppercase tracking-wider text-primary"
 										>
-											Case
+											Case{event.case_id ? ` #${event.case_id}` : ''}
 										</span>
 									</TooltipTrigger>
 									<TooltipContent>Projected from a linked case timeline (read-only)</TooltipContent>

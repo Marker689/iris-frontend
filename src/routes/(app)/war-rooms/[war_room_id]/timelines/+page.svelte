@@ -31,7 +31,9 @@
 	import { UsersService } from '$lib/services/users.service';
 	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { safeHexColor } from '$lib/utils/color';
+	import { caseNameWithoutNumber } from '$lib/utils/case-name';
 	import TimelineView from './components/timeline-view.svelte';
+	import { caseSelectionState, filterLinkedCases, withCaseTimelines } from './case-sources';
 
 	const warRoomId = $derived(Number(page.params.war_room_id));
 
@@ -91,13 +93,10 @@
 	let dragEventId = $state<number | null>(null);
 	let dragOverTimelineId = $state<number | null>(null);
 
-	// A load started later wins (a live refresh racing a selection change)
-	let loadSeq = 0;
-	const load = async (silent = false) => {
-		const seq = ++loadSeq;
-		if (!silent) loading = true;
-		// Native war-room timelines (list) + linked-case timelines (sidebar tree)
-		// in parallel — one round-trip's worth of latency for both trees.
+	// Both sidebar trees: native war-room timelines + linked-case timelines,
+	// in parallel. Only re-read on mount and on live updates — ticking a
+	// timeline only needs the events.
+	const loadTrees = async () => {
 		const [tl, lc] = await Promise.all([
 			WarRoomTimelinesService.list(warRoomId),
 			WarRoomTimelinesService.listLinkedCaseTimelines(warRoomId)
@@ -108,12 +107,25 @@
 		if (lc.ok && Array.isArray(lc.data)) {
 			linkedCases = lc.data as LinkedCase[];
 		}
+	};
 
-		// Fetch native + projected events in parallel too. Passing
+	const load = async (silent = false) => {
+		if (!silent) loading = true;
+		await Promise.all([loadTrees(), loadEvents()]);
+		loading = false;
+	};
+
+	// A load started later wins (a live refresh racing a selection change)
+	let loadSeq = 0;
+	let loadingEvents = $state(false);
+	const loadEvents = async () => {
+		const seq = ++loadSeq;
+		loadingEvents = true;
+		// Fetch native + projected events in parallel. Passing
 		// `undefined` for `timelineIds` when nothing is selected keeps
 		// today's "empty selection = show all natives" contract.
-		// Case events default to `[]` — the pref restore below is what
-		// flips the selection if the user previously opted in.
+		// Case events default to `[]` — the pref restore is what flips
+		// the selection if the user previously opted in.
 		const [ev, cev] = await Promise.all([
 			WarRoomTimelinesService.listEvents(warRoomId, {
 				timelineIds: selectedIds.size ? Array.from(selectedIds) : undefined
@@ -138,7 +150,18 @@
 			return a.event_date.localeCompare(b.event_date);
 		});
 		events = merged;
-		loading = false;
+		loadingEvents = false;
+	};
+
+	// Ticking several case timelines in a row fetches their events once.
+	let eventsTimer: ReturnType<typeof setTimeout> | null = null;
+	const loadEventsSoon = () => {
+		if (eventsTimer) clearTimeout(eventsTimer);
+		loadingEvents = true;
+		eventsTimer = setTimeout(() => {
+			eventsTimer = null;
+			loadEvents();
+		}, 300);
 	};
 
 	const loadPreferences = async () => {
@@ -201,16 +224,37 @@
 		if (next.has(id)) next.delete(id);
 		else next.add(id);
 		selectedIds = next;
-		load();
+		loadEventsSoon();
+	};
+
+	const setCaseTimelines = (next: Set<number>) => {
+		selectedCaseTimelineIds = next;
+		loadEventsSoon();
 	};
 
 	const toggleCaseTimeline = (timelineId: number) => {
 		const next = new Set(selectedCaseTimelineIds);
 		if (next.has(timelineId)) next.delete(timelineId);
 		else next.add(timelineId);
-		selectedCaseTimelineIds = next;
-		load();
+		setCaseTimelines(next);
 	};
+
+	// A case row's checkbox switches all its timelines: on unless they
+	// already all are.
+	const toggleCase = (lc: LinkedCase) => {
+		const on = caseSelectionState(lc, selectedCaseTimelineIds) !== 'all';
+		setCaseTimelines(withCaseTimelines(selectedCaseTimelineIds, [lc], on));
+	};
+
+	// All / None apply to the cases matching the sidebar search.
+	let caseSearch = $state('');
+	const visibleLinkedCases = $derived(filterLinkedCases(linkedCases, caseSearch));
+	const selectVisibleCases = (on: boolean) =>
+		setCaseTimelines(withCaseTimelines(selectedCaseTimelineIds, visibleLinkedCases, on));
+
+	const casesOnCount = $derived(
+		linkedCases.filter((lc) => caseSelectionState(lc, selectedCaseTimelineIds) !== 'none').length
+	);
 
 	const toggleCaseExpand = (caseId: number) => {
 		const next = new Set(expandedCaseIds);
@@ -219,12 +263,11 @@
 		expandedCaseIds = next;
 	};
 
+	// Every native timeline; the linked case timelines have their own
+	// All / None.
 	const showAll = () => {
-		// "Show all" also clears the case-timeline projection so the
-		// button is a true one-click reset to the default sidebar state.
 		selectedIds = new Set();
-		selectedCaseTimelineIds = new Set();
-		load();
+		loadEventsSoon();
 	};
 
 	// Discriminate projected case events (read-only) from native ones.
@@ -290,7 +333,7 @@
 			timelines = timelines.filter((x) => x.timeline_id !== t.timeline_id);
 			selectedIds.delete(t.timeline_id);
 			selectedIds = new Set(selectedIds);
-			load();
+			loadEvents();
 		}
 	};
 
@@ -402,7 +445,7 @@
 			saving = false;
 			if (res.ok) {
 				entryOpen = false;
-				load();
+				loadEvents();
 			} else {
 				toast({ title: 'Could not create event', variant: 'destructive' });
 			}
@@ -461,7 +504,7 @@
 		const res = await WarRoomTimelinesService.duplicateEvent(warRoomId, eventId);
 		if (res.ok && res.data && typeof res.data !== 'string') {
 			// Reload so the new event lands in the right chronological slot.
-			await load();
+			await loadEvents();
 		}
 	};
 
@@ -823,92 +866,143 @@
 			{/if}
 
 			<!--
-			  Linked-case timelines. Each attached case is a collapsible
-			  group of its own timelines. Selection persists per-user +
-			  per-war-room in `war_room_timeline_sources:<war_room_id>`.
-			  Cases the caller can't read are elided server-side, so no
-			  client-side filtering is needed here.
+			  Linked-case timelines. One row per attached case: its checkbox
+			  switches all the case's timelines (indeterminate when only some
+			  are on), the chevron unfolds them for a finer pick. The search
+			  narrows the list, All / None apply to the cases it shows.
+			  Selection persists per-user + per-war-room in
+			  `war_room_timeline_sources:<war_room_id>`. Cases the caller
+			  can't read are elided server-side.
 			-->
 			{#if linkedCases.length > 0}
-				<header class="mt-3 flex items-center justify-between border-b border-t px-3 py-2">
-					<h3 class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
-						Linked case timelines
-					</h3>
+				<header class="mt-3 flex flex-col gap-1.5 border-b border-t px-3 py-2">
+					<div class="flex items-center justify-between gap-2">
+						<h3 class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+							Linked case timelines
+						</h3>
+						<span class="shrink-0 text-2xs tabular-nums text-muted-foreground">
+							{casesOnCount}/{linkedCases.length}
+						</span>
+					</div>
+					{#if linkedCases.length > 5}
+						<div class="relative">
+							<Search class="absolute left-2 top-1.5 h-3 w-3 text-muted-foreground" />
+							<Input
+								value={caseSearch}
+								oninput={(e) => (caseSearch = (e.target as HTMLInputElement).value)}
+								placeholder="Filter cases…"
+								class="h-6 pl-6 text-2xs"
+								aria-label="Filter linked cases"
+							/>
+						</div>
+					{/if}
+					<div class="flex items-center gap-2 text-2xs">
+						<button
+							type="button"
+							class="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+							disabled={visibleLinkedCases.length === 0}
+							onclick={() => selectVisibleCases(true)}
+						>
+							{caseSearch.trim() ? 'All matching' : 'All'}
+						</button>
+						<span class="text-muted-foreground/50" aria-hidden="true">·</span>
+						<button
+							type="button"
+							class="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+							disabled={visibleLinkedCases.length === 0}
+							onclick={() => selectVisibleCases(false)}
+						>
+							{caseSearch.trim() ? 'None matching' : 'None'}
+						</button>
+						{#if loadingEvents}
+							<span class="ml-auto italic text-muted-foreground">Loading…</span>
+						{/if}
+					</div>
 				</header>
 				<ul class="flex flex-col gap-0.5 py-1">
-					{#each linkedCases as lc (lc.case_id)}
+					{#each visibleLinkedCases as lc (lc.case_id)}
 						{@const expanded = expandedCaseIds.has(lc.case_id)}
-						{@const anySelected = lc.timelines.some((t) =>
-							selectedCaseTimelineIds.has(t.timeline_id)
-						)}
+						{@const selection = caseSelectionState(lc, selectedCaseTimelineIds)}
+						{@const bareName = caseNameWithoutNumber(lc.case_name)}
 						<li>
-							<button
-								type="button"
-								class="flex w-full items-center gap-1 rounded-sm px-2 py-1 text-left transition-colors hover:bg-muted/50"
-								onclick={() => toggleCaseExpand(lc.case_id)}
-								aria-expanded={expanded}
+							<div
+								class="flex items-center gap-1.5 rounded-sm px-2 py-1 transition-colors hover:bg-muted/50"
+								class:bg-muted={selection === 'all'}
 							>
-								<span
-									class="inline-block w-3 shrink-0 text-center text-muted-foreground"
-									aria-hidden="true">{expanded ? '▾' : '▸'}</span
+								<Checkbox
+									checked={selection === 'all'}
+									indeterminate={selection === 'some'}
+									disabled={lc.timelines.length === 0}
+									onCheckedChange={() => toggleCase(lc)}
+									aria-label={`Show the timelines of case #${lc.case_id}`}
+								/>
+								<button
+									type="button"
+									class="flex min-w-0 flex-1 items-center gap-1 text-left"
+									onclick={() => toggleCase(lc)}
+									disabled={lc.timelines.length === 0}
+									title={`#${lc.case_id} ${bareName}`}
 								>
-								<span class="min-w-0 flex-1 truncate" title={lc.case_name}>
-									<span class="text-muted-foreground">#{lc.case_id}</span>
-									·
-									{lc.case_name}
-								</span>
-								{#if anySelected}
-									<span
-										class="shrink-0 rounded border bg-primary/10 px-1 text-[9px] uppercase tracking-wider text-primary"
-										title="At least one timeline from this case is visible"
+									<span class="shrink-0 font-mono text-2xs text-muted-foreground"
+										>#{lc.case_id}</span
 									>
-										On
-									</span>
+									<span class="min-w-0 flex-1 truncate">{bareName}</span>
+								</button>
+								{#if lc.timelines.length > 1}
+									<button
+										type="button"
+										class="shrink-0 rounded px-1 text-2xs tabular-nums text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+										onclick={() => toggleCaseExpand(lc.case_id)}
+										aria-expanded={expanded}
+										aria-label={`${expanded ? 'Hide' : 'Show'} the timelines of case #${lc.case_id}`}
+									>
+										{lc.timelines.length}
+										{expanded ? '▾' : '▸'}
+									</button>
+								{:else if lc.timelines.length === 0}
+									<span class="shrink-0 text-2xs italic text-muted-foreground">empty</span>
 								{/if}
-							</button>
-							{#if expanded}
-								{#if lc.timelines.length === 0}
-									<p class="px-6 py-1 text-2xs italic text-muted-foreground">
-										No timelines on this case.
-									</p>
-								{:else}
-									<ul class="ml-4 flex flex-col gap-0.5">
-										{#each lc.timelines as ct (ct.timeline_id)}
-											{@const checked = selectedCaseTimelineIds.has(ct.timeline_id)}
-											{@const safeCTColor = safeHexColor(ct.color)}
-											<li>
-												<label
-													class="flex items-center gap-2 rounded-sm px-2 py-1 transition-colors hover:bg-muted/50"
-													class:bg-muted={checked}
-												>
-													<Checkbox
-														{checked}
-														onCheckedChange={() => toggleCaseTimeline(ct.timeline_id)}
-														aria-label={`Toggle ${ct.name} from case #${lc.case_id}`}
-													/>
-													{#if safeCTColor}
-														<span
-															class="h-2 w-2 shrink-0 rounded-full"
-															style:background-color={safeCTColor}
-															aria-hidden="true"
-														></span>
-													{/if}
-													<span class="min-w-0 flex-1 truncate" title={ct.name}>{ct.name}</span>
-													{#if ct.is_default}
-														<span
-															class="shrink-0 rounded border bg-muted/60 px-1 text-[9px] uppercase tracking-wider text-muted-foreground"
-														>
-															Default
-														</span>
-													{/if}
-												</label>
-											</li>
-										{/each}
-									</ul>
-								{/if}
+							</div>
+							{#if expanded && lc.timelines.length > 1}
+								<ul class="ml-6 flex flex-col gap-0.5">
+									{#each lc.timelines as ct (ct.timeline_id)}
+										{@const checked = selectedCaseTimelineIds.has(ct.timeline_id)}
+										{@const safeCTColor = safeHexColor(ct.color)}
+										<li>
+											<label
+												class="flex items-center gap-2 rounded-sm px-2 py-1 transition-colors hover:bg-muted/50"
+												class:bg-muted={checked}
+											>
+												<Checkbox
+													{checked}
+													onCheckedChange={() => toggleCaseTimeline(ct.timeline_id)}
+													aria-label={`Toggle ${ct.name} from case #${lc.case_id}`}
+												/>
+												{#if safeCTColor}
+													<span
+														class="h-2 w-2 shrink-0 rounded-full"
+														style:background-color={safeCTColor}
+														aria-hidden="true"
+													></span>
+												{/if}
+												<span class="min-w-0 flex-1 truncate" title={ct.name}>{ct.name}</span>
+												{#if ct.is_default}
+													<span
+														class="shrink-0 rounded border bg-muted/60 px-1 text-[9px] uppercase tracking-wider text-muted-foreground"
+													>
+														Default
+													</span>
+												{/if}
+											</label>
+										</li>
+									{/each}
+								</ul>
 							{/if}
 						</li>
 					{/each}
+					{#if visibleLinkedCases.length === 0}
+						<li class="px-3 py-2 text-2xs italic text-muted-foreground">No matching case.</li>
+					{/if}
 				</ul>
 			{/if}
 		</div>
