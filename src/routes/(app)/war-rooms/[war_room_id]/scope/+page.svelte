@@ -121,11 +121,11 @@
 		type ScopeOutcome
 	} from './components/helpers';
 
-	type Tab = 'customers' | 'assets' | 'iocs' | 'vulnerabilities' | 'staging';
+	type Tab = 'assets' | 'iocs' | 'customers' | 'vulnerabilities' | 'staging';
 	const TABS: { key: Tab; label: string; icon: typeof Server }[] = [
-		{ key: 'customers', label: 'Customers', icon: Building2 },
 		{ key: 'assets', label: 'Assets', icon: Server },
 		{ key: 'iocs', label: 'IOCs', icon: Bug },
+		{ key: 'customers', label: 'Customers', icon: Building2 },
 		{ key: 'vulnerabilities', label: 'Vulnerabilities', icon: ShieldAlert },
 		{ key: 'staging', label: 'Staging', icon: Inbox }
 	];
