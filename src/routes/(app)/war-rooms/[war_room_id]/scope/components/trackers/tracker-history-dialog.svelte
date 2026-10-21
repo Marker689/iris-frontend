@@ -1,11 +1,17 @@
 <!--
-  History side sheet of a tracker: the log of one row, or (row = null)
+  History dialog of a tracker: the log of one row, or (row = null)
   the last events of the whole tracker ("Activity").
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { Loader2 } from 'lucide-svelte';
-	import * as Sheet from '$lib/components/ui/sheet';
+	import { History, Loader2 } from 'lucide-svelte';
+	import {
+		Dialog,
+		DialogContent,
+		DialogDescription,
+		DialogHeader,
+		DialogTitle
+	} from '$lib/components/ui/dialog';
 	import {
 		WarRoomTrackersService,
 		trackerRowLabel,
@@ -87,17 +93,19 @@
 	};
 </script>
 
-<Sheet.Root bind:open>
-	<Sheet.Content side="right" class="w-full overflow-y-auto sm:max-w-md">
-		<Sheet.Header>
-			<Sheet.Title>{row ? trackerRowLabel(row) || 'Row' : `${tracker.name} — activity`}</Sheet.Title
-			>
-			<Sheet.Description>
+<Dialog bind:open>
+	<DialogContent class="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
+		<DialogHeader class="border-b px-6 py-4">
+			<DialogTitle class="flex items-center gap-2">
+				<History class="h-4 w-4 text-primary" aria-hidden="true" />
+				{row ? trackerRowLabel(row) || 'Row' : `${tracker.name} — activity`}
+			</DialogTitle>
+			<DialogDescription>
 				{row ? 'Every change made to this row.' : 'The last changes made in this tracker.'}
-			</Sheet.Description>
-		</Sheet.Header>
+			</DialogDescription>
+		</DialogHeader>
 
-		<div class="mt-4" data-testid="tracker-history">
+		<div class="flex-1 overflow-y-auto px-6 py-4" data-testid="tracker-history">
 			{#if loading && events.length === 0}
 				<div class="flex justify-center py-8">
 					<Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
@@ -131,5 +139,5 @@
 				</ol>
 			{/if}
 		</div>
-	</Sheet.Content>
-</Sheet.Root>
+	</DialogContent>
+</Dialog>

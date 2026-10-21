@@ -51,7 +51,7 @@
 	import ScopeFlagDialog from '../scope-flag-dialog.svelte';
 	import { SELECT_CHECKBOX_CLASS, errorMessage } from '../helpers';
 	import TrackerAddRowsDialog from './tracker-add-rows-dialog.svelte';
-	import TrackerHistorySheet from './tracker-history-sheet.svelte';
+	import TrackerHistoryDialog from './tracker-history-dialog.svelte';
 	import TrackerItemCell from './tracker-item-cell.svelte';
 	import TrackerStepsCell from './tracker-steps-cell.svelte';
 	import TrackerValueCell from './tracker-value-cell.svelte';
@@ -95,6 +95,20 @@
 
 	let seq = 0;
 
+	// The live pushes carry no author, so our own writes come back as
+	// pushes too: right after this view synced its rows, the re-read they
+	// trigger is skipped.
+	const ECHO_MS = 2000;
+	let syncedAt = 0;
+	const markSynced = () => {
+		syncedAt = Date.now();
+	};
+	const isEcho = () => Date.now() - syncedAt < ECHO_MS;
+
+	// Only the id: the store replaces the tracker object on every reload,
+	// which must not count as another tracker being shown.
+	const trackerId = $derived(tracker.id);
+
 	const Icon = $derived(getTrackerIcon(tracker.icon));
 	const sourceLabel = $derived(TRACKER_SOURCES.find((s) => s.value === tracker.source)?.label);
 	const isManual = $derived(tracker.source === 'manual');
@@ -120,8 +134,7 @@
 
 	const loadRows = async () => {
 		const mine = ++seq;
-		const id = tracker.id;
-		const res = await WarRoomTrackersService.listRows(store.warRoomId, id);
+		const res = await WarRoomTrackersService.listRows(store.warRoomId, trackerId);
 		if (mine !== seq) return;
 		loading = false;
 		const body = okObject(res);
@@ -130,6 +143,7 @@
 			return;
 		}
 		loadError = null;
+		markSynced();
 		rows = body.data;
 		truncated = body.truncated;
 		const keys = new Set(rows.map((r) => r.key));
@@ -146,8 +160,9 @@
 
 	// New tracker shown: start from scratch.
 	$effect(() => {
-		void tracker.id;
+		void trackerId;
 		untrack(() => {
+			syncedAt = 0;
 			rows = [];
 			loading = true;
 			loadError = null;
@@ -159,11 +174,16 @@
 		});
 	});
 
-	// Rows (re)read on tracker change and whenever the store says so.
+	// Rows (re)read on tracker change and whenever the store says so
+	// (live push, template applied), unless it is the echo of our write.
+	let readId: number | null = null;
 	$effect(() => {
-		void tracker.id;
+		const id = trackerId;
 		void store.rowsVersion;
 		untrack(() => {
+			const sameTracker = readId === id;
+			readId = id;
+			if (sameTracker && isEcho()) return;
 			historyVersion += 1;
 			void loadRows();
 		});
@@ -181,7 +201,9 @@
 
 	// Mirrors follow the war room: re-read when its items change. The
 	// `trackers` topic is handled by the page (store.reload bumps rowsVersion).
-	useWarRoomLive(['scope', 'cases'], () => void loadRows());
+	useWarRoomLive(['scope', 'cases'], () => {
+		if (!isEcho()) void loadRows();
+	});
 
 	async function withBusy<T>(keys: string[], fn: () => Promise<T>): Promise<T> {
 		busyKeys = new Set([...busyKeys, ...keys]);
@@ -210,6 +232,7 @@
 				});
 				const body = okObject(res);
 				if (body && Array.isArray(body.data)) {
+					markSynced();
 					rows = mergeTrackerRows(rows, body.data);
 					historyVersion += 1;
 					return true;
@@ -226,8 +249,49 @@
 		);
 	};
 
-	const toggleStep = (row: TrackerRow, stepId: number, on: boolean) =>
-		applyState([row], on ? { add_step_ids: [stepId] } : { remove_step_ids: [stepId] });
+	// Step toggles in flight per row: the server copy of a row is only
+	// taken once its last toggle answered, so quick clicks don't flicker.
+	const pendingToggles = new Map<string, number>();
+
+	const flipStep = (key: string, stepId: number, on: boolean) => {
+		const row = rows.find((r) => r.key === key);
+		if (!row || row.steps.some((s) => s.step_id === stepId) === on) return;
+		const steps = on
+			? [...row.steps, { step_id: stepId, set_by: null, set_at: new Date().toISOString() }]
+			: row.steps.filter((s) => s.step_id !== stepId);
+		rows = mergeTrackerRows(rows, [{ ...row, steps }]);
+	};
+
+	/** Steps flip at once; flipped back if the server refuses. */
+	const toggleStep = async (row: TrackerRow, stepId: number, on: boolean) => {
+		const ref = trackerRowRef(row);
+		if (ref === null) return;
+		const key = row.key;
+		flipStep(key, stepId, on);
+		pendingToggles.set(key, (pendingToggles.get(key) ?? 0) + 1);
+		const res = await WarRoomTrackersService.updateState(store.warRoomId, trackerId, {
+			rows: [ref],
+			...(on ? { add_step_ids: [stepId] } : { remove_step_ids: [stepId] })
+		});
+		const left = (pendingToggles.get(key) ?? 1) - 1;
+		if (left > 0) pendingToggles.set(key, left);
+		else pendingToggles.delete(key);
+		const body = okObject(res);
+		if (body && Array.isArray(body.data)) {
+			markSynced();
+			if (left === 0) rows = mergeTrackerRows(rows, body.data);
+			historyVersion += 1;
+			return;
+		}
+		flipStep(key, stepId, !on);
+		if (res.status !== 403) {
+			toast({
+				title: 'Could not save the change',
+				description: errorMessage(res, 'The server refused the request.'),
+				variant: 'destructive'
+			});
+		}
+	};
 
 	const saveValue = (row: TrackerRow, key: string, value: TrackerValue) =>
 		applyState([row], { values: { [key]: value } });
@@ -729,7 +793,7 @@
 	{/if}
 </div>
 
-<TrackerHistorySheet
+<TrackerHistoryDialog
 	bind:open={historyOpen}
 	warRoomId={store.warRoomId}
 	{tracker}
