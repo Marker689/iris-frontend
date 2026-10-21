@@ -38,13 +38,10 @@
 	import { toast } from '$lib/components/ui/toast';
 	import ConfirmationDialog from '$lib/components/ui/dialog/ConfirmationDialog.svelte';
 	import AssetFlagChip from '$lib/components/common/assets/AssetFlagChip.svelte';
+	import FlagColorPicker from '$lib/components/common/assets/FlagColorPicker.svelte';
+	import FlagIconPicker from '$lib/components/common/assets/FlagIconPicker.svelte';
+	import { getAssetFlagIcon } from '$lib/components/common/assets/asset-flag-icon';
 	import {
-		ASSET_FLAG_ICONS,
-		getAssetFlagIcon,
-		type AssetFlagIconName
-	} from '$lib/components/common/assets/asset-flag-icon';
-	import {
-		ASSET_FLAG_COLORS,
 		ASSET_FLAG_KINDS,
 		ASSET_STATUS_TIMELINE_NAME,
 		AssetFlagsService,
@@ -91,8 +88,6 @@
 			summary: "Mitigated, Patched, Not affected, Can't be patched, Accepted risk"
 		}
 	];
-
-	const ICON_NAMES = Object.keys(ASSET_FLAG_ICONS) as AssetFlagIconName[];
 
 	let flags = $state<AssetFlag[]>([]);
 	let loading = $state(false);
@@ -661,48 +656,23 @@
 				<span id="flag-color-label" class="text-2xs uppercase tracking-wide text-muted-foreground">
 					Colour
 				</span>
-				<div class="flex flex-wrap gap-1.5" role="radiogroup" aria-labelledby="flag-color-label">
-					{#each ASSET_FLAG_COLORS as color (color)}
-						<button
-							type="button"
-							role="radio"
-							aria-checked={form.color === color}
-							aria-label={color}
-							title={color}
-							disabled={editorBusy}
-							onclick={() => (form.color = color)}
-							class="h-6 w-6 rounded-full {assetFlagDotClass(color)} {form.color === color
-								? 'ring-2 ring-ring ring-offset-2 ring-offset-background'
-								: ''}"
-						></button>
-					{/each}
-				</div>
+				<FlagColorPicker
+					bind:value={form.color}
+					disabled={editorBusy}
+					labelledby="flag-color-label"
+				/>
 			</div>
 
 			<div class="flex flex-col gap-1">
 				<span id="flag-icon-label" class="text-2xs uppercase tracking-wide text-muted-foreground">
 					Icon
 				</span>
-				<div class="flex flex-wrap gap-1" role="radiogroup" aria-labelledby="flag-icon-label">
-					{#each ICON_NAMES as name (name)}
-						{@const Icon = ASSET_FLAG_ICONS[name]}
-						<button
-							type="button"
-							role="radio"
-							aria-checked={form.icon === name}
-							aria-label={name}
-							title={name}
-							disabled={editorBusy}
-							onclick={() => (form.icon = name)}
-							class="flex h-8 w-8 items-center justify-center rounded-md border transition-colors {form.icon ===
-							name
-								? assetFlagChipClass(form.color)
-								: 'text-muted-foreground hover:bg-muted'}"
-						>
-							<Icon class="h-4 w-4" aria-hidden="true" />
-						</button>
-					{/each}
-				</div>
+				<FlagIconPicker
+					bind:value={form.icon}
+					color={form.color}
+					disabled={editorBusy}
+					labelledby="flag-icon-label"
+				/>
 			</div>
 
 			<div class="flex flex-col gap-1">
