@@ -165,6 +165,13 @@ describe('AiWorkflowsService', () => {
 		expect(mockPut).toHaveBeenCalledWith('/ai-workflows/3/category', { category_id: null }, {});
 	});
 
+	it('shares a workflow with groups and lists the groups', async () => {
+		await AiWorkflowsService.setSharing(3, [5, 6]);
+		expect(mockPut).toHaveBeenCalledWith('/ai-workflows/3/sharing', { group_ids: [5, 6] }, {});
+		await AiWorkflowsService.shareGroups();
+		expect(mockGet).toHaveBeenCalledWith('/ai-workflows/share-groups', {});
+	});
+
 	it('forwards options', async () => {
 		const options = { skipAuthRedirect: true };
 		await AiWorkflowsService.list(options);

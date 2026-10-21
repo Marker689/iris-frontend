@@ -40,7 +40,8 @@
 		PlayIcon,
 		SaveIcon,
 		ShieldCheckIcon,
-		TriangleAlertIcon
+		TriangleAlertIcon,
+		UsersIcon
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -101,6 +102,7 @@
 	import MultiSelect, { type MultiSelectItem } from '../components/MultiSelect.svelte';
 	import RunDialog from '../components/RunDialog.svelte';
 	import PublishDialog from '../components/PublishDialog.svelte';
+	import ShareDialog from '../components/ShareDialog.svelte';
 	import VersionsDialog from '../components/VersionsDialog.svelte';
 	import NodeEventsPanel from '../components/NodeEventsPanel.svelte';
 	import NodeTestPanel from '../components/NodeTestPanel.svelte';
@@ -150,12 +152,26 @@
 	const userCtx = getContext<UserCtx>(USER_CTX);
 	const canWrite = $derived(userCtx?.can('ai_workflows_write') ?? false);
 	const isAdmin = $derived(userCtx?.can('server_administrator') ?? false);
-	const readOnly = $derived(!canWrite);
 
 	const routeId = $derived(page.params.id ?? 'new');
 	const isNew = $derived(routeId === 'new');
 
 	let workflow = $state<AiWorkflow | null>(null);
+	// Shared with one of the user's groups: they view and run it, as
+	// themselves; only its owner (or an administrator) changes it.
+	const sharedWithMe = $derived(workflow?.can_edit === false);
+	const canEdit = $derived(canWrite && !sharedWithMe);
+	const readOnly = $derived(!canEdit);
+	let shareOpen = $state(false);
+
+	function onShared(updated: AiWorkflow) {
+		if (!workflow) return;
+		workflow = {
+			...workflow,
+			shared_group_ids: updated.shared_group_ids,
+			shared_groups: updated.shared_groups
+		};
+	}
 	let catalogue = $state<AiWorkflowCatalogue | null>(null);
 	let form = $state<WorkflowForm>(emptyWorkflowForm());
 	let nodes = $state.raw<FlowNode[]>([]);
@@ -1111,17 +1127,19 @@
 				<BracesIcon size={12} class="mr-1" /> JSON
 			</Button>
 			{#if workflow}
-				<Button
-					variant="outline"
-					size="sm"
-					class="h-7"
-					onclick={exportWorkflow}
-					title="Download as JSON: keystore references are kept, secrets are never exported"
-					data-testid="wf-export"
-				>
-					<DownloadIcon size={12} class="mr-1" /> Export
-				</Button>
-				{#if canWrite}
+				{#if !sharedWithMe}
+					<Button
+						variant="outline"
+						size="sm"
+						class="h-7"
+						onclick={exportWorkflow}
+						title="Download as JSON: keystore references are kept, secrets are never exported"
+						data-testid="wf-export"
+					>
+						<DownloadIcon size={12} class="mr-1" /> Export
+					</Button>
+				{/if}
+				{#if canEdit}
 					<Button
 						variant="outline"
 						size="sm"
@@ -1173,7 +1191,7 @@
 				{/if}
 				{validating ? 'Validating…' : 'Validate'}
 			</Button>
-			{#if canWrite}
+			{#if canEdit}
 				<Button
 					size="sm"
 					class="h-7"
@@ -1207,7 +1225,13 @@
 				{/if}
 				{#if readOnly}
 					<p class="border-b bg-muted/30 px-4 py-1.5 text-2xs text-muted-foreground">
-						Read-only: editing needs the “Workflows write” permission.
+						{#if sharedWithMe}
+							Shared with you: you can view it{canWrite
+								? ' and run it (your runs act as you)'
+								: ''}; only its owner can change it.
+						{:else}
+							Read-only: editing needs the “Workflows write” permission.
+						{/if}
 					</p>
 				{/if}
 				{#if remoteDeleted}
@@ -1380,6 +1404,31 @@
 									Owner: {workflow.owner.name ?? workflow.owner.login}
 								</p>
 							{/if}
+							{#if workflow}
+								<div class="flex flex-col gap-1" data-testid="wf-sharing">
+									<span class={LABEL_CLASS}
+										>Shared with (members view it, and run it as themselves)</span
+									>
+									<div class="flex items-center gap-2">
+										<span class="min-w-0 flex-1 truncate text-2xs text-muted-foreground">
+											{workflow.shared_groups?.length
+												? workflow.shared_groups.map((g) => g.name ?? `#${g.id}`).join(', ')
+												: 'Nobody (private)'}
+										</span>
+										{#if canEdit}
+											<Button
+												variant="outline"
+												size="sm"
+												class="h-6 px-2 text-2xs"
+												onclick={() => (shareOpen = true)}
+												data-testid="wf-share"
+											>
+												<UsersIcon size={11} class="mr-1" /> Share
+											</Button>
+										{/if}
+									</div>
+								</div>
+							{/if}
 						</aside>
 						<PanelResizer
 							bind:width={settingsWidth}
@@ -1400,8 +1449,8 @@
 								{readOnly}
 								onAddNode={addNode}
 								onSelect={(id) => (selectedId = id)}
-								blocks={canWrite ? blocks : []}
-								onInsertBlock={canWrite ? insertSavedBlock : undefined}
+								blocks={canEdit ? blocks : []}
+								onInsertBlock={canEdit ? insertSavedBlock : undefined}
 								onSaveSelection={startSaveSelection}
 								onImportBlock={importBlock}
 								onExportBlock={exportBlock}
@@ -1455,7 +1504,7 @@
 									>
 										Events ({sidStats?.total ?? 0})
 									</button>
-									{#if canWrite}
+									{#if canEdit}
 										<button
 											type="button"
 											role="tab"
@@ -1474,11 +1523,11 @@
 									<NodeEventsPanel
 										workflowId={workflow.id}
 										nodeId={sid}
-										canReplay={canWrite}
+										canReplay={canEdit}
 										{dirty}
 										onReplayed={() => setTimeout(loadStats, 1500)}
 									/>
-								{:else if workflow && canWrite && drawerTab === 'test'}
+								{:else if workflow && canEdit && drawerTab === 'test'}
 									<NodeTestPanel
 										workflowId={workflow.id}
 										blocked={testBlocked(selectedType, meta[sid].config)}
@@ -1679,5 +1728,12 @@
 		workflowName={workflow.name}
 		workflowDescription={workflow.description}
 		{dirty}
+	/>
+	<ShareDialog
+		bind:open={shareOpen}
+		workflowId={workflow.id}
+		workflowName={workflow.name}
+		groupIds={workflow.shared_group_ids ?? []}
+		{onShared}
 	/>
 {/if}

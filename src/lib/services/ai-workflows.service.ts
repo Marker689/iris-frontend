@@ -140,6 +140,11 @@ export interface AiUserRef {
 	name: string | null;
 }
 
+export interface AiGroupRef {
+	id: number;
+	name: string | null;
+}
+
 export interface AiWorkflowSummary {
 	id: number;
 	uuid: string;
@@ -179,6 +184,14 @@ export interface AiWorkflowSummary {
 	last_fired_at?: string | null;
 	/** AI-workflow category (`CategoriesService`), null when in none. */
 	category_id?: number | null;
+	/** Groups whose members may see the workflow and run it, as themselves. */
+	shared_group_ids?: number[];
+	shared_groups?: AiGroupRef[];
+	/**
+	 * The caller may change the workflow (owner or administrator); false
+	 * when it is only shared with one of their groups.
+	 */
+	can_edit?: boolean;
 	created_at?: string | null;
 	updated_at?: string | null;
 }
@@ -774,6 +787,20 @@ export class AiWorkflowsService {
 			{ category_id: categoryId },
 			options
 		);
+	}
+
+	/** Share the workflow with groups (none: private again); not a new version. */
+	static async setSharing(
+		id: number,
+		groupIds: number[],
+		options: ApiOptions = {}
+	): Promise<RequestResponse<AiWorkflow>> {
+		return ApiService.put<AiWorkflow>(`${BASE}/${id}/sharing`, { group_ids: groupIds }, options);
+	}
+
+	/** The groups a workflow can be shared with. */
+	static async shareGroups(options: ApiOptions = {}): Promise<RequestResponse<AiGroupRef[]>> {
+		return ApiService.get<AiGroupRef[]>(`${BASE}/share-groups`, options);
 	}
 
 	static async catalogue(options: ApiOptions = {}): Promise<RequestResponse<AiWorkflowCatalogue>> {

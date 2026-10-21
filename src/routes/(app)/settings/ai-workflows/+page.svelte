@@ -1,9 +1,10 @@
 <!--
   AI workflows: searchable list with trigger, active toggle, owner, version and
   last-24h run counts; new / import / edit / export / publish / delete / run
-  / move to category actions, the category column (drop a row on a
+  / share / move to category actions, the category column (drop a row on a
   category to move it), the workflow library and the JSON authoring guide. The editor
-  lives at `./[id]` (`./new` to create), runs at `./runs`.
+  lives at `./[id]` (`./new` to create), runs at `./runs`. A workflow shared
+  with one of the user's groups (`can_edit` false) can be viewed and run only.
 -->
 <script lang="ts">
 	import { getContext, untrack } from 'svelte';
@@ -22,6 +23,7 @@
 		SearchIcon,
 		Trash2Icon,
 		UploadIcon,
+		UsersIcon,
 		WorkflowIcon,
 		XIcon
 	} from 'lucide-svelte';
@@ -54,6 +56,7 @@
 	import AuthoringGuideDialog from './components/AuthoringGuideDialog.svelte';
 	import LibraryDialog from './components/LibraryDialog.svelte';
 	import PublishDialog from './components/PublishDialog.svelte';
+	import ShareDialog from './components/ShareDialog.svelte';
 	import {
 		describeApiError,
 		describeWarnings,
@@ -84,7 +87,20 @@
 	let libraryOpen = $state(false);
 	let publishTarget = $state<AiWorkflowSummary | null>(null);
 	let publishOpen = $state(false);
+	let shareTarget = $state<AiWorkflowSummary | null>(null);
+	let shareOpen = $state(false);
 	let importing = $state(false);
+
+	/** Write permission on a workflow the user owns (or administers). */
+	const canEdit = (workflow: AiWorkflowSummary) => canWrite && workflow.can_edit !== false;
+
+	function onShared(updated: AiWorkflow) {
+		workflows = workflows.map((w) =>
+			w.id === updated.id
+				? { ...w, shared_group_ids: updated.shared_group_ids, shared_groups: updated.shared_groups }
+				: w
+		);
+	}
 
 	let search = $state('');
 
@@ -117,7 +133,7 @@
 	}
 
 	function dragWorkflow(workflow: AiWorkflowSummary, e: DragEvent) {
-		if (!canWrite || !e.dataTransfer) return;
+		if (!canEdit(workflow) || !e.dataTransfer) return;
 		e.dataTransfer.setData(CATEGORY_DRAG_TYPE, String(workflow.id));
 		e.dataTransfer.effectAllowed = 'move';
 	}
@@ -424,13 +440,13 @@
 											<tr
 												class="border-t hover:bg-muted/20"
 												data-testid={`wf-row-${workflow.id}`}
-												draggable={canWrite}
+												draggable={canEdit(workflow)}
 												ondragstart={(e) => dragWorkflow(workflow, e)}
 											>
 												<td class="px-3 py-2">
 													<Switch
 														checked={workflow.is_active}
-														disabled={!canWrite || toggling[workflow.id]}
+														disabled={!canEdit(workflow) || toggling[workflow.id]}
 														onCheckedChange={(v: boolean) => toggleActive(workflow, v)}
 														aria-label={`Activate ${workflow.name}`}
 													/>
@@ -481,7 +497,21 @@
 														</div>
 													{/if}
 												</td>
-												<td class="truncate px-3 py-2">{userLabel(workflow.owner)}</td>
+												<td class="max-w-0 px-3 py-2">
+													<div class="truncate">{userLabel(workflow.owner)}</div>
+													{#if workflow.shared_groups?.length}
+														{@const groupNames = workflow.shared_groups
+															.map((g) => g.name ?? `#${g.id}`)
+															.join(', ')}
+														<div
+															class="flex items-center gap-1 truncate text-2xs text-muted-foreground"
+															title={`Shared with ${groupNames}`}
+															data-testid={`wf-shared-${workflow.id}`}
+														>
+															<UsersIcon size={10} class="shrink-0" />{groupNames}
+														</div>
+													{/if}
+												</td>
 												<td class="px-3 py-2 font-mono">v{workflow.version}</td>
 												<td class="px-3 py-2">
 													<a
@@ -533,22 +563,38 @@
 															variant="ghost"
 															size="icon"
 															class="h-7 w-7"
-															title={canWrite ? 'Edit' : 'View'}
+															title={canEdit(workflow) ? 'Edit' : 'View'}
 															href={`/settings/ai-workflows/${workflow.id}`}
 														>
 															<PencilIcon size={13} />
 														</Button>
-														<Button
-															variant="ghost"
-															size="icon"
-															class="h-7 w-7"
-															title="Export (JSON, without secrets)"
-															aria-label={`Export ${workflow.name}`}
-															onclick={() => exportWorkflow(workflow)}
-														>
-															<DownloadIcon size={13} />
-														</Button>
-														{#if canWrite}
+														{#if workflow.can_edit !== false}
+															<Button
+																variant="ghost"
+																size="icon"
+																class="h-7 w-7"
+																title="Export (JSON, without secrets)"
+																aria-label={`Export ${workflow.name}`}
+																onclick={() => exportWorkflow(workflow)}
+															>
+																<DownloadIcon size={13} />
+															</Button>
+														{/if}
+														{#if canEdit(workflow)}
+															<Button
+																variant="ghost"
+																size="icon"
+																class="h-7 w-7"
+																title="Share with groups"
+																aria-label={`Share ${workflow.name}`}
+																onclick={() => {
+																	shareTarget = workflow;
+																	shareOpen = true;
+																}}
+																data-testid={`wf-share-${workflow.id}`}
+															>
+																<UsersIcon size={13} />
+															</Button>
 															<CategoryMoveMenu
 																categories={categories.categories}
 																value={workflow.category_id}
@@ -625,5 +671,14 @@
 		workflowId={publishTarget.id}
 		workflowName={publishTarget.name}
 		workflowDescription={publishTarget.description}
+	/>
+{/if}
+{#if shareTarget}
+	<ShareDialog
+		bind:open={shareOpen}
+		workflowId={shareTarget.id}
+		workflowName={shareTarget.name}
+		groupIds={shareTarget.shared_group_ids ?? []}
+		{onShared}
 	/>
 {/if}
