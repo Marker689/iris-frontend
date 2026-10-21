@@ -4,6 +4,7 @@
   is still listed and comes back as "denied" in the results.
 -->
 <script lang="ts">
+	import { caseNameWithoutNumber } from '$lib/utils/case-name';
 	import { Building2, Search } from 'lucide-svelte';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
@@ -145,7 +146,7 @@
 							aria-label={`Target case #${c.case_id}`}
 						/>
 						<span class="font-mono text-2xs text-muted-foreground">#{c.case_id}</span>
-						<span class="min-w-0 flex-1 truncate">{c.case_name}</span>
+						<span class="min-w-0 flex-1 truncate">{caseNameWithoutNumber(c.case_name)}</span>
 						{#if disabled}
 							<span class="shrink-0 text-2xs text-muted-foreground">{disabledNote}</span>
 						{/if}

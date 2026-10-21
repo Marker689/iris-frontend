@@ -7,6 +7,7 @@
   DOM stays rows x constant instead of rows x cases.
 -->
 <script lang="ts">
+	import { caseNameWithoutNumber, caseNumberedName } from '$lib/utils/case-name';
 	import { Building2, Check, Plus, Send } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
@@ -96,9 +97,11 @@
 				<th class={TH}>TLP</th>
 				{#if columns}
 					{#each cases as c (c.case_id)}
-						<th class={`${TH} text-center`} title={`#${c.case_id} ${c.case_name}`}>
+						<th class={`${TH} text-center`} title={caseNumberedName(c.case_id, c.case_name)}>
 							<span class="font-mono">#{c.case_id}</span>
-							<span class="block max-w-[7rem] truncate text-2xs font-normal">{c.case_name}</span>
+							<span class="block max-w-[7rem] truncate text-2xs font-normal"
+								>{caseNameWithoutNumber(c.case_name)}</span
+							>
 						</th>
 					{/each}
 				{:else}

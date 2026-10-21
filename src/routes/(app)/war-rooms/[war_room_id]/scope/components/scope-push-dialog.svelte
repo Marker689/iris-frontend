@@ -4,6 +4,7 @@
   shows the per-case outcome returned by the server.
 -->
 <script lang="ts">
+	import { caseNameWithoutNumber } from '$lib/utils/case-name';
 	import { untrack } from 'svelte';
 	import { Loader2, Send } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -75,7 +76,9 @@
 		return distinctCustomers([...sourceCustomers, ...cases.filter((c) => picked.has(c.case_id))]);
 	});
 
-	const caseNames = $derived(Object.fromEntries(cases.map((c) => [c.case_id, c.case_name])));
+	const caseNames = $derived(
+		Object.fromEntries(cases.map((c) => [c.case_id, caseNameWithoutNumber(c.case_name)]))
+	);
 
 	const submit = async () => {
 		if (selected.length === 0 || submitting) return;

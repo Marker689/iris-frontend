@@ -5,6 +5,7 @@ import type {
 	ScopeIoc,
 	ScopeIocInput
 } from '$lib/services/war-room-scope.service';
+import { caseNumberedName } from '$lib/utils/case-name';
 
 /** One normalised outcome row, whatever endpoint produced it. */
 // The default checkbox border is faint on the dense scope tables; make
@@ -73,8 +74,9 @@ export const errorMessage = (res: RequestResponse<unknown>, fallback: string): s
 	return res.error?.message || fallback;
 };
 
+/** "#12 Name": the stored name already carries the number, shown once. */
 export const caseLabel = (c: Pick<ScopeCase, 'case_id' | 'case_name'>): string =>
-	`#${c.case_id} ${c.case_name}`;
+	caseNumberedName(c.case_id, c.case_name);
 
 /** Distinct customers (by id, falling back to name) of a set of cases. */
 export const distinctCustomers = (

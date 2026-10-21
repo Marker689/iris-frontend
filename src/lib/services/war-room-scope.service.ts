@@ -147,6 +147,23 @@ export interface ScopeAssetPage extends ScopeList<ScopeAsset> {
 	flag_totals?: ScopeAssetFlagTotals[];
 }
 
+/**
+ * A customer of the readable attached cases, with its cases and the
+ * totals over them. `customer_id` is null for the cases without a
+ * customer. The vulnerability totals are absent without the permission.
+ */
+export interface ScopeCustomerSummary {
+	customer_id: number | null;
+	customer_name: string | null;
+	cases: { case_id: number; case_name: string }[];
+	assets: number;
+	done: number;
+	compromised: number;
+	iocs: number;
+	vuln_open?: number;
+	vuln_exploited_open?: number;
+}
+
 export interface ScopeIocPage extends ScopeList<ScopeIoc> {
 	/** Distinct indicators per case. */
 	case_totals?: { case_id: number; iocs: number }[];
@@ -165,6 +182,8 @@ export interface ScopeAssetsQuery extends ScopePageQuery {
 	/** Assets not carrying this flag. */
 	without_flag_id?: number;
 	case_id?: number;
+	/** Assets of the attached cases of this customer. */
+	customer_id?: number;
 	compromised?: boolean;
 	/** Open findings, exploited findings, or no open finding. */
 	vulnerable?: 'open' | 'exploited' | 'none';
@@ -499,6 +518,7 @@ export class WarRoomScopeService {
 				flag_id: query.flag_id,
 				without_flag_id: query.without_flag_id,
 				case_id: query.case_id,
+				customer_id: query.customer_id,
 				compromised: query.compromised ? 1 : undefined,
 				vulnerable: query.vulnerable,
 				vulnerability: query.vulnerability?.trim() || undefined,
@@ -508,6 +528,13 @@ export class WarRoomScopeService {
 			}),
 			options
 		);
+	}
+
+	static listCustomers(
+		warRoomId: number,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<{ data: ScopeCustomerSummary[] }>> {
+		return ApiService.get(`${base(warRoomId)}/customers`, options);
 	}
 
 	static listIocs(

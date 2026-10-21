@@ -10,6 +10,8 @@
   Registry assets (Assets Manager) can also be attached to the scope
   without being in a case, optionally linked to a case and/or a
   vulnerability.
+  The Customers tab lists the customers of those cases with their totals;
+  the assets can be filtered on one customer.
   Assets and IOCs are paged server-side (with per-case totals) so a room
   with hundreds of cases and thousands of objects stays responsive;
   selections survive page changes.
@@ -22,6 +24,7 @@
 	import {
 		AlertTriangle,
 		Bug,
+		Building2,
 		Columns3,
 		Download,
 		Flag,
@@ -63,6 +66,7 @@
 		type ScopeAssetCaseTotals,
 		type ScopeAssetPage,
 		type ScopeCase,
+		type ScopeCustomerSummary,
 		type ScopeExportFormat,
 		type ScopeFlagAction,
 		type ScopeIocPage,
@@ -71,6 +75,7 @@
 		type StagedObject
 	} from '$lib/services/war-room-scope.service';
 	import ScopeAssetsTable from './components/scope-assets-table.svelte';
+	import ScopeCustomers from './components/scope-customers.svelte';
 	import ScopeFlagBoard from './components/scope-flag-board.svelte';
 	import ScopeIocsMatrix from './components/scope-iocs-matrix.svelte';
 	import ScopeStaging from './components/scope-staging.svelte';
@@ -107,6 +112,7 @@
 	} from './components/vulnerability-helpers';
 	import {
 		buildIocRows,
+		caseLabel,
 		errorMessage,
 		groupSightings,
 		outcomesFailed,
@@ -115,8 +121,9 @@
 		type ScopeOutcome
 	} from './components/helpers';
 
-	type Tab = 'assets' | 'iocs' | 'vulnerabilities' | 'staging';
+	type Tab = 'customers' | 'assets' | 'iocs' | 'vulnerabilities' | 'staging';
 	const TABS: { key: Tab; label: string; icon: typeof Server }[] = [
+		{ key: 'customers', label: 'Customers', icon: Building2 },
 		{ key: 'assets', label: 'Assets', icon: Server },
 		{ key: 'iocs', label: 'IOCs', icon: Bug },
 		{ key: 'vulnerabilities', label: 'Vulnerabilities', icon: ShieldAlert },
@@ -142,7 +149,9 @@
 
 	const tabFromUrl = (): Tab => {
 		const t = page.url.searchParams.get('tab');
-		return t === 'iocs' || t === 'vulnerabilities' || t === 'staging' ? t : 'assets';
+		return t === 'customers' || t === 'iocs' || t === 'vulnerabilities' || t === 'staging'
+			? t
+			: 'assets';
 	};
 	let tab = $state<Tab>(tabFromUrl());
 	let assetView = $state<'table' | 'board'>(
@@ -152,7 +161,7 @@
 	// --- Filters --------------------------------------------------------
 	// Initial values can come from the URL so the Board can deep-link
 	// (`?compromised=1`, `?vulnerable=open|exploited|none`, `?flag=<id>|none`,
-	// `?case=<id>`, `?vulnerability=<identifier>`).
+	// `?case=<id>`, `?customer=<id>`, `?vulnerability=<identifier>`).
 	const positiveIntParam = (name: string): number | null => {
 		const n = Number(page.url.searchParams.get(name));
 		return Number.isInteger(n) && n > 0 ? n : null;
@@ -163,6 +172,8 @@
 	let search = $state('');
 	let debouncedSearch = $state('');
 	let caseFilter = $state<number | null>(positiveIntParam('case'));
+	// Assets only: the cases of one customer.
+	let customerFilter = $state<number | null>(positiveIntParam('customer'));
 	let flagFilter = $state<number | 'none' | null>(flagFromUrl());
 	let compromisedOnly = $state(page.url.searchParams.get('compromised') === '1');
 	let vulnerableFilter = $state<VulnerableFilter | null>(
@@ -206,6 +217,7 @@
 	const anyFilterActive = $derived(
 		search.trim() !== '' ||
 			caseFilter !== null ||
+			customerFilter !== null ||
 			flagFilter !== null ||
 			compromisedOnly ||
 			(canReadVulns && (vulnerableFilter !== null || vulnerabilityFilter !== null))
@@ -215,6 +227,7 @@
 		search = '';
 		debouncedSearch = '';
 		caseFilter = null;
+		customerFilter = null;
 		flagFilter = null;
 		compromisedOnly = false;
 		vulnerableFilter = null;
@@ -256,6 +269,7 @@
 		const res = await WarRoomScopeService.listAssets(warRoomId, {
 			q: debouncedSearch,
 			case_id: caseFilter ?? undefined,
+			customer_id: customerFilter ?? undefined,
 			flag_id: flagFilter ?? undefined,
 			compromised: compromisedOnly,
 			vulnerable: canReadVulns ? (vulnerableFilter ?? undefined) : undefined,
@@ -369,6 +383,29 @@
 		loadingStaging = false;
 	};
 
+	// Per-customer totals, unfiltered: the Customers tab has no filter bar.
+	let customers = $state<ScopeCustomerSummary[]>([]);
+	let loadingCustomers = $state(true);
+	let customersSeq = 0;
+	const loadCustomers = async () => {
+		const seq = ++customersSeq;
+		const res = await WarRoomScopeService.listCustomers(warRoomId);
+		if (seq !== customersSeq) return;
+		if (res.ok && res.data && typeof res.data === 'object') customers = res.data.data;
+		loadingCustomers = false;
+	};
+	$effect(() => {
+		void warRoomId;
+		untrack(() => void loadCustomers());
+	});
+
+	// Customers tab → Assets tab on that customer only.
+	const showCustomerAssets = (customerId: number) => {
+		caseFilter = null;
+		customerFilter = customerId;
+		selectTab('assets');
+	};
+
 	const loadTaxonomies = async () => {
 		const [types, statuses, iTypes, tlpRes] = await Promise.all([
 			AssetTypesService.list(),
@@ -400,6 +437,7 @@
 			warRoomId,
 			debouncedSearch,
 			caseFilter,
+			customerFilter,
 			flagFilter,
 			compromisedOnly,
 			vulnerableFilter,
@@ -451,6 +489,7 @@
 		filterAttachedRows(attached, {
 			search: debouncedSearch,
 			caseId: caseFilter,
+			customerId: customerFilter,
 			flag: flagFilter,
 			compromisedOnly,
 			vulnerable: canReadVulns ? vulnerableFilter : null,
@@ -543,6 +582,7 @@
 			loadIocs(),
 			loadStaging(),
 			loadAttached(),
+			loadCustomers(),
 			canReadVulns ? loadMatrix() : null
 		]);
 	});
@@ -581,9 +621,22 @@
 	);
 	const vulnIdentifiers = $derived(scopeVulnIdentifiers(assets));
 	const iocRows = $derived<IocRow[]>(buildIocRows(iocsRes?.data ?? []));
+	// Customers of the attached cases, for the assets filter.
+	const customerFilterItems = $derived([
+		{ value: 'all', label: 'All customers' },
+		...[
+			...new Map(
+				cases
+					.filter((c) => c.customer_id !== null)
+					.map((c) => [c.customer_id as number, c.customer_name ?? `Customer #${c.customer_id}`])
+			)
+		]
+			.sort((a, b) => a[1].localeCompare(b[1]))
+			.map(([id, name]) => ({ value: String(id), label: name }))
+	]);
 	const caseFilterItems = $derived([
 		{ value: 'all', label: 'All cases' },
-		...cases.map((c) => ({ value: String(c.case_id), label: `#${c.case_id} ${c.case_name}` }))
+		...cases.map((c) => ({ value: String(c.case_id), label: caseLabel(c) }))
 	]);
 	const matrixRows = $derived(matrix?.vulnerabilities ?? []);
 	const truncated = $derived(
@@ -595,6 +648,7 @@
 		if (key === 'assets') {
 			return assetsRes ? (assetsRes.total ?? assets.length) + visibleAttached.length : null;
 		}
+		if (key === 'customers') return loadingCustomers ? null : customers.length;
 		if (key === 'iocs') return iocsRes ? (iocsRes.total ?? iocRows.length) : null;
 		if (key === 'vulnerabilities') return matrix ? (matrix.total ?? matrixRows.length) : null;
 		return loadingStaging ? null : staging.length;
@@ -1115,7 +1169,7 @@
 		{/if}
 	</div>
 
-	{#if tab !== 'staging'}
+	{#if tab !== 'staging' && tab !== 'customers'}
 		<div class="flex flex-wrap items-center gap-2 rounded-md border bg-card/40 px-3 py-2">
 			<div class="relative min-w-[240px] flex-1">
 				<Search
@@ -1151,6 +1205,22 @@
 			</div>
 
 			{#if tab === 'assets'}
+				<div class="flex shrink-0 items-center gap-1.5 text-2xs">
+					<span class="text-muted-foreground" id="scope-filter-customer-label">Customer</span>
+					<SearchableSelect
+						id="scope-filter-customer"
+						class="w-48 text-xs"
+						items={customerFilterItems}
+						value={customerFilter == null ? 'all' : String(customerFilter)}
+						onValueChange={(v) => {
+							customerFilter = v && v !== 'all' ? Number(v) : null;
+						}}
+						placeholder="All customers"
+						searchPlaceholder="Search customers…"
+						aria-label="Filter by customer"
+					/>
+				</div>
+
 				<label class="flex shrink-0 items-center gap-1.5 text-2xs" for="scope-filter-flag">
 					<span class="text-muted-foreground">Flag</span>
 					<select
@@ -1279,7 +1349,21 @@
 		</div>
 	{/if}
 
-	{#if tab === 'assets'}
+	{#if tab === 'customers'}
+		{#if loadingCustomers}
+			<div class="flex flex-col gap-2">
+				{#each Array(3) as _, i (i)}
+					<Skeleton class="h-10 w-full" />
+				{/each}
+			</div>
+		{:else}
+			<ScopeCustomers
+				{customers}
+				showVulnerabilities={canReadVulns}
+				onShowAssets={showCustomerAssets}
+			/>
+		{/if}
+	{:else if tab === 'assets'}
 		{#if selectedAssets.length > 0 && assetView === 'table'}
 			<div
 				class="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs"

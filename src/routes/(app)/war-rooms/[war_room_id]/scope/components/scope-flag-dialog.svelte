@@ -8,6 +8,7 @@
   either.
 -->
 <script lang="ts">
+	import { caseNumberedName } from '$lib/utils/case-name';
 	import { untrack } from 'svelte';
 	import { Flag, Gavel, Loader2 } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -193,7 +194,7 @@
 			</DialogTitle>
 			<DialogDescription>
 				{#if assets.length === 1}
-					{assets[0].asset_name} in #{assets[0].case_id} {assets[0].case_name}
+					{assets[0].asset_name} in {caseNumberedName(assets[0].case_id, assets[0].case_name)}
 				{:else}
 					{assets.length} assets across {caseCount}
 					{caseCount === 1 ? 'case' : 'cases'}

@@ -115,8 +115,9 @@
 	// The board is a flat, status-first view of the same filtered set, so
 	// it needs subtasks too — the list only fetches top-level rows and
 	// lazily expands. Keeping a separate array avoids bending the list's
-	// parent/child caches into a shape they were not built for.
-	let viewMode = $state<'list' | 'board'>('list');
+	// parent/child caches into a shape they were not built for. The board
+	// is the default view of the war room.
+	let viewMode = $state<'list' | 'board'>('board');
 	let boardTasks = $state<WarRoomTask[]>([]);
 	let boardLoading = $state(false);
 

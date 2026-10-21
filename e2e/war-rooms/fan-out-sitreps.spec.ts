@@ -38,6 +38,8 @@ test.describe('War room · task fan-out and SitRep auto-draft', () => {
 
 			await login(page);
 			await page.goto(`/war-rooms/${wrId}/tasks`);
+			// The board is the default; fan-out and the roll-up live on the list rows.
+			await page.getByRole('button', { name: 'List view' }).click();
 			await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 });
 
 			await page.getByRole('button', { name: 'Fan out to cases' }).first().click();

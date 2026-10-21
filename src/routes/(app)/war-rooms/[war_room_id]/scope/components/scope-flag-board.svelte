@@ -8,6 +8,7 @@
   server-side flag totals.
 -->
 <script lang="ts">
+	import { caseNameWithoutNumber } from '$lib/utils/case-name';
 	import { Gavel, ShieldAlert } from 'lucide-svelte';
 	import AssetFlagChip from '$lib/components/common/assets/AssetFlagChip.svelte';
 	import type { AssetFlag } from '$lib/services/asset-flags.service';
@@ -155,7 +156,7 @@
 						</span>
 						<span class="truncate text-2xs text-muted-foreground">
 							<span class="font-mono">#{a.case_id}</span>
-							{a.case_name}
+							{caseNameWithoutNumber(a.case_name)}
 						</span>
 						{#if entry?.reason && col.flag?.kind === 'exception'}
 							<span class="line-clamp-2 text-2xs italic text-muted-foreground">

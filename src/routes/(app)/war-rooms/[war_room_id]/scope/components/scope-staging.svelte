@@ -3,6 +3,7 @@
   belong to a case yet. Review, adjust targets, push (or discard).
 -->
 <script lang="ts">
+	import { caseNumberedName } from '$lib/utils/case-name';
 	import { Bug, CornerDownRight, Inbox, Pencil, Send, Server, Trash2 } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { toast } from '$lib/components/ui/toast';
@@ -67,7 +68,7 @@
 		return limitedList(
 			ids.map((id) => {
 				const c = caseById.get(id);
-				return c ? `#${id} ${c.case_name}` : `#${id}`;
+				return c ? caseNumberedName(id, c.case_name) : `#${id}`;
 			}),
 			5
 		);

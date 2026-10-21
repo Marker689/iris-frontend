@@ -14,6 +14,7 @@
   With write access, the Compromise and Analysis cells open a status menu.
 -->
 <script lang="ts">
+	import { caseNameWithoutNumber, caseNumberedName } from '$lib/utils/case-name';
 	import {
 		Building2,
 		Copy,
@@ -237,7 +238,7 @@
 		return {
 			count: others.length,
 			title: `Also in ${limitedList(
-				others.map((o) => `#${o.case_id} ${o.case_name}`),
+				others.map((o) => caseNumberedName(o.case_id, o.case_name)),
 				10
 			)}`
 		};
@@ -506,7 +507,7 @@
 						{#if !groupByCase}
 							<td class={`${TD} text-xs`}>
 								<span class="font-mono text-2xs text-muted-foreground">#{a.case_id}</span>
-								<span class="max-w-[12rem] truncate">{a.case_name}</span>
+								<span class="max-w-[12rem] truncate">{caseNameWithoutNumber(a.case_name)}</span>
 							</td>
 						{/if}
 						<td class={`${TD} text-xs text-muted-foreground`}>{a.customer_name ?? '—'}</td>
@@ -690,7 +691,7 @@
 								{#if r.case_id !== null}
 									<a href={`/case/${r.case_id}/assets`} class="hover:underline">
 										<span class="font-mono text-2xs text-muted-foreground">#{r.case_id}</span>
-										<span class="max-w-[12rem] truncate">{r.case_name ?? ''}</span>
+										<span class="max-w-[12rem] truncate">{caseNameWithoutNumber(r.case_name)}</span>
 									</a>
 								{/if}
 							</td>

@@ -4,6 +4,7 @@
   hooks and history fire), or park it in the war-room staging inbox.
 -->
 <script lang="ts">
+	import { caseNameWithoutNumber } from '$lib/utils/case-name';
 	import { untrack } from 'svelte';
 	import { Bug, Inbox, Loader2, Plus, Server } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -117,7 +118,9 @@
 	// Creating fans out in batches; a staged object keeps its proposed
 	// targets in one row, capped by the server.
 	const tooManyToStage = $derived(selected.length > SCOPE_MAX_TARGET_CASES);
-	const caseNames = $derived(Object.fromEntries(cases.map((c) => [c.case_id, c.case_name])));
+	const caseNames = $derived(
+		Object.fromEntries(cases.map((c) => [c.case_id, caseNameWithoutNumber(c.case_name)]))
+	);
 	const canSubmit = $derived(formValid && selected.length > 0 && !reasonMissing);
 	const label = $derived(
 		isAsset ? assetForm.asset_name.trim() || 'Asset' : iocForm.ioc_value.trim() || 'IOC'
