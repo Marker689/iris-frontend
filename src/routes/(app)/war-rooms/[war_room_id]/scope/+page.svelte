@@ -25,8 +25,10 @@
 		AlertTriangle,
 		Bug,
 		Building2,
+		ClipboardCopy,
 		Columns3,
 		Download,
+		FileSpreadsheet,
 		Flag,
 		Inbox,
 		ListChecks,
@@ -46,6 +48,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import DownloadModal from '$lib/components/common/DownloadModal.svelte';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { SearchableSelect } from '$lib/components/ui/searchable-select';
 	import { toast } from '$lib/components/ui/toast';
@@ -100,6 +103,26 @@
 	} from '$lib/components/vulnerabilities/permissions';
 	import type { VulnerabilityChoice } from '$lib/components/vulnerabilities/findings/finding-form';
 	import { apiErrorMessage } from '$lib/utils/error-handler';
+	import {
+		copyText,
+		downloadText,
+		exportFilename,
+		loadColumnKeys,
+		pickColumns,
+		rowsToCsv,
+		rowsToTsv,
+		saveColumnKeys,
+		type ExportColumn,
+		type ExportScope
+	} from '$lib/utils/table-export';
+	import {
+		assetExportColumns,
+		assetExportRows,
+		customerExportColumns,
+		iocExportColumns,
+		vulnerabilityExportColumns,
+		type ScopeGrid
+	} from './components/scope-export';
 	import {
 		VulnerabilitiesService,
 		type VulnerabilityInput,
@@ -1021,6 +1044,229 @@
 		WarRoomScopeService.saveFile(res.value);
 		exportOpen = false;
 	};
+
+	// --- CSV download / clipboard copy of the grids ----------------------
+	// "Visible" is the page on screen, "all" re-reads every page with the
+	// same filters. The copy is one click: the rows on screen, as a
+	// tab-separated table, in the columns of the last download.
+	const EXPORT_PAGES_MAX = 200;
+
+	interface GridExport {
+		grid: ScopeGrid;
+		noun: string;
+		columns: ExportColumn<never>[];
+		countVisible: number;
+		countAll: number;
+		/** False when the grid is not paged: visible and all are the same rows. */
+		showScope: boolean;
+		/** The rows in the given columns; null when a page could not be read. */
+		render: (scope: ExportScope, keys: string[], format: 'csv' | 'tsv') => Promise<string | null>;
+	}
+
+	function gridExport<T>(spec: {
+		grid: ScopeGrid;
+		noun: string;
+		columns: ExportColumn<T>[];
+		visible: T[];
+		countAll: number;
+		showScope?: boolean;
+		fetchAll?: () => Promise<T[] | null>;
+	}): GridExport {
+		return {
+			grid: spec.grid,
+			noun: spec.noun,
+			columns: spec.columns,
+			countVisible: spec.visible.length,
+			countAll: spec.countAll,
+			showScope: spec.showScope ?? true,
+			render: async (scope, keys, format) => {
+				const rows = scope === 'all' && spec.fetchAll ? await spec.fetchAll() : spec.visible;
+				if (rows === null) return null;
+				const columns = pickColumns(spec.columns, keys);
+				return format === 'csv' ? rowsToCsv(rows, columns) : rowsToTsv(rows, columns);
+			}
+		};
+	}
+
+	/** Every page of a paged listing; null as soon as one fails. */
+	async function fetchPages<T>(
+		perPage: number,
+		fetchPage: (page: number) => Promise<{ rows: T[]; total: number } | null>
+	): Promise<T[] | null> {
+		const out: T[] = [];
+		for (let p = 1; p <= EXPORT_PAGES_MAX; p++) {
+			const res = await fetchPage(p);
+			if (!res) return null;
+			out.push(...res.rows);
+			if (res.rows.length === 0 || p * perPage >= res.total) break;
+		}
+		return out;
+	}
+
+	const flagName = (flagId: number): string =>
+		flags.find((f) => f.id === flagId)?.name ?? `Flag #${flagId}`;
+	const listedCases = $derived(
+		caseFilter === null ? cases : cases.filter((c) => c.case_id === caseFilter)
+	);
+
+	const EXPORT_PER_PAGE = 500;
+	const EXPORT_MATRIX_PER_PAGE = 200;
+
+	const fetchAllAssets = () =>
+		fetchPages(EXPORT_PER_PAGE, async (p) => {
+			const res = await WarRoomScopeService.listAssets(warRoomId, {
+				q: debouncedSearch,
+				case_id: caseFilter ?? undefined,
+				customer_id: customerFilter ?? undefined,
+				flag_id: flagFilter ?? undefined,
+				compromised: compromisedOnly,
+				vulnerable: canReadVulns ? (vulnerableFilter ?? undefined) : undefined,
+				vulnerability: canReadVulns ? (vulnerabilityFilter ?? undefined) : undefined,
+				page: p,
+				per_page: EXPORT_PER_PAGE,
+				sort: assetSort
+			});
+			if (!res.ok || !res.data || typeof res.data === 'string') return null;
+			return { rows: res.data.data, total: res.data.total ?? 0 };
+		});
+
+	const fetchAllIocs = () =>
+		fetchPages(EXPORT_PER_PAGE, async (p) => {
+			const res = await WarRoomScopeService.listIocs(warRoomId, {
+				q: debouncedSearch,
+				case_id: caseFilter ?? undefined,
+				page: p,
+				per_page: EXPORT_PER_PAGE
+			});
+			if (!res.ok || !res.data || typeof res.data === 'string') return null;
+			return { rows: res.data.data, total: res.data.total ?? 0 };
+		});
+
+	const fetchAllVulnerabilities = () =>
+		fetchPages(EXPORT_MATRIX_PER_PAGE, async (p) => {
+			const res = await VulnerabilitiesService.warRoomMatrix(warRoomId, {
+				page: p,
+				per_page: EXPORT_MATRIX_PER_PAGE,
+				search: debouncedSearch,
+				case_id: caseFilter
+			});
+			if (!res.ok || !res.data || typeof res.data !== 'object') return null;
+			return { rows: res.data.vulnerabilities, total: res.data.total ?? 0 };
+		});
+
+	const currentExport = $derived.by((): GridExport | null => {
+		if (tab === 'assets' && assetView === 'table') {
+			return gridExport({
+				grid: 'assets',
+				noun: 'assets',
+				columns: assetExportColumns(canReadVulns),
+				visible: assetExportRows(assets, attachedRows, flagName),
+				countAll: (assetsRes?.total ?? assets.length) + visibleAttached.length,
+				fetchAll: async () => {
+					const all = await fetchAllAssets();
+					return all && assetExportRows(all, visibleAttached, flagName);
+				}
+			});
+		}
+		if (tab === 'iocs') {
+			return gridExport({
+				grid: 'iocs',
+				noun: 'IOCs',
+				columns: iocExportColumns(listedCases),
+				visible: iocRows,
+				countAll: iocsRes?.total ?? iocRows.length,
+				fetchAll: async () => {
+					const all = await fetchAllIocs();
+					return all && buildIocRows(all);
+				}
+			});
+		}
+		if (tab === 'customers') {
+			return gridExport({
+				grid: 'customers',
+				noun: 'customers',
+				columns: customerExportColumns(canReadVulns),
+				visible: customers,
+				countAll: customers.length,
+				showScope: false
+			});
+		}
+		if (tab === 'vulnerabilities' && canReadVulns) {
+			return gridExport({
+				grid: 'vulnerabilities',
+				noun: 'vulnerabilities',
+				columns: vulnerabilityExportColumns(listedCases),
+				visible: matrixRows,
+				countAll: matrix?.total ?? matrixRows.length,
+				fetchAll: fetchAllVulnerabilities
+			});
+		}
+		return null;
+	});
+
+	const columnsKey = (grid: ScopeGrid) => `war-room-scope-${grid}`;
+
+	let csvOpen = $state(false);
+	let csvBusy = $state(false);
+	// Taken on open: the download stays on the grid it was opened from.
+	let csvExport = $state<GridExport | null>(null);
+	let csvColumnKeys = $state<string[]>([]);
+
+	const openCsv = () => {
+		if (!currentExport) return;
+		csvExport = currentExport;
+		csvColumnKeys = loadColumnKeys(columnsKey(currentExport.grid), currentExport.columns);
+		csvOpen = true;
+	};
+
+	const downloadCsv = async (scope: ExportScope, keys: Set<string>) => {
+		const target = csvExport;
+		if (!target || csvBusy) return;
+		csvBusy = true;
+		try {
+			saveColumnKeys(columnsKey(target.grid), keys);
+			const csv = await target.render(scope, [...keys], 'csv');
+			if (csv === null) {
+				toast({
+					title: 'Download failed',
+					description: `Could not read every page of the ${target.noun}.`,
+					variant: 'destructive'
+				});
+				return;
+			}
+			downloadText(csv, exportFilename(`war-room-${warRoomId}-${target.grid}`));
+			csvOpen = false;
+		} finally {
+			csvBusy = false;
+		}
+	};
+
+	const copyRows = async (text: string | null, count: number, noun: string) => {
+		if (text !== null && (await copyText(text))) {
+			toast({ title: `${count} ${noun} copied`, variant: 'success' });
+			return;
+		}
+		toast({
+			title: 'Could not copy',
+			description: 'The browser refused access to the clipboard.',
+			variant: 'destructive'
+		});
+	};
+
+	const copyGrid = async () => {
+		const target = currentExport;
+		if (!target || target.countVisible === 0) return;
+		const keys = loadColumnKeys(columnsKey(target.grid), target.columns);
+		await copyRows(await target.render('visible', keys, 'tsv'), target.countVisible, target.noun);
+	};
+
+	// One group of the assets table: a case, a vulnerability, "not in a case".
+	const copyAssetGroup = async (groupAssets: ScopeAsset[], groupAttached: ScopeRegistryAsset[]) => {
+		const columns = assetExportColumns(canReadVulns);
+		const picked = pickColumns(columns, loadColumnKeys(columnsKey('assets'), columns));
+		const rows = assetExportRows(groupAssets, groupAttached, flagName);
+		await copyRows(rowsToTsv(rows, picked), rows.length, rows.length === 1 ? 'asset' : 'assets');
+	};
 </script>
 
 <div class="flex h-full w-full flex-col gap-4 overflow-y-auto p-4 sm:p-6">
@@ -1108,52 +1354,6 @@
 					<Columns3 class="h-4 w-4" />
 				</Button>
 			</div>
-			{#if assetView === 'table' && canWrite && attachedAllowed}
-				<Button
-					variant="outline"
-					size="sm"
-					class="ml-auto gap-1.5"
-					onclick={() => openAttach()}
-					title="Put assets of the Assets Manager in scope, with or without a case"
-					data-testid="scope-registry-attach"
-				>
-					<Paperclip class="h-3.5 w-3.5" /> Attach from Assets Manager
-				</Button>
-			{/if}
-		{/if}
-
-		{#if tab === 'vulnerabilities' && canRecord && canReadVulns}
-			<div class="ml-auto flex items-center gap-2">
-				{#if canTrack}
-					<Button
-						variant="outline"
-						size="sm"
-						class="gap-1.5"
-						onclick={() => (trackOpen = true)}
-						data-testid="scope-vuln-track-open"
-					>
-						<Pin class="h-3.5 w-3.5" /> Track vulnerability
-					</Button>
-				{/if}
-				<Button
-					variant="outline"
-					size="sm"
-					class="gap-1.5"
-					onclick={() => (vulnFormOpen = true)}
-					data-testid="scope-vuln-new"
-				>
-					<Plus class="h-3.5 w-3.5" /> New vulnerability
-				</Button>
-				<Button
-					size="sm"
-					class="gap-1.5"
-					onclick={() => openRecord([])}
-					disabled={cases.length === 0}
-					data-testid="scope-vuln-record"
-				>
-					<ShieldPlus class="h-3.5 w-3.5" /> Record on assets
-				</Button>
-			</div>
 		{/if}
 
 		{#if tab === 'iocs'}
@@ -1199,6 +1399,79 @@
 				</PopoverContent>
 			</Popover>
 		{/if}
+
+		<div class="ml-auto flex flex-wrap items-center gap-2">
+			{#if currentExport}
+				<div class="flex items-center gap-0.5 rounded-md border p-0.5">
+					<Button
+						variant="ghost"
+						size="sm"
+						class="h-7 gap-1.5 px-2 text-xs"
+						onclick={copyGrid}
+						disabled={currentExport.countVisible === 0}
+						title={`Copy the ${currentExport.countVisible} ${currentExport.noun} shown as a table, with the columns of the last CSV download`}
+						data-testid="scope-grid-copy"
+					>
+						<ClipboardCopy class="h-3.5 w-3.5" /> Copy
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						class="h-7 gap-1.5 px-2 text-xs"
+						onclick={openCsv}
+						title={`Download the ${currentExport.noun} as CSV, picking the columns`}
+						data-testid="scope-grid-csv"
+					>
+						<FileSpreadsheet class="h-3.5 w-3.5" /> CSV
+					</Button>
+				</div>
+			{/if}
+
+			{#if tab === 'assets' && assetView === 'table' && canWrite && attachedAllowed}
+				<Button
+					variant="outline"
+					size="sm"
+					class="gap-1.5"
+					onclick={() => openAttach()}
+					title="Put assets of the Assets Manager in scope, with or without a case"
+					data-testid="scope-registry-attach"
+				>
+					<Paperclip class="h-3.5 w-3.5" /> Attach from Assets Manager
+				</Button>
+			{/if}
+
+			{#if tab === 'vulnerabilities' && canRecord && canReadVulns}
+				{#if canTrack}
+					<Button
+						variant="outline"
+						size="sm"
+						class="gap-1.5"
+						onclick={() => (trackOpen = true)}
+						data-testid="scope-vuln-track-open"
+					>
+						<Pin class="h-3.5 w-3.5" /> Track vulnerability
+					</Button>
+				{/if}
+				<Button
+					variant="outline"
+					size="sm"
+					class="gap-1.5"
+					onclick={() => (vulnFormOpen = true)}
+					data-testid="scope-vuln-new"
+				>
+					<Plus class="h-3.5 w-3.5" /> New vulnerability
+				</Button>
+				<Button
+					size="sm"
+					class="gap-1.5"
+					onclick={() => openRecord([])}
+					disabled={cases.length === 0}
+					data-testid="scope-vuln-record"
+				>
+					<ShieldPlus class="h-3.5 w-3.5" /> Record on assets
+				</Button>
+			{/if}
+		</div>
 	</div>
 
 	{#if tab !== 'staging' && tab !== 'customers' && !isTrackerTab}
@@ -1517,6 +1790,7 @@
 				onEditAttached={(r) => openAttach(r)}
 				onDetachAttached={detachAttached}
 				{detachingId}
+				onCopyGroup={copyAssetGroup}
 			/>
 			{#if attachedTruncated && attachedRows.length > 0}
 				<p class="text-2xs text-amber-700 dark:text-amber-300">
@@ -1573,7 +1847,7 @@
 		{:else}
 			<ScopeIocsMatrix
 				rows={iocRows}
-				cases={caseFilter === null ? cases : cases.filter((c) => c.case_id === caseFilter)}
+				cases={listedCases}
 				selected={selectedIocs}
 				onSelectionChange={(next) => (selectedIocs = next)}
 				{canWrite}
@@ -1601,7 +1875,7 @@
 			<!-- Tracked entries are listed even with no attached case. -->
 			<ScopeVulnerabilitiesMatrix
 				rows={matrixRows}
-				cases={caseFilter === null ? cases : cases.filter((c) => c.case_id === caseFilter)}
+				cases={listedCases}
 				summary={matrix?.summary ?? null}
 				caseTotals={matrix?.case_totals ?? {}}
 				page={matrixPage}
@@ -1641,6 +1915,23 @@
 		/>
 	{/if}
 </div>
+
+{#if csvExport}
+	<DownloadModal
+		open={csvOpen}
+		title={`Download ${csvExport.noun} as CSV`}
+		itemNounPlural={csvExport.noun}
+		availableColumns={csvExport.columns}
+		countVisible={csvExport.countVisible}
+		countAll={csvExport.countAll}
+		showScope={csvExport.showScope}
+		initialColumnKeys={csvColumnKeys}
+		isProcessing={csvBusy}
+		processingMessage={`Reading every page of the ${csvExport.noun}…`}
+		onConfirm={downloadCsv}
+		onOpenChange={(v) => (csvOpen = v)}
+	/>
+{/if}
 
 <ScopeFlagDialog
 	bind:open={flagOpen}

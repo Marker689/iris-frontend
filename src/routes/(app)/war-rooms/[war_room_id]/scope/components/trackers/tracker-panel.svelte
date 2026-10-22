@@ -2,13 +2,16 @@
   One tracker tab of the Scope: the rows with their steps, asset flags,
   extra columns and note, all editable in place; search and step
   filters; bulk step changes; row history and tracker activity. Manual
-  trackers also add and delete rows.
+  trackers also add and delete rows. The rows can be copied as a table or
+  downloaded as CSV with a column picker.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import {
 		ArrowLeft,
 		ArrowRight,
+		ClipboardCopy,
+		FileSpreadsheet,
 		History,
 		Loader2,
 		Pencil,
@@ -21,6 +24,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import ConfirmationDialog from '$lib/components/ui/dialog/ConfirmationDialog.svelte';
+	import DownloadModal from '$lib/components/common/DownloadModal.svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Input } from '$lib/components/ui/input';
 	import { toast } from '$lib/components/ui/toast';
@@ -47,9 +51,21 @@
 		type TrackerValue
 	} from '$lib/services/war-room-trackers.service';
 	import { assetFlags, loadAssetFlags } from '$lib/stores/asset-flags.store.svelte';
+	import {
+		copyText,
+		downloadText,
+		exportFilename,
+		loadColumnKeys,
+		pickColumns,
+		rowsToCsv,
+		rowsToTsv,
+		saveColumnKeys,
+		type ExportScope
+	} from '$lib/utils/table-export';
 	import { mediumDateTimeFormatter } from '$lib/utils/time-formatter';
 	import ScopeFlagDialog from '../scope-flag-dialog.svelte';
 	import { SELECT_CHECKBOX_CLASS, errorMessage } from '../helpers';
+	import { trackerExportColumns } from '../scope-export';
 	import TrackerAddRowsDialog from './tracker-add-rows-dialog.svelte';
 	import TrackerHistoryDialog from './tracker-history-dialog.svelte';
 	import TrackerItemCell from './tracker-item-cell.svelte';
@@ -400,6 +416,49 @@
 	};
 
 	const index = $derived(store.trackers.findIndex((t) => t.id === tracker.id));
+
+	// Export: "visible" is every row matching the search and step filter,
+	// not only the ones rendered before "Show more".
+	const exportColumns = $derived(
+		trackerExportColumns(
+			tracker,
+			store.steps,
+			(id) => assetFlags.items.find((f) => f.id === id)?.name ?? `Flag #${id}`,
+			(id) => members.find((m) => m.id === id)?.name
+		)
+	);
+	const columnsKey = $derived(`war-room-tracker-${trackerId}`);
+	let csvOpen = $state(false);
+	let csvColumnKeys = $state<string[]>([]);
+
+	const openCsv = () => {
+		csvColumnKeys = loadColumnKeys(columnsKey, exportColumns);
+		csvOpen = true;
+	};
+
+	const downloadCsv = (scope: ExportScope, keys: Set<string>) => {
+		saveColumnKeys(columnsKey, keys);
+		const csv = rowsToCsv(scope === 'all' ? rows : filtered, pickColumns(exportColumns, keys));
+		downloadText(csv, exportFilename(`war-room-${store.warRoomId}-${tracker.name}`));
+		csvOpen = false;
+	};
+
+	const copyRows = async () => {
+		if (filtered.length === 0) return;
+		const picked = pickColumns(exportColumns, loadColumnKeys(columnsKey, exportColumns));
+		if (await copyText(rowsToTsv(filtered, picked))) {
+			toast({
+				title: `${filtered.length} ${filtered.length === 1 ? 'row' : 'rows'} copied`,
+				variant: 'success'
+			});
+			return;
+		}
+		toast({
+			title: 'Could not copy',
+			description: 'The browser refused access to the clipboard.',
+			variant: 'destructive'
+		});
+	};
 </script>
 
 <div class="flex flex-col gap-3" data-testid="tracker-panel">
@@ -415,6 +474,29 @@
 			</div>
 		</div>
 		<div class="flex items-center gap-2">
+			<div class="flex items-center gap-0.5 rounded-md border p-0.5">
+				<Button
+					variant="ghost"
+					size="sm"
+					class="h-7 gap-1.5 px-2 text-xs"
+					onclick={copyRows}
+					disabled={filtered.length === 0}
+					title={`Copy the ${filtered.length} rows shown as a table, with the columns of the last CSV download`}
+					data-testid="tracker-copy"
+				>
+					<ClipboardCopy class="h-3.5 w-3.5" /> Copy
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					class="h-7 gap-1.5 px-2 text-xs"
+					onclick={openCsv}
+					title="Download the rows as CSV, picking the columns"
+					data-testid="tracker-csv"
+				>
+					<FileSpreadsheet class="h-3.5 w-3.5" /> CSV
+				</Button>
+			</div>
 			{#if canWrite && isManual}
 				<Button
 					size="sm"
@@ -801,6 +883,19 @@
 	row={historyRow}
 	{rows}
 	version={historyVersion}
+/>
+
+<DownloadModal
+	open={csvOpen}
+	title={`Download "${tracker.name}" as CSV`}
+	itemNounPlural="rows"
+	availableColumns={exportColumns}
+	countVisible={filtered.length}
+	countAll={rows.length}
+	showScope={filtered.length !== rows.length}
+	initialColumnKeys={csvColumnKeys}
+	onConfirm={downloadCsv}
+	onOpenChange={(v) => (csvOpen = v)}
 />
 
 {#if canWrite}

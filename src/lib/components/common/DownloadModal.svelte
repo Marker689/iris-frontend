@@ -21,6 +21,10 @@
 		countAll: number;
 		isProcessing?: boolean;
 		processingMessage?: string;
+		/** Columns ticked on open (e.g. the last choice); the defaults when unset. */
+		initialColumnKeys?: string[];
+		/** False when "visible" and "all" are the same rows: the scope choice is hidden. */
+		showScope?: boolean;
 		onConfirm: (downloadType: 'visible' | 'all', selectedColumnKeys: Set<string>) => void;
 		onOpenChange: (open: boolean) => void;
 	};
@@ -34,6 +38,8 @@
 		countAll,
 		isProcessing = false,
 		processingMessage = 'Processing...',
+		initialColumnKeys,
+		showScope = true,
 		onConfirm,
 		onOpenChange
 	}: DownloadModalProps = $props();
@@ -65,7 +71,7 @@
 			// Reset to defaults or last state based on preference.
 			// For now, re-initialize based on defaultSelected.
 			selectedColumnKeys = new Set(
-				availableColumns.filter((c) => c.defaultSelected).map((c) => c.key)
+				initialColumnKeys ?? availableColumns.filter((c) => c.defaultSelected).map((c) => c.key)
 			);
 			selectedDownloadType = 'visible'; // Default to visible
 		}
@@ -77,7 +83,9 @@
 		<Dialog.Header>
 			<Dialog.Title>{title}</Dialog.Title>
 			<Dialog.Description>
-				Select what you want to download and which columns to include.
+				{showScope
+					? 'Select what you want to download and which columns to include.'
+					: 'Select the columns to include.'}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -88,23 +96,25 @@
 			</div>
 		{:else}
 			<div class="grid gap-4 py-4">
-				<div class="flex flex-col gap-2">
-					<Label class="font-semibold">Download Scope</Label>
-					<RadioGroup.Root bind:value={selectedDownloadType} class="flex flex-col gap-2">
-						<div class="flex items-center space-x-2">
-							<RadioGroup.Item value="visible" id="r-visible" />
-							<Label for="r-visible">
-								Visible {itemNounPlural} ({countVisible})
-							</Label>
-						</div>
-						<div class="flex items-center space-x-2">
-							<RadioGroup.Item value="all" id="r-all" />
-							<Label for="r-all">
-								All matching {itemNounPlural} ({countAll})
-							</Label>
-						</div>
-					</RadioGroup.Root>
-				</div>
+				{#if showScope}
+					<div class="flex flex-col gap-2">
+						<Label class="font-semibold">Download Scope</Label>
+						<RadioGroup.Root bind:value={selectedDownloadType} class="flex flex-col gap-2">
+							<div class="flex items-center space-x-2">
+								<RadioGroup.Item value="visible" id="r-visible" />
+								<Label for="r-visible">
+									Visible {itemNounPlural} ({countVisible})
+								</Label>
+							</div>
+							<div class="flex items-center space-x-2">
+								<RadioGroup.Item value="all" id="r-all" />
+								<Label for="r-all">
+									All matching {itemNounPlural} ({countAll})
+								</Label>
+							</div>
+						</RadioGroup.Root>
+					</div>
+				{/if}
 
 				<div class="flex flex-col gap-2">
 					<Label class="font-semibold">Columns to Export</Label>
