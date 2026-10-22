@@ -1,6 +1,7 @@
 <!--
   Activity rail: everything IRIS posts on its own (case activity,
-  war-room activity, tasks, trackers, ...), newest on top, so the chat
+  war-room activity, tasks, trackers, ...), newest at the bottom like the
+  chat, so the chat
   next to it only carries what people say.
 
   The rail can be paused (new rows queue behind a pill instead of
@@ -9,10 +10,10 @@
   what arrived since. Its settings panel decides which lanes land here.
 -->
 <script lang="ts">
-	import { tick, type ComponentProps } from 'svelte';
+	import { tick, untrack, type ComponentProps } from 'svelte';
 	import {
 		Activity,
-		ArrowUp,
+		ArrowDown,
 		BellOff,
 		ChevronDown,
 		ChevronUp,
@@ -165,11 +166,31 @@
 				(!needle ||
 					`${m.author_name ?? m.author_login ?? ''} ${m.body ?? ''}`.toLowerCase().includes(needle))
 		);
-		return foldBursts([...shown].reverse(), prefs.foldBursts);
+		return foldBursts(shown, prefs.foldBursts);
+	});
+
+	// Oldest on top, newest at the bottom, like the chat: the list follows
+	// new rows while the operator is at the bottom and stays put once they
+	// scroll up to read.
+	let atBottom = $state(true);
+	const onScroll = () => {
+		if (!scrollEl) return;
+		atBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 40;
+	};
+	const scrollToBottom = async () => {
+		await tick();
+		if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+		atBottom = true;
+	};
+	$effect(() => {
+		void entries;
+		if (!open || settingsOpen) return;
+		if (untrack(() => atBottom)) void scrollToBottom();
 	});
 
 	const togglePause = () => {
 		pausedAfter = pausedAfter == null ? latestTime(items) : null;
+		if (pausedAfter == null) void scrollToBottom();
 	};
 
 	const toggleExpanded = (id: number) => {
@@ -417,20 +438,11 @@
 					{/each}
 				</div>
 			</div>
-			{#if pending > 0}
-				<button
-					type="button"
-					class="mx-3 mt-2 inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-primary px-3 py-1 text-2xs font-semibold text-primary-foreground shadow-md"
-					onclick={togglePause}
-				>
-					<ArrowUp class="h-3 w-3" />
-					{pending} new event{pending === 1 ? '' : 's'} · resume
-				</button>
-			{/if}
 		{/if}
 
 		<div
 			bind:this={scrollEl}
+			onscroll={onScroll}
 			class={[
 				'stream-thin-scroll min-h-0 flex-1 overflow-y-auto',
 				!settingsOpen && 'px-1 pb-4 pt-1'
@@ -522,7 +534,7 @@
 												{attachedCases}
 											/>
 											<span class="text-2xs tabular-nums text-muted-foreground">
-												{timeOf(last)}–{timeOf(first)}
+												{timeOf(first)}–{timeOf(last)}
 											</span>
 											<button
 												type="button"
@@ -576,6 +588,17 @@
 				</ul>
 			{/if}
 		</div>
+
+		{#if !settingsOpen && pending > 0}
+			<button
+				type="button"
+				class="mx-3 mb-2 mt-1 inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-primary px-3 py-1 text-2xs font-semibold text-primary-foreground shadow-md"
+				onclick={togglePause}
+			>
+				<ArrowDown class="h-3 w-3" />
+				{pending} new event{pending === 1 ? '' : 's'} · resume
+			</button>
+		{/if}
 
 		{#if !settingsOpen && hiddenCount > 0}
 			<div class="shrink-0 border-t px-3 py-1.5 text-2xs text-muted-foreground">

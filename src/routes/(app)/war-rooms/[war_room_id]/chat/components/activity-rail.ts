@@ -350,7 +350,7 @@ const burstKey = (m: ChatMessage): string =>
 /**
  * Fold runs of `min`+ consecutive similar rows (same author, kind, case
  * and activity type) into one burst entry. Order is kept, so a list
- * sorted newest first gives bursts sorted newest first.
+ * sorted oldest first gives bursts sorted oldest first.
  */
 export const foldBursts = (
 	items: readonly ChatMessage[],
