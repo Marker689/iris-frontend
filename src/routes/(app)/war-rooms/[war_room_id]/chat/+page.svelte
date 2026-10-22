@@ -8,31 +8,19 @@
 -->
 <script lang="ts">
 	import { formatDate, formatDateTime, parseServerDate } from '$lib/utils/time-formatter';
-	import { onMount, onDestroy, tick } from 'svelte';
+	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import { useWarRoomLive } from '$lib/contexts/war-room.context.svelte';
 	import { WAR_ROOM_LIVE_TOPICS } from '$lib/utils/war-room-live';
-	import {
-		WAR_ROOM_ACTIVITY_FAMILIES,
-		mergeSavedStreamLanes,
-		warRoomActivityFamily
-	} from '$lib/utils/war-room-stream';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import {
-		AlertCircle,
-		AlertOctagon,
+		Activity,
 		Archive,
 		ArchiveRestore,
 		BarChart3,
 		Bell,
-		Clock,
-		Crosshair,
-		Database,
 		ChevronDown,
 		ChevronRight,
-		FileText,
-		Filter,
-		Folder,
 		Gavel,
 		Hash,
 		Loader2,
@@ -41,22 +29,14 @@
 		Pencil,
 		Pin,
 		PinOff,
-		ListChecks,
-		ClipboardCheck,
 		Plus,
 		Search,
 		Send,
-		Settings2,
-		Share2,
-		ShieldAlert,
 		Slash,
+		SlidersHorizontal,
 		SmilePlus,
 		StickyNote,
 		Trash2,
-		Users,
-		UsersRound,
-		Waypoints,
-		WaypointsIcon,
 		X
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -77,6 +57,21 @@
 	} from './components/AttachmentPreviewDialog.svelte';
 	import StreamRefCard from './components/StreamRefCard.svelte';
 	import WarRoomThreadPane from './components/WarRoomThreadPane.svelte';
+	import ActivityRail from './components/ActivityRail.svelte';
+	import { StreamPreferences } from './components/stream-preferences.svelte';
+	import {
+		STREAM_LANES,
+		activityAnchorId,
+		activityQuote,
+		latestTime,
+		messageTime,
+		parseStreamPrefs,
+		serializeStreamPrefs,
+		streamLane,
+		type StreamLaneKey,
+		type StreamPrefs
+	} from './components/activity-rail';
+	import { systemColor, systemIcon } from './components/stream-icons';
 	import MessageReactions from './components/MessageReactions.svelte';
 	import EmojiPickerPopover from './components/EmojiPickerPopover.svelte';
 	import ComposerEmojiButton from './components/ComposerEmojiButton.svelte';
@@ -93,7 +88,6 @@
 	import {
 		WarRoomChatService,
 		type ChatMessage,
-		type ChatMessageKind,
 		type ChatPoll,
 		type ChatThreadRoot,
 		type ChatTopic
@@ -180,72 +174,23 @@
 		return topicById.get(id)?.name ?? null;
 	};
 
-	// --- Stream filter model ---------------------------------------------
+	// --- Stream routing ---------------------------------------------------
 	//
-	// The Stream tab shows every kind of war-room event: operator
-	// messages, war-room-level system rows, and the firehose of case
-	// activity mirrored from every attached case. The filter pane lets
-	// the operator turn each lane off individually:
-	//
-	//   * `globalFilters` controls the non-case-activity kinds via a
-	//     single set of opt-in keys (Messages, Tasks, SitReps, Notes,
-	//     System, Case attached/detached).
-	//
-	//   * `excludedCases` opts an entire case out of the stream — useful
-	//     when a quiet case is generating noise during a triage.
-	//
-	//   * `excludedCaseActivities` opts specific activity types out per
-	//     case (so the operator can mute "note.updated" on Case #12 but
-	//     keep seeing IOC events on it).
-	//
-	// Default state: everything on. Exclusions are opt-out, additions are
-	// noticed automatically — a case attached later simply starts
-	// streaming.
-
-	const GLOBAL_FILTERS = [
-		{ key: 'message', label: 'Messages', kinds: ['message'] as const },
-		{ key: 'tasks', label: 'Tasks', kinds: ['task_assigned', 'task_completed'] as const },
-		{ key: 'sitreps', label: 'SitReps', kinds: ['sitrep_published'] as const },
-		{ key: 'notes', label: 'Notes / Pins', kinds: ['note', 'pin'] as const },
-		{ key: 'trackers', label: 'Trackers', kinds: ['tracker'] as const },
-		{ key: 'system', label: 'System', kinds: ['system'] as const },
-		{
-			key: 'case_link',
-			label: 'Case attached / detached',
-			kinds: ['case_attached', 'case_detached'] as const
-		},
-		{ key: 'room_activity', label: 'War-room activity', kinds: ['war_room_activity'] as const }
-	];
-	const GLOBAL_FILTER_KEYS = GLOBAL_FILTERS.map((f) => f.key);
-	// Lanes preferences saved before `knownGlobalFilters` existed knew
-	const LEGACY_GLOBAL_FILTER_KEYS = ['message', 'tasks', 'sitreps', 'notes', 'system', 'case_link'];
-
-	let globalFilters = $state<Set<string>>(new Set(GLOBAL_FILTERS.map((f) => f.key)));
-
-	// Per-case exclusions. Empty by default — operator opts out.
-	let excludedCases = $state<Set<number>>(new Set());
-	let excludedCaseActivities = $state<Record<number, Set<string>>>({});
-	// War-room activity families the operator muted (`member`, `folder`, ...)
-	let excludedRoomActivities = $state<Set<string>>(new Set());
-
-	// --- Persistent filter preferences ----------------------------------
+	// People talk in the chat; everything IRIS posts on its own goes to
+	// the Activity rail on the right. Each automatic lane (case activity,
+	// tasks, trackers, ...) is routed by the operator to the rail, inline
+	// in the chat, or nowhere, and per-case / per-type mutes hide rows
+	// wherever their lane goes. The rules live in `activity-rail.ts`, the
+	// reactive state in `StreamPreferences`, the controls in the rail's
+	// settings panel.
 	//
 	// One preference bag per user, keyed as `war_room_stream`, applies
-	// across every war room they open. Loaded once on mount from the
-	// server; saved with a debounce whenever the operator flips a
-	// toggle. Sets aren't JSON — we serialize them as arrays and
-	// rehydrate back into Sets on read. The `filtersHydrated` gate
-	// stops us from persisting the initial-render defaults before the
-	// server round-trip finishes, which would race the server-side
-	// preference back to defaults.
-	type StreamPrefs = {
-		globalFilters: string[];
-		// Every lane that existed at save time, so one added later starts on
-		knownGlobalFilters?: string[];
-		excludedCases: number[];
-		excludedCaseActivities: Record<string, string[]>;
-		excludedRoomActivities?: string[];
-	};
+	// across every war room they open. Loaded once on mount; saved with a
+	// debounce whenever the operator changes something. The
+	// `filtersHydrated` gate stops us from persisting the initial-render
+	// defaults before the server round-trip finishes, which would race the
+	// server-side preference back to defaults.
+	const streamPrefs = new StreamPreferences();
 	const STREAM_PREF_KEY = 'war_room_stream';
 	let filtersHydrated = $state(false);
 	let savePrefTimer: ReturnType<typeof setTimeout> | null = null;
@@ -255,298 +200,50 @@
 			const res = await UsersService.getMyPreference<StreamPrefs>(STREAM_PREF_KEY);
 			if (res.ok && res.data && typeof res.data !== 'string') {
 				const value = (res.data as { value: StreamPrefs | null }).value;
-				if (value && typeof value === 'object') {
-					if (Array.isArray(value.globalFilters)) {
-						globalFilters = mergeSavedStreamLanes(
-							value.globalFilters,
-							value.knownGlobalFilters,
-							GLOBAL_FILTER_KEYS,
-							LEGACY_GLOBAL_FILTER_KEYS
-						);
-					}
-					if (Array.isArray(value.excludedRoomActivities)) {
-						excludedRoomActivities = new Set(value.excludedRoomActivities);
-					}
-					if (Array.isArray(value.excludedCases)) {
-						excludedCases = new Set(value.excludedCases);
-					}
-					if (value.excludedCaseActivities && typeof value.excludedCaseActivities === 'object') {
-						const next: Record<number, Set<string>> = {};
-						for (const [k, v] of Object.entries(value.excludedCaseActivities)) {
-							const caseId = Number(k);
-							if (Number.isFinite(caseId) && Array.isArray(v)) {
-								next[caseId] = new Set(v);
-							}
-						}
-						excludedCaseActivities = next;
-					}
-				}
+				streamPrefs.apply(parseStreamPrefs(value));
 			}
 		} finally {
 			filtersHydrated = true;
 		}
 	};
 
-	const saveFilterPrefsNow = async () => {
-		const payload: StreamPrefs = {
-			globalFilters: Array.from(globalFilters),
-			knownGlobalFilters: GLOBAL_FILTER_KEYS,
-			excludedCases: Array.from(excludedCases),
-			excludedCaseActivities: Object.fromEntries(
-				Object.entries(excludedCaseActivities).map(([k, v]) => [k, Array.from(v)])
-			),
-			excludedRoomActivities: Array.from(excludedRoomActivities)
-		};
-		await UsersService.setMyPreference(STREAM_PREF_KEY, payload);
-	};
-
-	// Every relevant state change schedules a save 500ms later. That
-	// coalesces bursts (e.g. toggling several checkboxes in a row) into
-	// a single PUT while still feeling responsive if the operator moves
-	// on. The `$effect` reads every filter state so any of them changing
-	// arms the timer.
+	// Every change schedules a save 500ms later, which coalesces bursts
+	// (several toggles in a row) into a single PUT. Reading `settings`
+	// subscribes the effect to every field.
 	$effect(() => {
-		void globalFilters;
-		void excludedCases;
-		void excludedCaseActivities;
-		void excludedRoomActivities;
+		const payload = serializeStreamPrefs(streamPrefs.settings);
 		if (!filtersHydrated) return;
 		if (savePrefTimer) clearTimeout(savePrefTimer);
 		savePrefTimer = setTimeout(() => {
-			void saveFilterPrefsNow();
+			void UsersService.setMyPreference(STREAM_PREF_KEY, payload);
 		}, 500);
 	});
 
-	// Grouped activity types. Categories collapse the 27 flat checkboxes
-	// from earlier into 8 expandable groups so the sidebar stays compact
-	// without losing granularity. Each group has its own checkbox: ticking
-	// it toggles every slug in the group at once; the parent shows an
-	// indeterminate state when some — but not all — child slugs are on.
-	const ACTIVITY_GROUPS: {
-		key: string;
-		label: string;
-		slugs: { slug: string; label: string }[];
-	}[] = [
-		{
-			key: 'notes',
-			label: 'Notes',
-			slugs: [
-				{ slug: 'note.created', label: 'Created' },
-				{ slug: 'note.updated', label: 'Updated' },
-				{ slug: 'note.deleted', label: 'Deleted' },
-				{ slug: 'directory.created', label: 'Folder created' },
-				{ slug: 'directory.updated', label: 'Folder updated' },
-				{ slug: 'directory.deleted', label: 'Folder deleted' }
-			]
-		},
-		{
-			key: 'iocs',
-			label: 'IOCs',
-			slugs: [
-				{ slug: 'ioc.created', label: 'Created' },
-				{ slug: 'ioc.updated', label: 'Updated' },
-				{ slug: 'ioc.deleted', label: 'Deleted' }
-			]
-		},
-		{
-			key: 'assets',
-			label: 'Assets',
-			slugs: [
-				{ slug: 'asset.created', label: 'Created' },
-				{ slug: 'asset.updated', label: 'Updated' },
-				{ slug: 'asset.deleted', label: 'Deleted' }
-			]
-		},
-		{
-			key: 'evidence',
-			label: 'Evidence',
-			slugs: [
-				{ slug: 'evidence.created', label: 'Added' },
-				{ slug: 'evidence.updated', label: 'Updated' },
-				{ slug: 'evidence.deleted', label: 'Deleted' }
-			]
-		},
-		{
-			key: 'tasks',
-			label: 'Tasks',
-			slugs: [
-				{ slug: 'task.created', label: 'Added' },
-				{ slug: 'task.updated', label: 'Updated' },
-				{ slug: 'task.deleted', label: 'Deleted' }
-			]
-		},
-		{
-			key: 'events',
-			label: 'Timeline events',
-			slugs: [
-				{ slug: 'event.created', label: 'Added' },
-				{ slug: 'event.updated', label: 'Updated' },
-				{ slug: 'event.deleted', label: 'Deleted' }
-			]
-		},
-		{
-			key: 'case',
-			label: 'Case lifecycle',
-			slugs: [
-				{ slug: 'case.created', label: 'Created' },
-				{ slug: 'case.closed', label: 'Closed' },
-				{ slug: 'case.reopened', label: 'Re-opened' },
-				{ slug: 'case.updated', label: 'Updated' },
-				{ slug: 'case.reviewer_changed', label: 'Reviewer changed' },
-				{ slug: 'alert.linked', label: 'Alert linked / unlinked' }
-			]
-		},
-		{
-			key: 'other',
-			label: 'Other',
-			slugs: [{ slug: 'case.other', label: 'Uncategorised' }]
-		}
-	];
-
-	// Flat list of all known slugs — used by `selectNone`-style bulk ops
-	// and by the bookkeeping when an entire case is muted (not yet wired up).
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	const ALL_ACTIVITY_SLUGS = ACTIVITY_GROUPS.flatMap((g) => g.slugs.map((s) => s.slug));
-
-	const globalKeyForKind = (k: ChatMessageKind): string | null => {
-		for (const f of GLOBAL_FILTERS) {
-			if ((f.kinds as readonly string[]).includes(k)) return f.key;
-		}
-		return null;
-	};
-
-	const visibleMessages = $derived.by(() =>
-		messages.filter((m) => {
-			if (m.deleted_at) return false;
-
-			// Case activity: gated by per-case + per-type exclusions.
-			if (m.kind === 'case_activity') {
-				if (m.ref_case_id == null) return true;
-				if (excludedCases.has(m.ref_case_id)) return false;
-				const slug = m.activity_type ?? 'case.other';
-				const set = excludedCaseActivities[m.ref_case_id];
-				if (set && set.has(slug)) return false;
-				return true;
-			}
-
-			// War-room activity: the lane, then the muted families.
-			if (m.kind === 'war_room_activity') {
-				if (!globalFilters.has('room_activity')) return false;
-				return !excludedRoomActivities.has(warRoomActivityFamily(m.activity_type));
-			}
-
-			// Case attached / detached are case-scoped too — let the
-			// operator mute a specific case across all event types.
-			if (m.kind === 'case_attached' || m.kind === 'case_detached') {
-				if (m.ref_case_id != null && excludedCases.has(m.ref_case_id)) {
-					return false;
-				}
-				return globalFilters.has('case_link');
-			}
-
-			// Everything else is gated by the global toggles.
-			const key = globalKeyForKind(m.kind);
-			return key ? globalFilters.has(key) : true;
-		})
+	const liveMessages = $derived(messages.filter((m) => !m.deleted_at));
+	const destinations = $derived(new Map(liveMessages.map((m) => [m, streamPrefs.destination(m)])));
+	// What the chat column shows, and what the Activity rail lists.
+	const visibleMessages = $derived(liveMessages.filter((m) => destinations.get(m) === 'chat'));
+	const railItems = $derived(liveMessages.filter((m) => destinations.get(m) === 'rail'));
+	// Automatic rows the settings hide everywhere, for the rail footer.
+	const hiddenCount = $derived(
+		liveMessages.filter((m) => destinations.get(m) === 'off' && streamLane(m.kind) != null).length
 	);
-
-	const toggleGlobal = (key: string) => {
-		const next = new Set(globalFilters);
-		if (next.has(key)) next.delete(key);
-		else next.add(key);
-		globalFilters = next;
-	};
-
-	const toggleCase = (caseId: number) => {
-		const next = new Set(excludedCases);
-		if (next.has(caseId)) next.delete(caseId);
-		else next.add(caseId);
-		excludedCases = next;
-	};
-
-	const toggleCaseActivity = (caseId: number, slug: string) => {
-		const current = excludedCaseActivities[caseId] ?? new Set<string>();
-		const next = new Set(current);
-		if (next.has(slug)) next.delete(slug);
-		else next.add(slug);
-		excludedCaseActivities = { ...excludedCaseActivities, [caseId]: next };
-	};
-
-	const isCaseActivityOn = (caseId: number, slug: string) =>
-		!(excludedCaseActivities[caseId]?.has(slug) ?? false);
-
-	const isCaseOn = (caseId: number) => !excludedCases.has(caseId);
-
-	const toggleRoomActivity = (family: string) => {
-		const next = new Set(excludedRoomActivities);
-		if (next.has(family)) next.delete(family);
-		else next.add(family);
-		excludedRoomActivities = next;
-	};
-
-	const selectAll = () => {
-		globalFilters = new Set(GLOBAL_FILTERS.map((f) => f.key));
-		excludedCases = new Set();
-		excludedCaseActivities = {};
-		excludedRoomActivities = new Set();
-	};
-
-	const selectNone = () => {
-		globalFilters = new Set();
-		excludedCases = new Set(attachedCases.map((c) => c.case_id));
-	};
+	const laneCounts = $derived.by(() => {
+		const counts = Object.fromEntries(STREAM_LANES.map((l) => [l.key, 0])) as Record<
+			StreamLaneKey,
+			number
+		>;
+		for (const m of liveMessages) {
+			const lane = streamLane(m.kind);
+			if (lane) counts[lane] += 1;
+		}
+		return counts;
+	});
 
 	// Slash-commands reference is low-signal once the operator knows the
-	// vocabulary — fold by default so it doesn't push Threads / Cases
-	// content off the bottom of the sidebar. Click the header to reveal.
+	// vocabulary — fold by default so it doesn't push Threads content off
+	// the bottom of the sidebar. Click the header to reveal.
 	let slashOpen = $state(false);
-
-	// Per-case section expansion (collapsed by default — keeps the pane
-	// short when many cases are attached).
-	let caseSectionsOpen = $state<Record<number, boolean>>({});
-	const toggleCaseSection = (caseId: number) => {
-		caseSectionsOpen = {
-			...caseSectionsOpen,
-			[caseId]: !(caseSectionsOpen[caseId] ?? false)
-		};
-	};
-
-	// Per-(case, group) expansion. Stored under a composite key so we
-	// don't have to reset state when the operator switches cases.
-	let groupSectionsOpen = $state<Record<string, boolean>>({});
-	const groupKey = (caseId: number, groupKey: string) => `${caseId}:${groupKey}`;
-	const toggleGroupSection = (caseId: number, gk: string) => {
-		const k = groupKey(caseId, gk);
-		groupSectionsOpen = { ...groupSectionsOpen, [k]: !groupSectionsOpen[k] };
-	};
-
-	// Aggregate state for a group's parent checkbox: 'all' (every slug on),
-	// 'none' (every slug off) or 'some' (mixed — renders as indeterminate).
-	const groupState = (
-		caseId: number,
-		group: (typeof ACTIVITY_GROUPS)[number]
-	): 'all' | 'none' | 'some' => {
-		const excluded = excludedCaseActivities[caseId] ?? new Set<string>();
-		const onCount = group.slugs.filter((s) => !excluded.has(s.slug)).length;
-		if (onCount === 0) return 'none';
-		if (onCount === group.slugs.length) return 'all';
-		return 'some';
-	};
-
-	const toggleGroup = (caseId: number, group: (typeof ACTIVITY_GROUPS)[number]) => {
-		const current = excludedCaseActivities[caseId] ?? new Set<string>();
-		const next = new Set(current);
-		const state = groupState(caseId, group);
-		// Mixed and all-on collapse to all-off; all-off expands to all-on.
-		// Mirrors the "click an indeterminate checkbox to clear" behaviour
-		// from native tri-state controls.
-		const wantOn = state === 'none';
-		for (const s of group.slugs) {
-			if (wantOn) next.delete(s.slug);
-			else next.add(s.slug);
-		}
-		excludedCaseActivities = { ...excludedCaseActivities, [caseId]: next };
-	};
 
 	// Attached cases drive the attachments picker (events / IOCs / assets
 	// / tasks come from these).
@@ -1155,9 +852,12 @@
 	const send = async () => {
 		const text = body.trim();
 		const hasAttachments = composerFiles.pending.length > 0;
-		// Allow attachment-only posts. Body must still be non-empty OR
-		// there must be at least one queued file.
-		if (!text && !hasAttachments) return;
+		// A quoted activity rides on the next message, but never on a
+		// slash command: the backend would read the quote as the command.
+		const quoted = quote && !text.startsWith('/') ? quote : null;
+		// Allow attachment-only and quote-only posts. Body must still be
+		// non-empty OR there must be a queued file or a quote.
+		if (!text && !hasAttachments && !quoted) return;
 		// Refuse to post when the composer target has been archived out
 		// from under the operator. Should be rare — the button/textarea
 		// are already disabled in that case — but guard anyway.
@@ -1183,10 +883,14 @@
 			return;
 		}
 
-		const res = await WarRoomChatService.post(warRoomId, text, postingTopicId, uploaded.ids);
+		const outgoing = quoted
+			? `${activityQuote(quoted, quoteCaseLabel(quoted))}${text ? `\n\n${text}` : ''}`
+			: text;
+		const res = await WarRoomChatService.post(warRoomId, outgoing, postingTopicId, uploaded.ids);
 		sending = false;
 		if (res.ok) {
 			body = '';
+			if (quoted && quote === quoted) quote = null;
 			composerFiles.clear();
 			// `/topic <name>` returns the newly-created topic — merge it
 			// into `topics` and switch the view straight away so the
@@ -1377,6 +1081,106 @@
 
 	const closeThread = () => {
 		openThread = null;
+		railOverThread = false;
+	};
+
+	// --- Activity rail ---------------------------------------------------
+	//
+	// A thread pane and the rail would squeeze the chat to nothing, so an
+	// open thread folds the rail to its strip without touching the saved
+	// preference; toggling it while the thread is open brings it back.
+	let railSettingsOpen = $state(false);
+	let railOverThread = $state(false);
+	let railRef: ReturnType<typeof ActivityRail> | null = $state(null);
+	const railShown = $derived(streamPrefs.railOpen && (openThread == null || railOverThread));
+
+	const toggleRail = () => {
+		if (!railShown && openThread != null) {
+			railOverThread = true;
+			streamPrefs.railOpen = true;
+			return;
+		}
+		streamPrefs.railOpen = !railShown;
+		if (openThread != null) railOverThread = !railShown;
+	};
+
+	const openRailSettings = () => {
+		railSettingsOpen = true;
+		if (!railShown) toggleRail();
+	};
+
+	// Rows that arrived while the rail was hidden, for the strip and the
+	// header button. The mark moves to the newest row whenever the rail is
+	// visible, so it's frozen at the moment it was hidden.
+	let seenAfter = $state(0);
+	$effect(() => {
+		if (railShown && !loading) {
+			const latest = latestTime(railItems);
+			untrack(() => {
+				if (latest > seenAfter) seenAfter = latest;
+			});
+		}
+	});
+	const unseen = $derived(railShown ? [] : railItems.filter((m) => messageTime(m) > seenAfter));
+
+	const muteFromRail = (m: ChatMessage) => {
+		const target = streamPrefs.mute(m);
+		if (!target) return;
+		toast({
+			title: 'Muted',
+			description: `${target.label.replace(/^Mute /, '').replace(/^Turn off /, '')} — undo it in the Activity settings.`
+		});
+	};
+
+	// "Discuss in chat": the row rides above the composer as a quote and
+	// is prepended to the next message.
+	let quote = $state<ChatMessage | null>(null);
+	const discussInChat = async (m: ChatMessage) => {
+		quote = m;
+		await tick();
+		composerEl?.focus();
+	};
+	const quoteCaseLabel = (m: ChatMessage): string | null => {
+		if (m.ref_case_id == null) return null;
+		const att = attachedCases.find((c) => c.case_id === m.ref_case_id);
+		return att ? `#${att.case_id} ${att.case_name}` : `#${m.ref_case_id}`;
+	};
+
+	// "Show in activity" links of quoted rows. Capture phase, so the
+	// markdown body's own link handling never sees the click.
+	const onActivityLinkClick = async (e: MouseEvent) => {
+		const a = (e.target as HTMLElement | null)?.closest?.('a');
+		const id = activityAnchorId(a?.getAttribute('href') ?? null);
+		if (id == null) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const target = messages.find((m) => m.message_id === id && !m.deleted_at);
+		const where = target ? streamPrefs.destination(target) : null;
+		if (where === 'rail') {
+			if (!railShown) toggleRail();
+			railSettingsOpen = false;
+			await tick();
+			if (await railRef?.locate(id)) return;
+		} else if (where === 'chat' && target) {
+			await jumpToTrace(target);
+			return;
+		}
+		toast({
+			title: where === 'off' ? 'Hidden by your settings' : 'Not loaded',
+			description:
+				where === 'off'
+					? 'That activity is muted in the Activity settings.'
+					: 'That activity is older than what this page has loaded.'
+		});
+	};
+
+	const onRailKey = (e: KeyboardEvent) => {
+		if (e.key !== ']' || e.metaKey || e.ctrlKey || e.altKey) return;
+		const el = e.target as HTMLElement | null;
+		if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)))
+			return;
+		e.preventDefault();
+		toggleRail();
 	};
 
 	// --- Topics loader / actions ---------------------------------------
@@ -1799,96 +1603,6 @@
 		}
 	};
 
-	const ROOM_ACTIVITY_ICONS: Record<string, typeof Users> = {
-		room: Settings2,
-		member: Users,
-		team: UsersRound,
-		note: StickyNote,
-		folder: Folder,
-		share: Share2,
-		task: ListChecks,
-		timeline: Clock,
-		event: Clock,
-		decision: Gavel,
-		sitrep: FileText,
-		scope: Crosshair,
-		vulnerability: ShieldAlert,
-		datastore: Database
-	};
-
-	const ROOM_ACTIVITY_COLORS: Record<string, string> = {
-		member: 'text-violet-600 dark:text-violet-400',
-		team: 'text-violet-600 dark:text-violet-400',
-		note: 'text-amber-600 dark:text-amber-400',
-		folder: 'text-amber-600 dark:text-amber-400',
-		share: 'text-amber-600 dark:text-amber-400',
-		task: 'text-emerald-600 dark:text-emerald-400',
-		decision: 'text-indigo-600 dark:text-indigo-400',
-		sitrep: 'text-amber-600 dark:text-amber-400',
-		vulnerability: 'text-red-600 dark:text-red-400'
-	};
-
-	const systemIcon = (k: ChatMessageKind, activityType: string | null = null) => {
-		switch (k) {
-			case 'war_room_activity':
-				return ROOM_ACTIVITY_ICONS[warRoomActivityFamily(activityType)] ?? Settings2;
-			case 'task_assigned':
-			case 'task_completed':
-				return ListChecks;
-			case 'case_attached':
-			case 'case_detached':
-			case 'case_activity':
-				return WaypointsIcon;
-			case 'sitrep_published':
-				return FileText;
-			case 'note':
-				return StickyNote;
-			case 'pin':
-				return Pin;
-			case 'decision':
-				return Gavel;
-			case 'tracker':
-				return ClipboardCheck;
-			case 'priority':
-				return AlertOctagon;
-			case 'system':
-				return AlertCircle;
-			default:
-				return null;
-		}
-	};
-
-	const systemColor = (k: ChatMessageKind, activityType: string | null = null) => {
-		switch (k) {
-			case 'war_room_activity':
-				return (
-					ROOM_ACTIVITY_COLORS[warRoomActivityFamily(activityType)] ??
-					'text-sky-600 dark:text-sky-400'
-				);
-			case 'task_assigned':
-			case 'task_completed':
-				return 'text-emerald-600 dark:text-emerald-400';
-			case 'case_attached':
-			case 'case_detached':
-			case 'case_activity':
-				return 'text-sky-600 dark:text-sky-400';
-			case 'sitrep_published':
-				return 'text-amber-600 dark:text-amber-400';
-			case 'note':
-				return 'text-amber-600 dark:text-amber-400';
-			case 'pin':
-				return 'text-violet-600 dark:text-violet-400';
-			case 'decision':
-				return 'text-indigo-600 dark:text-indigo-400';
-			case 'tracker':
-				return 'text-teal-600 dark:text-teal-400';
-			case 'priority':
-				return 'text-red-600 dark:text-red-400';
-			default:
-				return 'text-muted-foreground';
-		}
-	};
-
 	// Determine whether to render an avatar / header for this message
 	// vs. an inline continuation of the previous bubble. Groups
 	// consecutive messages from the same author within a 5min window
@@ -1924,35 +1638,29 @@
 		return dt < 5 * 60 * 1000;
 	};
 
-	const totalGlobalFilters = GLOBAL_FILTERS.length;
-	const activeGlobalFilters = $derived(globalFilters.size);
-	const anyExclusion = $derived(
-		excludedCases.size > 0 ||
-			Object.values(excludedCaseActivities).some((s) => s.size > 0) ||
-			excludedRoomActivities.size > 0 ||
-			activeGlobalFilters < totalGlobalFilters
-	);
+	// Anything routed away from the chat, for the empty state.
+	const anyExclusion = $derived(streamPrefs.customised || railItems.length > 0);
 </script>
 
 <!--
 	Stream layout.
 
-	Left pane (lg+): the firehose filter. Two stacked sections — global
-	kind toggles on top, then a per-case sub-tree where each attached
-	case can be muted entirely or trimmed down to specific activity
-	types (note created, IOC updated, asset deleted, …).
+	Left pane (lg+): conversation navigation — topics, threads,
+	decisions & pins, slash commands.
 
-	Right pane: the rendered stream with composer at the bottom.
+	Middle: the chat, i.e. what people say, with the composer at the
+	bottom; plus the thread side-pane when one is open.
 
-	A new case attached to the war room appears in the left pane
-	automatically — the filter list is keyed off the live
-	`attachedCases` state, not a snapshot — so its activity starts
-	showing up the moment it's attached.
+	Right: the Activity rail with everything IRIS posts on its own. Which
+	lanes land there, inline in the chat or nowhere is the operator's
+	call, in the rail's settings. A case attached later starts streaming
+	automatically — the settings list is keyed off the live
+	`attachedCases` state.
 -->
 <!--
-	Outer split: the filters sidebar on the left is now user-resizable —
-	defaults to ~22 % of the chat surface, drag the handle to widen for a
-	long case list or narrow when threads are the focus. Pane sizes are
+	Outer split: the sidebar on the left is user-resizable — defaults to
+	~22 % of the chat surface, drag the handle to widen for long thread
+	titles or narrow when the chat is the focus. Pane sizes are
 	persisted in localStorage by `paneforge` keyed on `autoSaveId` so the
 	choice survives reloads.
 -->
@@ -1967,32 +1675,24 @@
 		maxSize={45}
 		class="flex min-h-0 flex-col border-r bg-card/40"
 	>
-		<!-- Header row with quick select-all / select-none. shrink-0 keeps
-		     it pinned while the inner list scrolls. -->
+		<!-- Header row. The stream filters moved to the Activity rail's
+		     settings; this pane only navigates the conversation. -->
 		<div class="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
 			<p
 				class="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
 			>
-				<Filter class="h-3 w-3" />
-				Filters
+				<MessageSquare class="h-3 w-3" />
+				Conversation
 			</p>
-			{#if anyExclusion}
-				<button
-					type="button"
-					class="text-2xs text-primary transition-colors hover:underline"
-					onclick={selectAll}
-				>
-					Reset
-				</button>
-			{:else}
-				<button
-					type="button"
-					class="text-2xs text-muted-foreground transition-colors hover:text-foreground"
-					onclick={selectNone}
-				>
-					Clear all
-				</button>
-			{/if}
+			<button
+				type="button"
+				class="inline-flex items-center gap-1 text-2xs text-muted-foreground transition-colors hover:text-foreground"
+				onclick={openRailSettings}
+				title="Stream filters moved to the Activity settings"
+			>
+				<SlidersHorizontal class="h-3 w-3" />
+				Activity settings
+			</button>
 		</div>
 
 		<!-- The scroll viewport. `min-h-0` on this AND on the parent
@@ -2343,187 +2043,6 @@
 				{/if}
 			</section>
 
-			<!-- Stream lanes toggles: sit below the trace views (Threads,
-			     Decisions & Pins) because in normal operation an IC
-			     spends more time reading those than tweaking which
-			     activity kinds are visible. -->
-			<section class="border-t px-2 py-2">
-				<p
-					class="px-2 pb-1 pt-1 text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
-				>
-					Stream lanes
-				</p>
-				<ul class="flex flex-col">
-					{#each GLOBAL_FILTERS as f (f.key)}
-						{@const on = globalFilters.has(f.key)}
-						<li>
-							<label
-								class={[
-									'flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1.5 text-xs transition-colors',
-									on
-										? 'text-foreground hover:bg-muted/60'
-										: 'text-muted-foreground hover:bg-muted/40'
-								]}
-							>
-								<span>{f.label}</span>
-								<Checkbox
-									checked={on}
-									onCheckedChange={() => toggleGlobal(f.key)}
-									aria-label={`Toggle ${f.label}`}
-								/>
-							</label>
-							{#if f.key === 'room_activity' && on}
-								<ul class="ml-3 flex flex-col border-l pl-1">
-									{#each WAR_ROOM_ACTIVITY_FAMILIES as family (family.key)}
-										{@const familyOn = !excludedRoomActivities.has(family.key)}
-										<li>
-											<label
-												class={[
-													'flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1 text-2xs transition-colors',
-													familyOn
-														? 'text-foreground hover:bg-muted/60'
-														: 'text-muted-foreground hover:bg-muted/40'
-												]}
-											>
-												<span>{family.label}</span>
-												<Checkbox
-													checked={familyOn}
-													onCheckedChange={() => toggleRoomActivity(family.key)}
-													aria-label={`Toggle war-room activity: ${family.label}`}
-												/>
-											</label>
-										</li>
-									{/each}
-								</ul>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			</section>
-
-			<!-- Per-case sub-tree with grouped activity types. The list
-			     itself is capped at a comfortable max-height and scrolls
-			     internally — otherwise a war room with many attached
-			     cases would push the slash-command reference off the
-			     bottom of the sidebar. -->
-			<section class="border-t px-2 py-2">
-				<div class="flex items-center justify-between px-2 pb-1 pt-1">
-					<p
-						class="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground"
-					>
-						<Waypoints class="h-3 w-3" />
-						Cases ({attachedCases.length})
-					</p>
-				</div>
-
-				{#if attachedCases.length === 0}
-					<p class="px-2 py-2 text-2xs text-muted-foreground">
-						No cases attached. Anything attached later will appear here automatically.
-					</p>
-				{:else}
-					<ul class="stream-thin-scroll flex max-h-72 flex-col overflow-y-auto">
-						{#each attachedCases as att (att.case_id)}
-							{@const caseOn = isCaseOn(att.case_id)}
-							{@const caseExpanded = caseSectionsOpen[att.case_id] ?? false}
-							<li>
-								<div
-									class={[
-										'flex items-center gap-1 rounded-md px-2 py-1.5 transition-colors',
-										caseOn ? 'hover:bg-muted/60' : 'opacity-60 hover:bg-muted/40'
-									]}
-								>
-									<button
-										type="button"
-										class="flex flex-1 items-center gap-1.5 text-left"
-										onclick={() => toggleCaseSection(att.case_id)}
-										aria-expanded={caseExpanded}
-									>
-										{#if caseExpanded}
-											<ChevronDown class="h-3 w-3 shrink-0 text-muted-foreground" />
-										{:else}
-											<ChevronRight class="h-3 w-3 shrink-0 text-muted-foreground" />
-										{/if}
-										<span class="min-w-0 flex-1 truncate text-xs" title={att.case_name}>
-											{att.case_name}
-										</span>
-									</button>
-									<Checkbox
-										checked={caseOn}
-										onCheckedChange={() => toggleCase(att.case_id)}
-										aria-label={`Toggle case #${att.case_id} in stream`}
-									/>
-								</div>
-
-								{#if caseExpanded}
-									<ul class="ml-4 flex flex-col border-l border-border/40 pl-1">
-										{#each ACTIVITY_GROUPS as g (g.key)}
-											{@const gOpen = groupSectionsOpen[groupKey(att.case_id, g.key)] ?? false}
-											{@const gState = groupState(att.case_id, g)}
-											<li>
-												<div
-													class={[
-														'flex items-center gap-1 rounded-md px-2 py-1 transition-colors',
-														caseOn ? 'hover:bg-muted/50' : 'opacity-60 hover:bg-muted/30'
-													]}
-												>
-													<button
-														type="button"
-														class="flex flex-1 items-center gap-1.5 text-left"
-														onclick={() => toggleGroupSection(att.case_id, g.key)}
-														aria-expanded={gOpen}
-													>
-														{#if gOpen}
-															<ChevronDown class="h-3 w-3 shrink-0 text-muted-foreground" />
-														{:else}
-															<ChevronRight class="h-3 w-3 shrink-0 text-muted-foreground" />
-														{/if}
-														<span class="text-2xs">{g.label}</span>
-													</button>
-													<Checkbox
-														checked={gState === 'all'}
-														indeterminate={gState === 'some'}
-														onCheckedChange={() => toggleGroup(att.case_id, g)}
-														disabled={!caseOn}
-														aria-label={`Toggle ${g.label} for case #${att.case_id}`}
-													/>
-												</div>
-
-												{#if gOpen}
-													<ul class="ml-4 flex flex-col border-l border-border/30 pl-1">
-														{#each g.slugs as s (s.slug)}
-															{@const typeOn = isCaseActivityOn(att.case_id, s.slug)}
-															<li>
-																<label
-																	class={[
-																		'flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-0.5 text-2xs transition-colors',
-																		caseOn && typeOn
-																			? 'text-foreground hover:bg-muted/50'
-																			: 'text-muted-foreground hover:bg-muted/30',
-																		!caseOn && 'cursor-not-allowed'
-																	]}
-																>
-																	<span class="truncate">{s.label}</span>
-																	<Checkbox
-																		checked={caseOn && typeOn}
-																		onCheckedChange={() => toggleCaseActivity(att.case_id, s.slug)}
-																		disabled={!caseOn}
-																		aria-label={s.label}
-																	/>
-																</label>
-															</li>
-														{/each}
-													</ul>
-												{/if}
-											</li>
-										{/each}
-									</ul>
-								{/if}
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</section>
-
 			<!-- Slash commands reference. Folded by default — once an
 			     operator knows the vocabulary this just takes space; the
 			     header expands it on click. -->
@@ -2563,26 +2082,6 @@
 	<!-- Right side: stream column + optional thread side-pane. -->
 	<Resizable.Pane class="flex h-full min-h-0 min-w-0 flex-row">
 		<div class="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-			<!-- Compact summary visible only when sidebar is hidden. -->
-			<div class="flex items-center gap-2 overflow-x-auto border-b px-4 py-2 lg:hidden">
-				<Filter class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-				<span class="shrink-0 text-2xs text-muted-foreground">
-					{activeGlobalFilters}/{totalGlobalFilters} lanes
-					{#if excludedCases.size > 0}
-						· {excludedCases.size} case{excludedCases.size === 1 ? '' : 's'} muted
-					{/if}
-				</span>
-				{#if anyExclusion}
-					<button
-						type="button"
-						class="ml-auto shrink-0 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-2xs text-primary"
-						onclick={selectAll}
-					>
-						Reset filters
-					</button>
-				{/if}
-			</div>
-
 			<!--
 		  Top-of-stream quick filter. Hits the server (case-insensitive
 		  ILIKE against the message body + case-activity description),
@@ -2636,11 +2135,34 @@
 						{visibleMessages.length} match{visibleMessages.length === 1 ? '' : 'es'}
 					</span>
 				{/if}
+				{#if !railShown}
+					<Button
+						variant="outline"
+						size="sm"
+						class="h-8 shrink-0 gap-1.5 text-xs"
+						onclick={toggleRail}
+						title="Show activity  ]"
+					>
+						<Activity class="h-3.5 w-3.5" />
+						Activity
+						{#if unseen.length > 0}
+							<span
+								class="rounded-full bg-primary px-1.5 text-2xs font-semibold tabular-nums text-primary-foreground"
+							>
+								{unseen.length > 99 ? '99+' : unseen.length}
+							</span>
+						{/if}
+					</Button>
+				{/if}
 			</div>
 
 			<!-- Stream. min-w-0 above keeps long messages from forcing the
 		     column wider than the grid track allows. -->
-			<div bind:this={listEl} class="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+			<div
+				bind:this={listEl}
+				class="flex-1 overflow-y-auto px-4 py-4 sm:px-6"
+				onclickcapture={onActivityLinkClick}
+			>
 				{#if loading}
 					<div class="flex flex-col gap-3">
 						{#each Array(4) as _}
@@ -2681,8 +2203,10 @@
 									No stream entries match “{appliedSearch}”.
 								{:else if messages.length === 0}
 									No activity yet. Drop the first message or attach a case.
+								{:else if railItems.length > 0}
+									Nobody has said anything yet. Automatic activity is in the Activity rail.
 								{:else}
-									No entries match the current filters.
+									Nothing to show with your Activity settings.
 								{/if}
 							</p>
 							{#if appliedSearch && messages.length === 0}
@@ -2690,8 +2214,8 @@
 									Clear search
 								</Button>
 							{:else if anyExclusion}
-								<Button size="sm" variant="ghost" class="h-7 text-2xs" onclick={selectAll}>
-									Reset filters
+								<Button size="sm" variant="ghost" class="h-7 text-2xs" onclick={openRailSettings}>
+									Activity settings
 								</Button>
 							{/if}
 						</div>
@@ -3255,6 +2779,36 @@
 				{/if}
 
 				<ComposerPendingAttachments attachments={composerFiles} />
+				{#if quote}
+					{@const QuoteIcon = systemIcon(quote.kind, quote.activity_type)}
+					<div
+						class="mb-1.5 flex items-start gap-2 rounded-md border-l-2 border-primary/60 bg-muted/50 px-2.5 py-1.5 text-xs"
+					>
+						{#if QuoteIcon}
+							<QuoteIcon
+								class={`mt-0.5 h-3.5 w-3.5 shrink-0 ${systemColor(quote.kind, quote.activity_type)}`}
+							/>
+						{/if}
+						<p class="line-clamp-2 min-w-0 flex-1 text-muted-foreground">
+							<span class="font-medium text-foreground">
+								{quote.author_name ?? quote.author_login ?? 'IRIS'}
+							</span>
+							{quote.body ?? ''}
+							{#if quoteCaseLabel(quote)}
+								<span class="text-2xs">· {quoteCaseLabel(quote)}</span>
+							{/if}
+						</p>
+						<button
+							type="button"
+							class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+							onclick={() => (quote = null)}
+							aria-label="Remove quoted activity"
+							title="Remove quote"
+						>
+							<X class="h-3 w-3" />
+						</button>
+					</div>
+				{/if}
 				<!-- Topic chip — shows the operator which topic the composer will
 			     post into. Clickable to open a topic-picker popover; hidden
 			     entirely on backends without topics support. -->
@@ -3457,7 +3011,7 @@
 						size="sm"
 						class="h-8 gap-1.5"
 						disabled={sending ||
-							(!body.trim() && composerFiles.pending.length === 0) ||
+							(!body.trim() && composerFiles.pending.length === 0 && !quote) ||
 							composerLocked}
 					>
 						{#if sending}
@@ -3475,7 +3029,9 @@
 					<kbd class="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">Shift+Enter</kbd>
 					for newline ·
 					<kbd class="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">/</kbd>
-					for commands
+					for commands ·
+					<kbd class="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">]</kbd>
+					activity
 				</p>
 			</form>
 		</div>
@@ -3490,8 +3046,27 @@
 				onChanged={loadThreads}
 			/>
 		{/if}
+
+		<ActivityRail
+			bind:this={railRef}
+			bind:settingsOpen={railSettingsOpen}
+			{warRoomId}
+			items={railItems}
+			{unseen}
+			open={railShown}
+			prefs={streamPrefs}
+			{attachedCases}
+			{laneCounts}
+			{hiddenCount}
+			onToggle={toggleRail}
+			onDiscuss={discussInChat}
+			onMute={muteFromRail}
+			onAttachmentClick={openPreview}
+		/>
 	</Resizable.Pane>
 </Resizable.PaneGroup>
+
+<svelte:window onkeydown={onRailKey} />
 
 <AttachmentPreviewDialog
 	bind:open={previewOpen}
