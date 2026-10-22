@@ -4,9 +4,11 @@
 #   Stage 2 (runtime)    — copy the build output + prod node_modules,
 #                           start `node build` as a non-root user.
 #
-# Pin the major-version of node so dev and prod use the same runtime.
+# Pin node to the release line CI tests on (22, LTS) so dev and prod use the
+# same runtime, at a patch carrying the latest security fixes (22.23.4:
+# Node.js October 2026 security releases).
 
-ARG NODE_VERSION=23-alpine
+ARG NODE_VERSION=22.23.4-alpine
 
 # ---------------------------------------------------------------------------
 # Stage 1: builder
