@@ -25,10 +25,8 @@
 		AlertTriangle,
 		Bug,
 		Building2,
-		ClipboardCopy,
 		Columns3,
 		Download,
-		FileSpreadsheet,
 		Flag,
 		Inbox,
 		ListChecks,
@@ -48,8 +46,8 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import TableExportMenu from '$lib/components/common/TableExportMenu.svelte';
 	import DownloadModal from '$lib/components/common/DownloadModal.svelte';
-	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { SearchableSelect } from '$lib/components/ui/searchable-select';
 	import { toast } from '$lib/components/ui/toast';
 	import { USER_CTX, type UserCtx } from '$lib/contexts/user-context.context.svelte';
@@ -1023,8 +1021,7 @@
 		return res.ok === true;
 	};
 
-	// --- Export ---------------------------------------------------------
-	let exportOpen = $state(false);
+	// --- Blocklist export (IOCs) ------------------------------------------
 	let includeRed = $state(false);
 	let exporting = $state<ScopeExportFormat | null>(null);
 
@@ -1042,13 +1039,13 @@
 			return;
 		}
 		WarRoomScopeService.saveFile(res.value);
-		exportOpen = false;
+		exportMenuOpen = false;
 	};
 
-	// --- CSV download / clipboard copy of the grids ----------------------
-	// "Visible" is the page on screen, "all" re-reads every page with the
-	// same filters. The copy is one click: the rows on screen, as a
-	// tab-separated table, in the columns of the last download.
+	// --- Copy as table / CSV download of the grids ------------------------
+	// Both pick the columns first (remembered per grid). "Visible" is the
+	// page on screen, "all" re-reads every page with the same filters. The
+	// copy is tab-separated, it pastes as a table.
 	const EXPORT_PAGES_MAX = 200;
 
 	interface GridExport {
@@ -1060,7 +1057,11 @@
 		/** False when the grid is not paged: visible and all are the same rows. */
 		showScope: boolean;
 		/** The rows in the given columns; null when a page could not be read. */
-		render: (scope: ExportScope, keys: string[], format: 'csv' | 'tsv') => Promise<string | null>;
+		render: (
+			scope: ExportScope,
+			keys: string[],
+			format: 'csv' | 'tsv'
+		) => Promise<{ text: string; count: number } | null>;
 	}
 
 	function gridExport<T>(spec: {
@@ -1083,7 +1084,8 @@
 				const rows = scope === 'all' && spec.fetchAll ? await spec.fetchAll() : spec.visible;
 				if (rows === null) return null;
 				const columns = pickColumns(spec.columns, keys);
-				return format === 'csv' ? rowsToCsv(rows, columns) : rowsToTsv(rows, columns);
+				const text = format === 'csv' ? rowsToCsv(rows, columns) : rowsToTsv(rows, columns);
+				return { text, count: rows.length };
 			}
 		};
 	}
@@ -1206,66 +1208,79 @@
 
 	const columnsKey = (grid: ScopeGrid) => `war-room-scope-${grid}`;
 
-	let csvOpen = $state(false);
-	let csvBusy = $state(false);
-	// Taken on open: the download stays on the grid it was opened from.
-	let csvExport = $state<GridExport | null>(null);
-	let csvColumnKeys = $state<string[]>([]);
+	type ExportMode = 'copy' | 'csv';
 
-	const openCsv = () => {
-		if (!currentExport) return;
-		csvExport = currentExport;
-		csvColumnKeys = loadColumnKeys(columnsKey(currentExport.grid), currentExport.columns);
-		csvOpen = true;
+	let exportMenuOpen = $state(false);
+	let exportDialogOpen = $state(false);
+	let exportBusy = $state(false);
+	// Taken on open: the dialog stays on the rows it was opened for.
+	let exportDialog = $state<{ target: GridExport; mode: ExportMode; title: string } | null>(null);
+	let exportColumnKeys = $state<string[]>([]);
+
+	const openExport = (target: GridExport, mode: ExportMode, title?: string) => {
+		exportDialog = {
+			target,
+			mode,
+			title:
+				title ??
+				(mode === 'csv' ? `Download ${target.noun} as CSV` : `Copy ${target.noun} as a table`)
+		};
+		exportColumnKeys = loadColumnKeys(columnsKey(target.grid), target.columns);
+		exportDialogOpen = true;
 	};
 
-	const downloadCsv = async (scope: ExportScope, keys: Set<string>) => {
-		const target = csvExport;
-		if (!target || csvBusy) return;
-		csvBusy = true;
+	const confirmExport = async (scope: ExportScope, keys: Set<string>) => {
+		const dialog = exportDialog;
+		if (!dialog || exportBusy) return;
+		const { target, mode } = dialog;
+		exportBusy = true;
 		try {
 			saveColumnKeys(columnsKey(target.grid), keys);
-			const csv = await target.render(scope, [...keys], 'csv');
-			if (csv === null) {
+			const out = await target.render(scope, [...keys], mode === 'csv' ? 'csv' : 'tsv');
+			if (out === null) {
 				toast({
-					title: 'Download failed',
+					title: mode === 'csv' ? 'Download failed' : 'Copy failed',
 					description: `Could not read every page of the ${target.noun}.`,
 					variant: 'destructive'
 				});
 				return;
 			}
-			downloadText(csv, exportFilename(`war-room-${warRoomId}-${target.grid}`));
-			csvOpen = false;
+			if (mode === 'csv') {
+				downloadText(out.text, exportFilename(`war-room-${warRoomId}-${target.grid}`));
+			} else if (await copyText(out.text)) {
+				toast({
+					title: `${out.count} ${out.count === 1 ? 'row' : 'rows'} copied`,
+					variant: 'success'
+				});
+			} else {
+				toast({
+					title: 'Could not copy',
+					description: 'The browser refused access to the clipboard.',
+					variant: 'destructive'
+				});
+				return;
+			}
+			exportDialogOpen = false;
 		} finally {
-			csvBusy = false;
+			exportBusy = false;
 		}
-	};
-
-	const copyRows = async (text: string | null, count: number, noun: string) => {
-		if (text !== null && (await copyText(text))) {
-			toast({ title: `${count} ${noun} copied`, variant: 'success' });
-			return;
-		}
-		toast({
-			title: 'Could not copy',
-			description: 'The browser refused access to the clipboard.',
-			variant: 'destructive'
-		});
-	};
-
-	const copyGrid = async () => {
-		const target = currentExport;
-		if (!target || target.countVisible === 0) return;
-		const keys = loadColumnKeys(columnsKey(target.grid), target.columns);
-		await copyRows(await target.render('visible', keys, 'tsv'), target.countVisible, target.noun);
 	};
 
 	// One group of the assets table: a case, a vulnerability, "not in a case".
-	const copyAssetGroup = async (groupAssets: ScopeAsset[], groupAttached: ScopeRegistryAsset[]) => {
-		const columns = assetExportColumns(canReadVulns);
-		const picked = pickColumns(columns, loadColumnKeys(columnsKey('assets'), columns));
-		const rows = assetExportRows(groupAssets, groupAttached, flagName);
-		await copyRows(rowsToTsv(rows, picked), rows.length, rows.length === 1 ? 'asset' : 'assets');
+	const copyAssetGroup = (
+		groupAssets: ScopeAsset[],
+		groupAttached: ScopeRegistryAsset[],
+		label: string
+	) => {
+		const target = gridExport({
+			grid: 'assets',
+			noun: 'assets',
+			columns: assetExportColumns(canReadVulns),
+			visible: assetExportRows(groupAssets, groupAttached, flagName),
+			countAll: groupAssets.length + groupAttached.length,
+			showScope: false
+		});
+		openExport(target, 'copy', `Copy assets — ${label}`);
 	};
 </script>
 
@@ -1356,75 +1371,52 @@
 			</div>
 		{/if}
 
-		{#if tab === 'iocs'}
-			<Popover bind:open={exportOpen}>
-				<PopoverTrigger>
-					<Button variant="outline" size="sm" class="gap-1.5">
-						<Download class="h-3.5 w-3.5" /> Export
-					</Button>
-				</PopoverTrigger>
-				<PopoverContent align="start" class="w-64 p-3">
-					<p class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-						Export blocklist
-					</p>
-					<p class="mt-1 text-2xs text-muted-foreground">
-						Every IOC you can see in the attached cases, deduplicated.
-					</p>
-					<label class="mt-3 flex items-center gap-2 text-xs" for="scope-export-red">
-						<Checkbox
-							id="scope-export-red"
-							checked={includeRed}
-							onCheckedChange={(v) => (includeRed = !!v)}
-						/>
-						Include TLP:RED
-					</label>
-					<div class="mt-3 flex flex-col gap-1">
-						{#each [{ f: 'txt', l: 'Plain text (one per line)' }, { f: 'csv', l: 'CSV' }, { f: 'stix', l: 'STIX 2.1 bundle' }] as opt (opt.f)}
-							<Button
-								variant="ghost"
-								size="sm"
-								class="justify-start gap-2"
-								disabled={exporting !== null}
-								onclick={() => exportIocs(opt.f as ScopeExportFormat)}
-							>
-								{#if exporting === opt.f}
-									<Loader2 class="h-3.5 w-3.5 animate-spin" />
-								{:else}
-									<Download class="h-3.5 w-3.5" />
-								{/if}
-								{opt.l}
-							</Button>
-						{/each}
-					</div>
-				</PopoverContent>
-			</Popover>
-		{/if}
-
 		<div class="ml-auto flex flex-wrap items-center gap-2">
 			{#if currentExport}
-				<div class="flex items-center gap-0.5 rounded-md border p-0.5">
-					<Button
-						variant="ghost"
-						size="sm"
-						class="h-7 gap-1.5 px-2 text-xs"
-						onclick={copyGrid}
-						disabled={currentExport.countVisible === 0}
-						title={`Copy the ${currentExport.countVisible} ${currentExport.noun} shown as a table, with the columns of the last CSV download`}
-						data-testid="scope-grid-copy"
-					>
-						<ClipboardCopy class="h-3.5 w-3.5" /> Copy
-					</Button>
-					<Button
-						variant="ghost"
-						size="sm"
-						class="h-7 gap-1.5 px-2 text-xs"
-						onclick={openCsv}
-						title={`Download the ${currentExport.noun} as CSV, picking the columns`}
-						data-testid="scope-grid-csv"
-					>
-						<FileSpreadsheet class="h-3.5 w-3.5" /> CSV
-					</Button>
-				</div>
+				{@const target = currentExport}
+				<TableExportMenu
+					bind:open={exportMenuOpen}
+					noun={target.noun}
+					empty={target.countVisible === 0}
+					onCopy={() => openExport(target, 'copy')}
+					onCsv={() => openExport(target, 'csv')}
+					testId="scope-grid-export"
+				>
+					{#if tab === 'iocs'}
+						<p class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+							Blocklist
+						</p>
+						<p class="mt-1 text-2xs text-muted-foreground">
+							Every IOC you can see in the attached cases, deduplicated.
+						</p>
+						<label class="mt-3 flex items-center gap-2 text-xs" for="scope-export-red">
+							<Checkbox
+								id="scope-export-red"
+								checked={includeRed}
+								onCheckedChange={(v) => (includeRed = !!v)}
+							/>
+							Include TLP:RED
+						</label>
+						<div class="mt-2 flex flex-col gap-1">
+							{#each [{ f: 'txt', l: 'Plain text (one per line)' }, { f: 'csv', l: 'CSV' }, { f: 'stix', l: 'STIX 2.1 bundle' }] as opt (opt.f)}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="justify-start gap-2"
+									disabled={exporting !== null}
+									onclick={() => exportIocs(opt.f as ScopeExportFormat)}
+								>
+									{#if exporting === opt.f}
+										<Loader2 class="h-3.5 w-3.5 animate-spin" />
+									{:else}
+										<Download class="h-3.5 w-3.5" />
+									{/if}
+									{opt.l}
+								</Button>
+							{/each}
+						</div>
+					{/if}
+				</TableExportMenu>
 			{/if}
 
 			{#if tab === 'assets' && assetView === 'table' && canWrite && attachedAllowed}
@@ -1916,20 +1908,21 @@
 	{/if}
 </div>
 
-{#if csvExport}
+{#if exportDialog}
 	<DownloadModal
-		open={csvOpen}
-		title={`Download ${csvExport.noun} as CSV`}
-		itemNounPlural={csvExport.noun}
-		availableColumns={csvExport.columns}
-		countVisible={csvExport.countVisible}
-		countAll={csvExport.countAll}
-		showScope={csvExport.showScope}
-		initialColumnKeys={csvColumnKeys}
-		isProcessing={csvBusy}
-		processingMessage={`Reading every page of the ${csvExport.noun}…`}
-		onConfirm={downloadCsv}
-		onOpenChange={(v) => (csvOpen = v)}
+		open={exportDialogOpen}
+		title={exportDialog.title}
+		itemNounPlural={exportDialog.target.noun}
+		availableColumns={exportDialog.target.columns}
+		countVisible={exportDialog.target.countVisible}
+		countAll={exportDialog.target.countAll}
+		showScope={exportDialog.target.showScope}
+		initialColumnKeys={exportColumnKeys}
+		confirmLabel={exportDialog.mode === 'csv' ? 'Download' : 'Copy'}
+		isProcessing={exportBusy}
+		processingMessage={`Reading every page of the ${exportDialog.target.noun}…`}
+		onConfirm={confirmExport}
+		onOpenChange={(v) => (exportDialogOpen = v)}
 	/>
 {/if}
 

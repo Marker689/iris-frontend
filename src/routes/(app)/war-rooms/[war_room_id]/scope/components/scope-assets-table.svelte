@@ -96,8 +96,8 @@
 		onDetachAttached?: (row: ScopeRegistryAsset) => void;
 		/** Attachment being detached, its button is disabled. */
 		detachingId?: number | null;
-		/** Copy the rows of one group; the group headers have no copy button when unset. */
-		onCopyGroup?: (assets: ScopeAsset[], attached: ScopeRegistryAsset[]) => void;
+		/** Copy the rows of one group (`label` names it); no copy button when unset. */
+		onCopyGroup?: (assets: ScopeAsset[], attached: ScopeRegistryAsset[], label: string) => void;
 	};
 
 	let {
@@ -307,12 +307,12 @@
 			variant="ghost"
 			size="sm"
 			class="ml-auto h-6 gap-1 px-1.5 text-2xs text-muted-foreground"
-			onclick={() => onCopyGroup(g.rows, g.attached)}
-			aria-label={`Copy the assets of ${label}`}
-			title="Copy the rows of this group as a table, with the columns of the last CSV download"
+			onclick={() => onCopyGroup(g.rows, g.attached, label)}
+			aria-label={`Copy the assets — ${label}`}
+			title="Copy the assets of this group as a table, picking the columns"
 			data-testid="scope-assets-group-copy"
 		>
-			<ClipboardCopy class="h-3 w-3" aria-hidden="true" /> Copy
+			<ClipboardCopy class="h-3 w-3" aria-hidden="true" /> Copy…
 		</Button>
 	{/if}
 {/snippet}
@@ -467,7 +467,7 @@
 										{v.exploitedOpen} exploited
 									</span>
 								{/if}
-								{@render copyGroup(g, v.identifier ?? 'the assets without vulnerability')}
+								{@render copyGroup(g, v.identifier ?? 'No vulnerability')}
 							</div>
 						</td>
 					</tr>
@@ -483,7 +483,7 @@
 									{g.attached.length}
 									{g.attached.length === 1 ? 'asset' : 'assets'} attached from the Assets Manager
 								</span>
-								{@render copyGroup(g, 'the assets not in a case')}
+								{@render copyGroup(g, 'Not in a case')}
 							</div>
 						</td>
 					</tr>

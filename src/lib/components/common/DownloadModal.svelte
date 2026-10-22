@@ -25,6 +25,8 @@
 		initialColumnKeys?: string[];
 		/** False when "visible" and "all" are the same rows: the scope choice is hidden. */
 		showScope?: boolean;
+		/** What the confirm button does, e.g. "Copy"; also used in the texts. */
+		confirmLabel?: string;
 		onConfirm: (downloadType: 'visible' | 'all', selectedColumnKeys: Set<string>) => void;
 		onOpenChange: (open: boolean) => void;
 	};
@@ -40,6 +42,7 @@
 		processingMessage = 'Processing...',
 		initialColumnKeys,
 		showScope = true,
+		confirmLabel = 'Download',
 		onConfirm,
 		onOpenChange
 	}: DownloadModalProps = $props();
@@ -84,7 +87,7 @@
 			<Dialog.Title>{title}</Dialog.Title>
 			<Dialog.Description>
 				{showScope
-					? 'Select what you want to download and which columns to include.'
+					? `Select what you want to ${confirmLabel.toLowerCase()} and which columns to include.`
 					: 'Select the columns to include.'}
 			</Dialog.Description>
 		</Dialog.Header>
@@ -98,7 +101,7 @@
 			<div class="grid gap-4 py-4">
 				{#if showScope}
 					<div class="flex flex-col gap-2">
-						<Label class="font-semibold">Download Scope</Label>
+						<Label class="font-semibold">{confirmLabel} Scope</Label>
 						<RadioGroup.Root bind:value={selectedDownloadType} class="flex flex-col gap-2">
 							<div class="flex items-center space-x-2">
 								<RadioGroup.Item value="visible" id="r-visible" />
@@ -147,7 +150,7 @@
 					{#if isProcessing}
 						<RefreshCwIcon class="mr-2 h-4 w-4 animate-spin" />
 					{/if}
-					Download
+					{confirmLabel}
 				</Button>
 			</Dialog.Footer>
 		{/if}

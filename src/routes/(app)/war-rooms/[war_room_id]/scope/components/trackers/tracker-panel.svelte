@@ -2,16 +2,14 @@
   One tracker tab of the Scope: the rows with their steps, asset flags,
   extra columns and note, all editable in place; search and step
   filters; bulk step changes; row history and tracker activity. Manual
-  trackers also add and delete rows. The rows can be copied as a table or
-  downloaded as CSV with a column picker.
+  trackers also add and delete rows. Export copies the rows as a table or
+  downloads them as CSV, picking the columns first.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import {
 		ArrowLeft,
 		ArrowRight,
-		ClipboardCopy,
-		FileSpreadsheet,
 		History,
 		Loader2,
 		Pencil,
@@ -25,6 +23,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import ConfirmationDialog from '$lib/components/ui/dialog/ConfirmationDialog.svelte';
 	import DownloadModal from '$lib/components/common/DownloadModal.svelte';
+	import TableExportMenu from '$lib/components/common/TableExportMenu.svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Input } from '$lib/components/ui/input';
 	import { toast } from '$lib/components/ui/toast';
@@ -428,36 +427,39 @@
 		)
 	);
 	const columnsKey = $derived(`war-room-tracker-${trackerId}`);
-	let csvOpen = $state(false);
-	let csvColumnKeys = $state<string[]>([]);
+	let exportMode = $state<'copy' | 'csv'>('csv');
+	let exportOpen = $state(false);
+	let exportColumnKeys = $state<string[]>([]);
 
-	const openCsv = () => {
-		csvColumnKeys = loadColumnKeys(columnsKey, exportColumns);
-		csvOpen = true;
+	const openExport = (mode: 'copy' | 'csv') => {
+		exportMode = mode;
+		exportColumnKeys = loadColumnKeys(columnsKey, exportColumns);
+		exportOpen = true;
 	};
 
-	const downloadCsv = (scope: ExportScope, keys: Set<string>) => {
+	const confirmExport = async (scope: ExportScope, keys: Set<string>) => {
 		saveColumnKeys(columnsKey, keys);
-		const csv = rowsToCsv(scope === 'all' ? rows : filtered, pickColumns(exportColumns, keys));
-		downloadText(csv, exportFilename(`war-room-${store.warRoomId}-${tracker.name}`));
-		csvOpen = false;
-	};
-
-	const copyRows = async () => {
-		if (filtered.length === 0) return;
-		const picked = pickColumns(exportColumns, loadColumnKeys(columnsKey, exportColumns));
-		if (await copyText(rowsToTsv(filtered, picked))) {
+		const picked = pickColumns(exportColumns, keys);
+		const target = scope === 'all' ? rows : filtered;
+		if (exportMode === 'csv') {
+			downloadText(
+				rowsToCsv(target, picked),
+				exportFilename(`war-room-${store.warRoomId}-${tracker.name}`)
+			);
+		} else if (await copyText(rowsToTsv(target, picked))) {
 			toast({
-				title: `${filtered.length} ${filtered.length === 1 ? 'row' : 'rows'} copied`,
+				title: `${target.length} ${target.length === 1 ? 'row' : 'rows'} copied`,
 				variant: 'success'
+			});
+		} else {
+			toast({
+				title: 'Could not copy',
+				description: 'The browser refused access to the clipboard.',
+				variant: 'destructive'
 			});
 			return;
 		}
-		toast({
-			title: 'Could not copy',
-			description: 'The browser refused access to the clipboard.',
-			variant: 'destructive'
-		});
+		exportOpen = false;
 	};
 </script>
 
@@ -474,29 +476,13 @@
 			</div>
 		</div>
 		<div class="flex items-center gap-2">
-			<div class="flex items-center gap-0.5 rounded-md border p-0.5">
-				<Button
-					variant="ghost"
-					size="sm"
-					class="h-7 gap-1.5 px-2 text-xs"
-					onclick={copyRows}
-					disabled={filtered.length === 0}
-					title={`Copy the ${filtered.length} rows shown as a table, with the columns of the last CSV download`}
-					data-testid="tracker-copy"
-				>
-					<ClipboardCopy class="h-3.5 w-3.5" /> Copy
-				</Button>
-				<Button
-					variant="ghost"
-					size="sm"
-					class="h-7 gap-1.5 px-2 text-xs"
-					onclick={openCsv}
-					title="Download the rows as CSV, picking the columns"
-					data-testid="tracker-csv"
-				>
-					<FileSpreadsheet class="h-3.5 w-3.5" /> CSV
-				</Button>
-			</div>
+			<TableExportMenu
+				noun="rows"
+				empty={filtered.length === 0}
+				onCopy={() => openExport('copy')}
+				onCsv={() => openExport('csv')}
+				testId="tracker-export"
+			/>
 			{#if canWrite && isManual}
 				<Button
 					size="sm"
@@ -886,16 +872,19 @@
 />
 
 <DownloadModal
-	open={csvOpen}
-	title={`Download "${tracker.name}" as CSV`}
+	open={exportOpen}
+	title={exportMode === 'csv'
+		? `Download "${tracker.name}" as CSV`
+		: `Copy "${tracker.name}" as a table`}
 	itemNounPlural="rows"
 	availableColumns={exportColumns}
 	countVisible={filtered.length}
 	countAll={rows.length}
 	showScope={filtered.length !== rows.length}
-	initialColumnKeys={csvColumnKeys}
-	onConfirm={downloadCsv}
-	onOpenChange={(v) => (csvOpen = v)}
+	initialColumnKeys={exportColumnKeys}
+	confirmLabel={exportMode === 'csv' ? 'Download' : 'Copy'}
+	onConfirm={confirmExport}
+	onOpenChange={(v) => (exportOpen = v)}
 />
 
 {#if canWrite}
