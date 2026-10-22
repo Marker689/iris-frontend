@@ -63,6 +63,7 @@
 		STREAM_LANES,
 		activityAnchorId,
 		activityQuote,
+		feedKinds,
 		latestTime,
 		messageTime,
 		parseStreamPrefs,
@@ -102,10 +103,16 @@
 
 	const warRoomId = $derived(Number(page.params.war_room_id));
 
+	// The chat column and the Activity rail are two feeds of the same
+	// endpoint, each fetching its own kinds and paging on its own.
 	let messages = $state<ChatMessage[]>([]);
 	let loading = $state(true);
 	let loadingMore = $state(false);
 	let exhausted = $state(false);
+	let railMessages = $state<ChatMessage[]>([]);
+	let railLoading = $state(true);
+	let railLoadingMore = $state(false);
+	let railExhausted = $state(false);
 	let body = $state('');
 	let sending = $state(false);
 	let composerEl: HTMLTextAreaElement | null = $state(null);
@@ -219,21 +226,32 @@
 		}, 500);
 	});
 
+	// Kinds each feed fetches under the current routes. A route change
+	// refills the feeds whose kinds moved (see the effect below `load`).
+	const feeds = $derived(feedKinds(streamPrefs.routes));
+
 	const liveMessages = $derived(messages.filter((m) => !m.deleted_at));
-	const destinations = $derived(new Map(liveMessages.map((m) => [m, streamPrefs.destination(m)])));
-	// What the chat column shows, and what the Activity rail lists.
-	const visibleMessages = $derived(liveMessages.filter((m) => destinations.get(m) === 'chat'));
-	const railItems = $derived(liveMessages.filter((m) => destinations.get(m) === 'rail'));
-	// Automatic rows the settings hide everywhere, for the rail footer.
-	const hiddenCount = $derived(
-		liveMessages.filter((m) => destinations.get(m) === 'off' && streamLane(m.kind) != null).length
+	const liveRail = $derived(railMessages.filter((m) => !m.deleted_at));
+	// Rows of a feed fetched just before a route change can still point
+	// elsewhere until the refill lands; mutes hide rows in either feed.
+	const visibleMessages = $derived(
+		liveMessages.filter((m) => streamPrefs.destination(m) === 'chat')
 	);
+	const railItems = $derived(liveRail.filter((m) => streamPrefs.destination(m) === 'rail'));
+	// Loaded automatic rows the mutes hide, for the rail footer. Lanes
+	// switched off aren't fetched at all, the footer names them instead.
+	const hiddenCount = $derived(
+		[...liveMessages, ...liveRail].filter(
+			(m) => streamLane(m.kind) != null && streamPrefs.destination(m) === 'off'
+		).length
+	);
+	const offLanes = $derived(STREAM_LANES.filter((l) => streamPrefs.routes[l.key] === 'off').length);
 	const laneCounts = $derived.by(() => {
 		const counts = Object.fromEntries(STREAM_LANES.map((l) => [l.key, 0])) as Record<
 			StreamLaneKey,
 			number
 		>;
-		for (const m of liveMessages) {
+		for (const m of [...liveMessages, ...liveRail]) {
 			const lane = streamLane(m.kind);
 			if (lane) counts[lane] += 1;
 		}
@@ -287,65 +305,15 @@
 	// Highest chat id the unread counters have seen (see `unreadByTopic`).
 	let unreadWatermark: number | null = null;
 
-	const load = async () => {
-		const generation = streamGeneration;
-		loading = true;
-		const search = appliedSearch || undefined;
-		const res = await WarRoomChatService.list(warRoomId, {
-			limit: 80,
-			search,
-			topicIds: currentTopicIdsFilter
-		});
-		if (generation !== streamGeneration) return;
-		if (res.ok && Array.isArray(res.data)) {
-			messages = [...res.data].reverse();
-			if (res.data.length < 80) exhausted = true;
-			else exhausted = false;
-		}
-		loading = false;
-		scrollToBottom();
-	};
+	const PAGE_SIZE = 80;
+	// Resolves once the saved routes are in: both feeds wait on it so the
+	// first page is fetched with the operator's kinds, not the defaults.
+	let prefsReady: Promise<void> = Promise.resolve();
+	// Kinds each feed currently holds, null before its first load.
+	let chatFeedKinds: string | null = null;
+	let railFeedKinds: string | null = null;
+	let railGeneration = 0;
 
-	// Start the stream over under the current topics / search.
-	const reloadStream = () => {
-		streamGeneration += 1;
-		exhausted = false;
-		messages = [];
-		return load();
-	};
-
-	const loadOlder = async () => {
-		if (loadingMore || exhausted || messages.length === 0) return;
-		const generation = streamGeneration;
-		loadingMore = true;
-		const before = messages[0].message_id;
-		const search = appliedSearch || undefined;
-		const res = await WarRoomChatService.list(warRoomId, {
-			before,
-			limit: 80,
-			search,
-			topicIds: currentTopicIdsFilter
-		});
-		loadingMore = false;
-		if (generation !== streamGeneration) return;
-		if (res.ok && Array.isArray(res.data)) {
-			if (res.data.length === 0) {
-				exhausted = true;
-				return;
-			}
-			const prevHeight = listEl?.scrollHeight ?? 0;
-			const prevTop = listEl?.scrollTop ?? 0;
-			messages = [...[...res.data].reverse(), ...messages];
-			await tick();
-			if (listEl) {
-				const delta = listEl.scrollHeight - prevHeight;
-				listEl.scrollTop = prevTop + delta;
-			}
-			if (res.data.length < 80) exhausted = true;
-		}
-	};
-
-	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	const messageKey = (m: ChatMessage) =>
 		// Live-merged stream mixes real chat ids (positive) and virtual
 		// UserActivity ids (negative) — `message_id` alone isn't ordered
@@ -353,14 +321,173 @@
 		// the poll never appends a row we already have.
 		`${m.message_id}:${m.created_at ?? ''}`;
 
+	// Infinite scroll: a page that doesn't fill the column can't be
+	// scrolled up, so keep loading until it does or the history ends.
+	const fillChat = async () => {
+		await tick();
+		if (listEl && listEl.scrollHeight - listEl.clientHeight < SCROLL_LOAD_THRESHOLD) {
+			await loadOlder();
+		}
+	};
+
+	// `quiet`: a poll refilling an empty chat, no skeleton.
+	const loadChat = async (quiet = false) => {
+		const generation = streamGeneration;
+		if (!quiet) loading = true;
+		await prefsReady;
+		const kinds = feeds.chat;
+		chatFeedKinds = kinds.join(',');
+		const search = appliedSearch || undefined;
+		const res = await WarRoomChatService.list(warRoomId, {
+			limit: PAGE_SIZE,
+			kinds,
+			search,
+			topicIds: currentTopicIdsFilter
+		});
+		if (generation !== streamGeneration) return;
+		if (res.ok && Array.isArray(res.data)) {
+			messages = [...res.data].reverse();
+			exhausted = res.data.length < PAGE_SIZE;
+		}
+		loading = false;
+		await scrollToBottom();
+		await fillChat();
+	};
+
+	const loadRail = async () => {
+		const generation = railGeneration;
+		railLoading = true;
+		await prefsReady;
+		const kinds = feeds.rail;
+		railFeedKinds = kinds.join(',');
+		// No lane routed to the rail: an empty `kinds` would mean "all".
+		if (kinds.length === 0) {
+			railMessages = [];
+			railExhausted = true;
+			railLoading = false;
+			return;
+		}
+		const res = await WarRoomChatService.list(warRoomId, {
+			limit: PAGE_SIZE,
+			kinds,
+			search: appliedSearch || undefined,
+			topicIds: currentTopicIdsFilter
+		});
+		if (generation !== railGeneration) return;
+		if (res.ok && Array.isArray(res.data)) {
+			railMessages = [...res.data].reverse();
+			railExhausted = res.data.length < PAGE_SIZE;
+		}
+		railLoading = false;
+	};
+
+	const load = () => Promise.all([loadChat(), loadRail()]);
+
+	const reloadChat = () => {
+		streamGeneration += 1;
+		exhausted = false;
+		messages = [];
+		return loadChat();
+	};
+
+	const reloadRail = () => {
+		railGeneration += 1;
+		railExhausted = false;
+		railMessages = [];
+		return loadRail();
+	};
+
+	// Start the stream over under the current topics / search.
+	const reloadStream = () => Promise.all([reloadChat(), reloadRail()]);
+
+	// Moving a lane between the rail, the chat and off changes what each
+	// feed has to fetch; only the feeds whose kinds moved start over.
+	$effect(() => {
+		const chat = feeds.chat.join(',');
+		const rail = feeds.rail.join(',');
+		untrack(() => {
+			if (chatFeedKinds != null && chat !== chatFeedKinds) void reloadChat();
+			if (railFeedKinds != null && rail !== railFeedKinds) void reloadRail();
+		});
+	});
+
+	const loadOlder = async () => {
+		if (loading || loadingMore || exhausted || messages.length === 0) return;
+		const generation = streamGeneration;
+		loadingMore = true;
+		const before = messages[0].message_id;
+		const search = appliedSearch || undefined;
+		const res = await WarRoomChatService.list(warRoomId, {
+			before,
+			limit: PAGE_SIZE,
+			kinds: feeds.chat,
+			search,
+			topicIds: currentTopicIdsFilter
+		});
+		loadingMore = false;
+		if (generation !== streamGeneration) return;
+		if (res.ok && Array.isArray(res.data)) {
+			// Read before the DOM update, the loader row included, so what
+			// the operator was reading stays where it was.
+			const prevHeight = listEl?.scrollHeight ?? 0;
+			const prevTop = listEl?.scrollTop ?? 0;
+			const seen = new Set(messages.map(messageKey));
+			messages = [...[...res.data].reverse().filter((m) => !seen.has(messageKey(m))), ...messages];
+			exhausted = res.data.length < PAGE_SIZE;
+			await tick();
+			if (listEl) {
+				const delta = listEl.scrollHeight - prevHeight;
+				listEl.scrollTop = prevTop + delta;
+			}
+			await fillChat();
+		}
+	};
+
+	// The rail keeps its own scroll position when rows land on top.
+	const loadOlderRail = async () => {
+		if (railLoading || railLoadingMore || railExhausted || railMessages.length === 0) return;
+		const generation = railGeneration;
+		railLoadingMore = true;
+		const res = await WarRoomChatService.list(warRoomId, {
+			before: railMessages[0].message_id,
+			limit: PAGE_SIZE,
+			kinds: feeds.rail,
+			search: appliedSearch || undefined,
+			topicIds: currentTopicIdsFilter
+		});
+		railLoadingMore = false;
+		if (generation !== railGeneration) return;
+		if (res.ok && Array.isArray(res.data)) {
+			const seen = new Set(railMessages.map(messageKey));
+			railMessages = [
+				...[...res.data].reverse().filter((m) => !seen.has(messageKey(m))),
+				...railMessages
+			];
+			railExhausted = res.data.length < PAGE_SIZE;
+		}
+	};
+
+	// Scrolled this close to the top, the chat pulls the previous page.
+	const SCROLL_LOAD_THRESHOLD = 300;
+	const onListScroll = () => {
+		if (listEl && listEl.scrollTop < SCROLL_LOAD_THRESHOLD) void loadOlder();
+	};
+
+	let pollTimer: ReturnType<typeof setInterval> | null = null;
+
 	const pollNewer = async () => {
-		if (messages.length === 0) return load();
+		if (loading) return;
+		if (messages.length === 0) return loadChat(true);
 		const generation = streamGeneration;
 		const search = appliedSearch || undefined;
 		// Poll UNFILTERED (no topic filter) so we can (a) show only the
 		// selected topics in the stream and (b) bump unread counters on
 		// the ones the operator isn't currently viewing.
-		const res = await WarRoomChatService.list(warRoomId, { limit: 50, search });
+		const res = await WarRoomChatService.list(warRoomId, {
+			limit: 50,
+			kinds: feeds.chat,
+			search
+		});
 		// The topics or search changed meanwhile: `reloadStream` refills.
 		if (generation !== streamGeneration) return;
 		if (!res.ok || !Array.isArray(res.data)) return;
@@ -432,6 +559,27 @@
 		}
 	};
 
+	// Activity rows don't change once posted: the rail only appends.
+	const pollRail = async () => {
+		if (railLoading || feeds.rail.length === 0) return;
+		const generation = railGeneration;
+		const res = await WarRoomChatService.list(warRoomId, {
+			limit: 50,
+			kinds: feeds.rail,
+			search: appliedSearch || undefined,
+			topicIds: currentTopicIdsFilter
+		});
+		if (generation !== railGeneration) return;
+		if (!res.ok || !Array.isArray(res.data)) return;
+		const seen = new Set(railMessages.map(messageKey));
+		const fresh = (res.data as ChatMessage[]).filter((m) => !seen.has(messageKey(m)));
+		if (fresh.length > 0) railMessages = [...railMessages, ...fresh.reverse()];
+	};
+
+	const pollStream = async () => {
+		await Promise.all([pollNewer(), pollRail()]);
+	};
+
 	// Debounced apply — 250ms after the operator stops typing, we
 	// promote the input into `appliedSearch` and reload the stream.
 	// Same feel as the topbar global search's debounce.
@@ -455,12 +603,9 @@
 	};
 
 	onMount(() => {
-		// Hydrate filter prefs before the first paint so the sidebar
-		// renders with the operator's saved selection rather than the
-		// "everything on" defaults. `void`d intentionally: the load
-		// helpers below don't depend on prefs, they'll rerender when
-		// the filters settle.
-		void loadFilterPrefs();
+		// Hydrate the stream prefs first: the feeds wait on them so the
+		// first pages are fetched with the operator's routes.
+		prefsReady = loadFilterPrefs();
 		// Topics first: the first page must already be filtered on the
 		// selected topic, or every topic's messages show up under Main.
 		void loadTopics().then((reloaded) => {
@@ -470,7 +615,7 @@
 		void loadThreads();
 		void loadTraceLog();
 		pollTimer = setInterval(() => {
-			void pollNewer();
+			void pollStream();
 			void loadThreads();
 			void loadTraceLog();
 			void loadTopics();
@@ -484,12 +629,12 @@
 	// Pulled as soon as someone posts, edits, reacts or votes, instead of
 	// at the next poll tick (which stays as the fallback).
 	useWarRoomLive(['chat'], async () => {
-		await Promise.all([pollNewer(), loadThreads(), loadTopics()]);
+		await Promise.all([pollStream(), loadThreads(), loadTopics()]);
 	});
 	// Any other change of the room lands in the stream as an activity row
 	useWarRoomLive(
 		WAR_ROOM_LIVE_TOPICS.filter((topic) => topic !== 'chat'),
-		() => pollNewer()
+		() => pollStream()
 	);
 
 	// Used by the per-bubble delete affordance to decide whether to render
@@ -1114,7 +1259,7 @@
 	// visible, so it's frozen at the moment it was hidden.
 	let seenAfter = $state(0);
 	$effect(() => {
-		if (railShown && !loading) {
+		if (railShown && !railLoading) {
 			const latest = latestTime(railItems);
 			untrack(() => {
 				if (latest > seenAfter) seenAfter = latest;
@@ -1154,7 +1299,13 @@
 		if (id == null) return;
 		e.preventDefault();
 		e.stopPropagation();
-		const target = messages.find((m) => m.message_id === id && !m.deleted_at);
+		const find = () => [...liveMessages, ...liveRail].find((m) => m.message_id === id) ?? null;
+		let target = find();
+		// Older than the rail's loaded pages: page back a few times.
+		for (let i = 0; !target && !railExhausted && railMessages.length > 0 && i < 10; i++) {
+			await loadOlderRail();
+			target = find();
+		}
 		const where = target ? streamPrefs.destination(target) : null;
 		if (where === 'rail') {
 			if (!railShown) toggleRail();
@@ -1166,11 +1317,11 @@
 			return;
 		}
 		toast({
-			title: where === 'off' ? 'Hidden by your settings' : 'Not loaded',
+			title: where === 'off' ? 'Hidden by your settings' : 'Not found',
 			description:
 				where === 'off'
 					? 'That activity is muted in the Activity settings.'
-					: 'That activity is older than what this page has loaded.'
+					: 'That activity is far back in the stream, or its lane is off in the Activity settings.'
 		});
 	};
 
@@ -1433,7 +1584,7 @@
 			// scroll back. Cheap and honest; no jarring silent no-op.
 			toast({
 				title: 'Message not loaded',
-				description: 'Scroll back with "Load earlier messages" to find it.',
+				description: 'Scroll up in the chat to load older messages and find it.',
 				variant: 'warning'
 			});
 		}
@@ -2162,6 +2313,7 @@
 				bind:this={listEl}
 				class="flex-1 overflow-y-auto px-4 py-4 sm:px-6"
 				onclickcapture={onActivityLinkClick}
+				onscroll={onListScroll}
 			>
 				{#if loading}
 					<div class="flex flex-col gap-3">
@@ -2176,20 +2328,19 @@
 						{/each}
 					</div>
 				{:else}
-					{#if !exhausted}
-						<div class="flex justify-center pb-3">
-							<Button
-								variant="ghost"
-								size="sm"
-								class="h-7 text-2xs"
-								onclick={loadOlder}
-								disabled={loadingMore}
-							>
-								{#if loadingMore}
-									<Loader2 class="mr-1 h-3 w-3 animate-spin" />
-								{/if}
-								Load earlier messages
-							</Button>
+					<!-- Older pages load as the operator scrolls up. Fixed height
+					     whatever it shows, so a page landing above doesn't jump. -->
+					{#if visibleMessages.length > 0}
+						<div
+							class="mb-3 flex h-6 items-center justify-center text-2xs text-muted-foreground"
+							aria-live="polite"
+						>
+							{#if loadingMore}
+								<Loader2 class="mr-1 h-3 w-3 animate-spin" />
+								Loading older messages…
+							{:else if exhausted}
+								Start of the conversation
+							{/if}
 						</div>
 					{/if}
 
@@ -2200,11 +2351,11 @@
 							<Send class="h-6 w-6 opacity-30" />
 							<p class="text-sm">
 								{#if appliedSearch && messages.length === 0}
-									No stream entries match “{appliedSearch}”.
-								{:else if messages.length === 0}
-									No activity yet. Drop the first message or attach a case.
+									No messages match “{appliedSearch}”.
 								{:else if railItems.length > 0}
 									Nobody has said anything yet. Automatic activity is in the Activity rail.
+								{:else if messages.length === 0}
+									No activity yet. Drop the first message or attach a case.
 								{:else}
 									Nothing to show with your Activity settings.
 								{/if}
@@ -3058,6 +3209,11 @@
 			{attachedCases}
 			{laneCounts}
 			{hiddenCount}
+			{offLanes}
+			loading={railLoading}
+			loadingOlder={railLoadingMore}
+			exhausted={railExhausted}
+			onLoadOlder={loadOlderRail}
 			onToggle={toggleRail}
 			onDiscuss={discussInChat}
 			onMute={muteFromRail}

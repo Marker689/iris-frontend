@@ -24,7 +24,7 @@
 	type Props = {
 		prefs: StreamPreferences;
 		attachedCases: WarRoomCaseAttachment[];
-		/** Loaded rows per lane, whatever their route. */
+		/** Loaded rows per lane; lanes switched off aren't fetched. */
 		laneCounts: Record<StreamLaneKey, number>;
 		onDone: () => void;
 	};
@@ -101,7 +101,10 @@
 						{:else}
 							<span class="min-w-0 flex-1 truncate text-xs">{lane.label}</span>
 						{/if}
-						<span class="text-2xs tabular-nums text-muted-foreground">{laneCounts[lane.key]}</span>
+						{#if route !== 'off'}
+							<span class="text-2xs tabular-nums text-muted-foreground">{laneCounts[lane.key]}</span
+							>
+						{/if}
 						<div
 							class="inline-flex shrink-0 rounded-md border bg-muted/40 p-0.5"
 							role="radiogroup"

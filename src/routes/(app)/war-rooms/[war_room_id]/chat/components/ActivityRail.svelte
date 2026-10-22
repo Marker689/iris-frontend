@@ -14,6 +14,7 @@
 	import {
 		Activity,
 		ArrowDown,
+		Loader2,
 		BellOff,
 		ChevronDown,
 		ChevronUp,
@@ -62,8 +63,17 @@
 		prefs: StreamPreferences;
 		attachedCases: WarRoomCaseAttachment[];
 		laneCounts: Record<StreamLaneKey, number>;
-		/** Automatic rows the settings hide everywhere. */
+		/** Loaded automatic rows the mutes hide. */
 		hiddenCount: number;
+		/** Lanes switched off, never fetched. */
+		offLanes: number;
+		/** First page still on its way. */
+		loading: boolean;
+		loadingOlder: boolean;
+		/** Nothing older left to load. */
+		exhausted: boolean;
+		/** Load the page before the oldest row. */
+		onLoadOlder: () => Promise<void>;
 		onToggle: () => void;
 		onDiscuss: (m: ChatMessage) => void;
 		onMute: (m: ChatMessage) => void;
@@ -79,6 +89,11 @@
 		attachedCases,
 		laneCounts,
 		hiddenCount,
+		offLanes,
+		loading,
+		loadingOlder,
+		exhausted,
+		onLoadOlder,
 		onToggle,
 		onDiscuss,
 		onMute,
@@ -171,21 +186,63 @@
 
 	// Oldest on top, newest at the bottom, like the chat: the list follows
 	// new rows while the operator is at the bottom and stays put once they
-	// scroll up to read.
+	// scroll up to read. Scrolling near the top loads the previous page.
+	const LOAD_THRESHOLD = 200;
 	let atBottom = $state(true);
 	const onScroll = () => {
 		if (!scrollEl) return;
 		atBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 40;
+		if (scrollEl.scrollTop < LOAD_THRESHOLD) void onLoadOlder();
 	};
 	const scrollToBottom = async () => {
 		await tick();
 		if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
 		atBottom = true;
 	};
+
+	// A page landing on top must not move what the operator is reading:
+	// measure before the DOM update, shift by what was added after it.
+	const entryKey = (e: RailEntry) => {
+		const first = firstOf(e);
+		return `${e.type}:${first.message_id}:${first.created_at}`;
+	};
+	const rowKey = (m: ChatMessage) => `${m.message_id}:${m.created_at}`;
+	let heightBefore = 0;
+	let firstBefore: string | null = null;
+	$effect.pre(() => {
+		void entries;
+		heightBefore = untrack(() => scrollEl?.scrollHeight ?? 0);
+	});
 	$effect(() => {
 		void entries;
+		// Older rows arrived: the previous first row is still there, below.
+		const first = items.length > 0 ? rowKey(items[0]) : null;
+		const prepended =
+			firstBefore != null &&
+			first !== firstBefore &&
+			untrack(() => items.some((m) => rowKey(m) === firstBefore));
+		firstBefore = first;
 		if (!open || settingsOpen) return;
-		if (untrack(() => atBottom)) void scrollToBottom();
+		untrack(() => {
+			if (atBottom) void scrollToBottom();
+			else if (prepended && scrollEl) {
+				scrollEl.scrollTop += scrollEl.scrollHeight - heightBefore;
+			}
+		});
+	});
+
+	// A page that doesn't fill the rail can't be scrolled up: keep loading
+	// until it does. Not while filtering, which could walk the whole
+	// history looking for a match.
+	$effect(() => {
+		void entries;
+		if (!open || settingsOpen || loading || loadingOlder || exhausted) return;
+		if (laneFilter !== 'all' || query.trim()) return;
+		void tick().then(() => {
+			if (scrollEl && scrollEl.scrollHeight - scrollEl.clientHeight < LOAD_THRESHOLD) {
+				void onLoadOlder();
+			}
+		});
 	});
 
 	const togglePause = () => {
@@ -459,12 +516,29 @@
 				<div
 					class="flex flex-col items-center gap-2 px-6 py-12 text-center text-xs text-muted-foreground"
 				>
-					<Inbox class="h-6 w-6" />
-					{items.length === 0 ? 'No activity yet.' : 'Nothing here with the current filters.'}
+					{#if loading}
+						<Loader2 class="h-5 w-5 animate-spin" />
+						Loading activity…
+					{:else}
+						<Inbox class="h-6 w-6" />
+						{items.length === 0 ? 'No activity yet.' : 'Nothing here with the current filters.'}
+					{/if}
 				</div>
 			{:else}
+				<!-- Fixed height whatever it shows, see the scroll anchoring. -->
+				<div
+					class="flex h-6 items-center justify-center text-2xs text-muted-foreground"
+					aria-live="polite"
+				>
+					{#if loadingOlder}
+						<Loader2 class="mr-1 h-3 w-3 animate-spin" />
+						Loading older activity…
+					{:else if exhausted}
+						Start of the activity
+					{/if}
+				</div>
 				<ul class="space-y-0.5">
-					{#each entries as entry, i (`${entry.type}:${firstOf(entry).message_id}:${firstOf(entry).created_at}`)}
+					{#each entries as entry, i (entryKey(entry))}
 						{@const first = firstOf(entry)}
 						{@const hour = hourOf(first)}
 						{#if i === 0 || hourOf(firstOf(entries[i - 1])).key !== hour.key}
@@ -600,10 +674,15 @@
 			</button>
 		{/if}
 
-		{#if !settingsOpen && hiddenCount > 0}
+		{#if !settingsOpen && (hiddenCount > 0 || offLanes > 0)}
 			<div class="shrink-0 border-t px-3 py-1.5 text-2xs text-muted-foreground">
 				<EyeOff class="mr-1 inline h-3 w-3" />
-				{hiddenCount} event{hiddenCount === 1 ? '' : 's'} hidden by your settings ·
+				{#if hiddenCount > 0}
+					{hiddenCount} event{hiddenCount === 1 ? '' : 's'} muted ·
+				{/if}
+				{#if offLanes > 0}
+					{offLanes} lane{offLanes === 1 ? '' : 's'} off ·
+				{/if}
 				<button
 					type="button"
 					class="text-primary hover:underline"

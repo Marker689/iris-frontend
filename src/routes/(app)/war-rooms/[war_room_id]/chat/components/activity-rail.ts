@@ -58,6 +58,22 @@ export const laneLabel = (key: StreamLaneKey): string =>
 export const defaultLaneRoutes = (): LaneRoutes =>
 	Object.fromEntries(STREAM_LANES.map((l) => [l.key, l.route])) as LaneRoutes;
 
+/** The conversation: no lane, always in the chat. */
+export const CONVERSATION_KINDS: readonly ChatMessageKind[] = ['message', 'poll', 'priority'];
+
+/**
+ * Kinds the chat and the rail each fetch, so each column pages through
+ * its own rows and a burst of case activity never pushes the
+ * conversation out of a page. Lanes switched off are fetched by neither.
+ */
+export const feedKinds = (
+	routes: LaneRoutes
+): { chat: ChatMessageKind[]; rail: ChatMessageKind[] } => {
+	const routed = (route: LaneRoute) =>
+		STREAM_LANES.filter((l) => routes[l.key] === route).flatMap((l) => [...l.kinds]);
+	return { chat: [...CONVERSATION_KINDS, ...routed('chat')], rail: routed('rail') };
+};
+
 // Case activity types, grouped so the per-case settings stay short.
 export const ACTIVITY_GROUPS: {
 	key: string;

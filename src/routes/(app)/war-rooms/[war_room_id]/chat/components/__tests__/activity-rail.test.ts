@@ -6,6 +6,7 @@ import {
 	burstSummary,
 	defaultLaneRoutes,
 	defaultStreamSettings,
+	feedKinds,
 	foldBursts,
 	isMutedEvent,
 	latestTime,
@@ -55,6 +56,28 @@ describe('lanes', () => {
 		expect(routes.case_activity).toBe('rail');
 		expect(routes.room_activity).toBe('rail');
 		expect(routes.tasks).toBe('rail');
+	});
+});
+
+describe('feedKinds', () => {
+	it('fetches the conversation and chat lanes for the chat, rail lanes for the rail', () => {
+		const routes = defaultLaneRoutes();
+		routes.system = 'off';
+		routes.decisions = 'rail';
+		const { chat, rail } = feedKinds(routes);
+		expect(chat).toEqual(
+			expect.arrayContaining(['message', 'poll', 'priority', 'note', 'pin', 'case_attached'])
+		);
+		expect(chat).not.toContain('decision');
+		expect(rail).toEqual(expect.arrayContaining(['case_activity', 'tracker', 'decision']));
+		expect([...chat, ...rail]).not.toContain('system');
+	});
+
+	it('leaves the rail nothing to fetch when every lane goes elsewhere', () => {
+		const routes = defaultLaneRoutes();
+		for (const key of Object.keys(routes) as (keyof typeof routes)[]) routes[key] = 'chat';
+		expect(feedKinds(routes).rail).toEqual([]);
+		expect(feedKinds(routes).chat).toContain('case_activity');
 	});
 });
 
