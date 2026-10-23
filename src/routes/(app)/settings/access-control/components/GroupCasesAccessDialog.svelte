@@ -152,7 +152,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="sm:max-w-2xl">
+	<Dialog.Content class="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
 		<Dialog.Header>
 			<Dialog.Title>Case access — {group.group_name}</Dialog.Title>
 			<Dialog.Description>
@@ -235,7 +235,7 @@
 					{autoFollow ? 'Apply auto-follow' : 'Add grants'}
 				</h3>
 				<div class="flex flex-col gap-2">
-					<div class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
 						<div class="relative">
 							<SearchIcon
 								size={12}
