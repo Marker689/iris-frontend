@@ -3,16 +3,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('$lib/services/hooks.service', () => ({
 	HooksService: {
 		invoke: vi.fn(),
-		invokeForAlerts: vi.fn()
+		invokeForAlerts: vi.fn(),
+		invokeForWarRoom: vi.fn()
 	}
 }));
 
 import { HooksService } from '$lib/services/hooks.service';
 import type { HookOption } from '$lib/services/hooks.service';
-import { callAlertHook, callHook, hookOptionKey } from '../hooks';
+import {
+	callAlertHook,
+	callHook,
+	callWarRoomHook,
+	filterHookOptions,
+	hookOptionKey
+} from '../hooks';
 
 const mockInvoke = HooksService.invoke as unknown as ReturnType<typeof vi.fn>;
 const mockInvokeForAlerts = HooksService.invokeForAlerts as unknown as ReturnType<typeof vi.fn>;
+const mockInvokeForWarRoom = HooksService.invokeForWarRoom as unknown as ReturnType<typeof vi.fn>;
 
 const moduleOption: HookOption = {
 	hook_name: 'on_manual_trigger_ioc',
@@ -85,5 +93,48 @@ describe('hooks utils', () => {
 		expect(hookOptionKey(workflow)).not.toBe(
 			hookOptionKey({ ...workflow, workflow_trigger_id: 'b' })
 		);
+	});
+});
+
+describe('callWarRoomHook', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockInvokeForWarRoom.mockResolvedValue({ ok: true, data: { queued: 1 } });
+	});
+
+	it('sends the entry to the war-room invoker, without targets', async () => {
+		const outcome = await callWarRoomHook(3, {
+			...webhookOption,
+			hook_name: 'on_manual_trigger_war_room'
+		});
+		expect(mockInvokeForWarRoom).toHaveBeenCalledWith(3, {
+			hook_name: 'on_manual_trigger_war_room',
+			module_name: 'IRIS webhooks',
+			hook_ui_name: 'Send to SOAR',
+			webhook_id: 4
+		});
+		expect(outcome).toEqual({ status: 'success', message: 'Queued task with 1 object(s)' });
+	});
+});
+
+describe('filterHookOptions', () => {
+	const options = [moduleOption, webhookOption];
+
+	it('keeps every entry for an empty or blank query', () => {
+		expect(filterHookOptions(options, '')).toEqual(options);
+		expect(filterHookOptions(options, '   ')).toEqual(options);
+	});
+
+	it('matches the label case-insensitively', () => {
+		expect(filterHookOptions(options, 'soar')).toEqual([webhookOption]);
+	});
+
+	it('matches the module name', () => {
+		expect(filterHookOptions(options, 'misp')).toEqual([moduleOption]);
+	});
+
+	it('needs every word to match', () => {
+		expect(filterHookOptions(options, 'send webhooks')).toEqual([webhookOption]);
+		expect(filterHookOptions(options, 'send misp')).toEqual([]);
 	});
 });

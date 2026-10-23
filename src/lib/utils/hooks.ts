@@ -106,3 +106,32 @@ export const callAlertHook = async (
 		}),
 		hookOption
 	);
+
+/** Fire a manual hook against a war room, through its own invoker. */
+export const callWarRoomHook = async (
+	warRoomId: number,
+	hookOption: HookOption
+): Promise<HookCallOutcome> =>
+	toOutcome(
+		await HooksService.invokeForWarRoom(warRoomId, {
+			hook_name: hookOption.hook_name,
+			module_name: hookOption.module_name,
+			hook_ui_name: hookOption.manual_hook_ui_name,
+			...entryTarget(hookOption)
+		}),
+		hookOption
+	);
+
+/**
+ * Entries of a "Run" menu matching the filter typed above them: every
+ * word of `query` must appear, case-insensitively, in the label or the
+ * module name. An empty query keeps them all.
+ */
+export const filterHookOptions = (options: HookOption[], query: string): HookOption[] => {
+	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+	if (words.length === 0) return options;
+	return options.filter((hookOption) => {
+		const haystack = `${hookOption.manual_hook_ui_name} ${hookOption.module_name}`.toLowerCase();
+		return words.every((word) => haystack.includes(word));
+	});
+};

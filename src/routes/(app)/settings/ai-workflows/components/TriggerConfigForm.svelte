@@ -105,7 +105,8 @@
 		{ value: 'event', label: 'Timeline event', entity: 'case' },
 		{ value: 'evidence', label: 'Evidence', entity: 'case' },
 		{ value: 'datastore_file', label: 'Datastore file', entity: 'case' },
-		{ value: 'task', label: 'Task', entity: 'case' }
+		{ value: 'task', label: 'Task', entity: 'case' },
+		{ value: 'war_room', label: 'War room', entity: 'war_room' }
 	];
 	const menuItems = MENUS.map(({ value, label }) => ({ value, label }));
 	const missingMenuEntities = $derived.by(() => {
@@ -117,7 +118,7 @@
 	});
 
 	// One run for the whole selection: objects of one case only
-	const SINGLE_RUN_MENUS = ['alert', 'case'];
+	const SINGLE_RUN_MENUS = ['alert', 'case', 'war_room'];
 	const singleRunMenus = $derived.by(() => {
 		if (type !== 'manual') return [];
 		return asStrings(config.menus).filter((m) => SINGLE_RUN_MENUS.includes(m));

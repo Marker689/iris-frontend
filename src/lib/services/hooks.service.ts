@@ -11,7 +11,8 @@ export type HookObjectType =
 	| 'evidence'
 	| 'datastore_file'
 	| 'global_task'
-	| 'alert';
+	| 'alert'
+	| 'war_room';
 
 export interface HookOption {
 	hook_name: string;
@@ -41,6 +42,9 @@ export interface InvokeHookBody {
 
 /** Same payload minus `type` — the alert endpoint only knows alerts. */
 export type InvokeAlertHookBody = Omit<InvokeHookBody, 'type'>;
+
+/** Same payload minus `type` and `targets` — the target is the war room of the URL. */
+export type InvokeWarRoomHookBody = Omit<InvokeHookBody, 'type' | 'targets'>;
 
 export interface InvokeHookResult {
 	queued: number;
@@ -75,5 +79,21 @@ export class HooksService {
 		options: ApiOptions = {}
 	): Promise<RequestResponse<InvokeHookResult>> {
 		return ApiService.post<InvokeHookResult>('/alerts/dim-hooks/invoke', body, options);
+	}
+
+	/**
+	 * War rooms don't belong to a case either: the war room of the URL
+	 * is the one target.
+	 */
+	static async invokeForWarRoom(
+		warRoomId: number,
+		body: InvokeWarRoomHookBody,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<InvokeHookResult>> {
+		return ApiService.post<InvokeHookResult>(
+			`/war-rooms/${warRoomId}/dim-hooks/invoke`,
+			body,
+			options
+		);
 	}
 }

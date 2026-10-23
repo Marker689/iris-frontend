@@ -26,12 +26,14 @@
 		ArrowLeftIcon,
 		CalendarIcon,
 		CheckIcon,
+		ChevronDownIcon,
 		DatabaseIcon,
 		LockIcon,
 		PencilIcon,
 		RadioTowerIcon,
 		ShieldAlert,
-		XIcon
+		XIcon,
+		ZapIcon
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -46,6 +48,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import { Popover, PopoverContent, PopoverTrigger } from '$lib/components/ui/popover';
 	import { toast } from '$lib/components/ui/toast';
+	import BulkHooksMenu from '$lib/components/common/BulkHooksMenu.svelte';
 	import WarRoomColorPicker from '$lib/components/war-room/WarRoomColorPicker.svelte';
 	import { WAR_ROOM_CTX, type WarRoomContext } from '$lib/contexts/war-room.context.svelte';
 	import {
@@ -607,6 +610,34 @@
 		{/if}
 
 		<div class="hidden h-5 w-px bg-border sm:block" aria-hidden="true"></div>
+
+		<!--
+		  Run ▾ — the manual hooks of the war room (modules, webhooks, AI
+		  workflows). Renders nothing when none is registered.
+		-->
+		{#if room?.war_room_id}
+			<BulkHooksMenu
+				hookType="war_room"
+				targets={[room.war_room_id]}
+				label="Run on this war room"
+				align="end"
+			>
+				{#snippet trigger({ props, disabled })}
+					<Button
+						{...props}
+						variant="ghost"
+						size="sm"
+						class="h-7 gap-1.5 px-2 text-xs"
+						{disabled}
+						data-testid="war-room-run-hooks"
+					>
+						<ZapIcon size={13} />
+						<span class="hidden md:inline">Run</span>
+						<ChevronDownIcon size={12} class="opacity-70" />
+					</Button>
+				{/snippet}
+			</BulkHooksMenu>
+		{/if}
 
 		<!--
 		  Archive / restore. Filing decision, independent from the state
