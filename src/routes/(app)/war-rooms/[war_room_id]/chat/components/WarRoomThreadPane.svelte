@@ -55,6 +55,7 @@
 	import ComposerEmojiButton from './ComposerEmojiButton.svelte';
 	import ComposerPendingAttachments from './ComposerPendingAttachments.svelte';
 	import { ComposerAttachments } from './composer-attachments.svelte';
+	import { autoGrow } from '$lib/actions/auto-grow';
 
 	interface Props {
 		warRoomId: number;
@@ -872,13 +873,14 @@
 
 			<textarea
 				bind:this={composerEl}
+				use:autoGrow={{ value: body, max: 200 }}
 				value={body}
 				oninput={onInput}
 				onkeydown={onKey}
 				onpaste={composerFiles.onPaste}
 				placeholder="Reply in thread… @mentions, /commands, attachments"
 				rows="1"
-				class="flex-1 resize-none bg-transparent text-xs leading-relaxed outline-none placeholder:text-muted-foreground"
+				class="flex-1 resize-none bg-transparent py-1 text-xs leading-relaxed outline-none placeholder:text-muted-foreground"
 			></textarea>
 
 			<ChatComposerMentions

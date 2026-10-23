@@ -13,6 +13,7 @@
 	import { onMount } from 'svelte';
 	import { Loader2 } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { autoGrow } from '$lib/actions/auto-grow';
 
 	interface Props {
 		/** Body to seed the draft with — the message's current text. */
@@ -39,20 +40,13 @@
 	let draft = $state(initial);
 	let el: HTMLTextAreaElement | null = $state(null);
 
-	// Grow to fit the content so a long message isn't edited through a
-	// one-line slot. Called on mount and on every keystroke.
-	const autosize = () => {
-		if (!el) return;
-		el.style.height = 'auto';
-		el.style.height = `${el.scrollHeight}px`;
-	};
-
+	// The textarea grows with the content (`autoGrow`), so a long message
+	// isn't edited through a one-line slot.
 	onMount(() => {
 		el?.focus();
 		// Caret at the end rather than select-all: most edits are a tweak
 		// to the tail, not a rewrite.
 		el?.setSelectionRange(draft.length, draft.length);
-		autosize();
 	});
 
 	const commit = () => {
@@ -84,7 +78,7 @@
 	<textarea
 		bind:this={el}
 		bind:value={draft}
-		oninput={autosize}
+		use:autoGrow={{ value: draft, max: 320 }}
 		onkeydown={onKey}
 		rows="1"
 		disabled={saving}

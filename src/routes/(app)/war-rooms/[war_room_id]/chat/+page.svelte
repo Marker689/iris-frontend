@@ -101,6 +101,7 @@
 	import { CaseAssetsService } from '$lib/services/case-assets.service';
 	import { CaseTimelineService } from '$lib/services/case-timeline.service';
 	import { CaseTasksService } from '$lib/services/case-tasks.service';
+	import { autoGrow } from '$lib/actions/auto-grow';
 
 	const warRoomId = $derived(Number(page.params.war_room_id));
 
@@ -3140,13 +3141,14 @@
 
 					<textarea
 						bind:this={composerEl}
+						use:autoGrow={{ value: body, max: 240 }}
 						value={body}
 						oninput={onInput}
 						onkeydown={onKey}
 						onpaste={composerFiles.onPaste}
 						placeholder="Type a message, /command, @user, #resource or :emoji…"
 						rows="1"
-						class="flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
+						class="flex-1 resize-none bg-transparent py-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
 					></textarea>
 
 					<ChatComposerMentions
