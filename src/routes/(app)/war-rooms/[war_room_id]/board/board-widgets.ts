@@ -1,22 +1,26 @@
 /**
  * War-room board widgets as the room's writers set them: what each type
- * is called, the room's widget list turned into layout slots, and the
- * edits made to that list in "Edit board" before it is saved (add,
- * update, remove, move, change column). The server validates the list
- * again on save (see `business/war_room_board_widgets.py`).
+ * is called, the room's widget list turned into layout slots, what a
+ * widget's settings amount to in a line, and the edits made to that list
+ * in "Edit board" before it is saved (add, update, remove, move, drag to
+ * a place, change column or type). The server validates the list again
+ * on save (see `business/war_room_board_widgets.py`).
  */
 import {
 	BOARD_BUILTIN_TYPES,
 	BOARD_TRACKER_TYPES,
 	BOARD_WIDGET_PLACES,
+	boardValueLabel,
 	isBoardBuiltinType,
 	type BoardConfigurableType,
 	type BoardPanelColumn,
 	type BoardWidgetConfig,
 	type BoardWidgetType,
+	type BoardWidgetZone,
 	type WarRoomBoardWidget
 } from '$lib/services/war-room-board.service';
-import type { Tracker, TrackerColumn } from '$lib/services/war-room-trackers.service';
+import type { Tracker, TrackerColumn, TrackerStep } from '$lib/services/war-room-trackers.service';
+import type { WarRoomTeam } from '$lib/services/war-room-teams.service';
 import type { BoardSlot } from './board-layout';
 
 /** Mirrors the server's limit. */
@@ -183,6 +187,27 @@ export const newBoardWidget = (
 	};
 };
 
+/** Tracker widgets, in the order "Show as" offers them. */
+export const BOARD_TRACKER_KINDS: readonly BoardConfigurableType[] = [
+	'tracker_count',
+	'tracker_progress',
+	'tracker_list',
+	'tracker_breakdown'
+];
+
+/** What the "Add" of a zone offers: new widgets, then built-ins to put back. */
+export function boardZoneAddable(
+	zone: BoardWidgetZone,
+	widgets: Pick<WarRoomBoardWidget, 'type'>[],
+	available: (type: BoardWidgetType) => boolean
+): { configurable: BoardConfigurableType[]; builtins: BoardWidgetType[] } {
+	const inZone = (t: BoardWidgetType) => BOARD_WIDGET_PLACES[t].zone === zone;
+	return {
+		configurable: BOARD_ADDABLE_TYPES.filter(inZone),
+		builtins: missingBuiltins(widgets).filter((t) => inZone(t) && available(t))
+	};
+}
+
 /** Built-in widgets the room's board does not have (they can be added back). */
 export const missingBuiltins = (widgets: Pick<WarRoomBoardWidget, 'type'>[]): BoardWidgetType[] => {
 	const present = new Set(widgets.map((w) => w.type));
@@ -233,6 +258,138 @@ export function setBoardWidgetColumn(
 	const w = widgets.find((x) => x.id === id);
 	if (!w || BOARD_WIDGET_PLACES[w.type].zone !== 'panel' || w.column === column) return widgets;
 	return [...widgets.filter((x) => x.id !== id), { ...w, column }];
+}
+
+/**
+ * Move a widget just before `beforeId`, or to the end of its zone (and
+ * column) when null; a panel can change column on the way. The list as
+ * is when the place is not in the widget's zone or nothing changes.
+ */
+export function placeBoardWidget(
+	widgets: WarRoomBoardWidget[],
+	id: string,
+	beforeId: string | null,
+	column?: BoardPanelColumn
+): WarRoomBoardWidget[] {
+	const w = widgets.find((x) => x.id === id);
+	if (!w || id === beforeId) return widgets;
+	const moved =
+		column && BOARD_WIDGET_PLACES[w.type].zone === 'panel' && (w.column ?? 'main') !== column
+			? { ...w, column }
+			: w;
+	const g = group(moved);
+	const rest = widgets.filter((x) => x.id !== id);
+	let at: number;
+	if (beforeId !== null) {
+		at = rest.findIndex((x) => x.id === beforeId);
+		if (at === -1 || group(rest[at]) !== g) return widgets;
+	} else {
+		const last = rest.map(group).lastIndexOf(g);
+		at = last === -1 ? rest.length : last + 1;
+	}
+	const out = [...rest.slice(0, at), moved, ...rest.slice(at)];
+	// Only the order within the zone (and column) shows.
+	const order = (list: WarRoomBoardWidget[]) =>
+		list
+			.filter((x) => group(x) === g)
+			.map((x) => x.id)
+			.join();
+	return moved === w && order(out) === order(widgets) ? widgets : out;
+}
+
+/**
+ * Turn a tracker widget into another kind (e.g. a count into a progress),
+ * keeping what still applies: the tracker, the steps picked, the filter.
+ * A tile becoming a panel goes to the panel's usual column.
+ */
+export function changeBoardWidgetType(
+	w: WarRoomBoardWidget,
+	type: BoardConfigurableType,
+	trackers: Pick<Tracker, 'id' | 'columns'>[]
+): WarRoomBoardWidget {
+	if (w.type === type) return w;
+	const config: BoardWidgetConfig = { ...newBoardWidgetConfig(type, trackers) };
+	const old = w.config;
+	if ('tracker_id' in config && old.tracker_id !== undefined) config.tracker_id = old.tracker_id;
+	// "Every row" ([]) and "the offered steps" (null) both mean no pick.
+	if ('step_ids' in config && old.step_ids?.length) config.step_ids = [...old.step_ids];
+	if ('filter' in config && old.filter) config.filter = { ...old.filter };
+	if (type === 'tracker_breakdown') {
+		const tracker = trackers.find((t) => t.id === config.tracker_id);
+		config.column_key = breakdownColumns(tracker?.columns ?? [])[0]?.key;
+	}
+	const place = BOARD_WIDGET_PLACES[type];
+	const wasPanel = BOARD_WIDGET_PLACES[w.type].zone === 'panel';
+	return {
+		...w,
+		type,
+		column: place.zone === 'panel' ? (wasPanel ? (w.column ?? place.column) : place.column) : null,
+		config
+	};
+}
+
+export interface BoardSummaryContext {
+	trackers: Pick<Tracker, 'id' | 'name' | 'columns'>[];
+	steps: Pick<TrackerStep, 'id' | 'name'>[];
+	teams: Pick<WarRoomTeam, 'team_id' | 'name'>[];
+}
+
+/** What a widget's settings amount to, in a line (the editor's cards). */
+export function boardWidgetSummary(w: WarRoomBoardWidget, ctx: BoardSummaryContext): string {
+	const c = w.config;
+	const stepNames = (ids: number[]) =>
+		ids.map((id) => ctx.steps.find((s) => s.id === id)?.name ?? `#${id}`).join(', ');
+	const tracker = ctx.trackers.find((t) => t.id === c.tracker_id);
+	const filter = () => {
+		const col = tracker?.columns?.find((x) => x.key === c.filter?.column_key);
+		if (!c.filter || !col) return null;
+		return `${col.label} is ${c.filter.values.map(boardValueLabel).join(' or ')}`;
+	};
+	const join = (...parts: (string | null | false | undefined)[]) =>
+		parts.filter(Boolean).join(' · ');
+	const name = tracker?.name ?? 'No tracker';
+	switch (w.type) {
+		case 'tracker_count':
+			return join(
+				name,
+				c.step_ids?.length ? stepNames(c.step_ids) : 'every row',
+				c.of_total !== false && 'out of all rows',
+				filter()
+			);
+		case 'tracker_list':
+			return join(name, c.step_ids?.length ? stepNames(c.step_ids) : 'every row', filter());
+		case 'tracker_progress':
+			return join(
+				name,
+				c.display === 'donut' ? 'donut' : c.display === 'funnel' ? 'funnel' : 'bars',
+				c.step_ids == null ? 'offered steps' : stepNames(c.step_ids),
+				filter()
+			);
+		case 'tracker_breakdown': {
+			const col = tracker?.columns?.find((x) => x.key === c.column_key);
+			return join(name, col ? `by ${col.label}` : 'no column');
+		}
+		case 'tasks': {
+			const teams = (c.team_ids ?? [])
+				.map((id) => ctx.teams.find((t) => t.team_id === id)?.name)
+				.filter(Boolean)
+				.join(', ');
+			return join(c.in_progress_only ? 'In progress only' : 'Open tasks', teams || 'every team');
+		}
+		case 'note': {
+			const line = (c.text ?? '')
+				.split('\n')
+				.map((l) => l.replace(/^[#>*\-\s]+/, '').trim())
+				.find(Boolean);
+			return line ?? 'Empty note';
+		}
+		case 'cases':
+			return c.highlight_step_ids?.length
+				? `Flags ${stepNames(c.highlight_step_ids)}`
+				: 'One card per attached case';
+		default:
+			return BOARD_WIDGET_TYPES[w.type].description;
+	}
 }
 
 /**

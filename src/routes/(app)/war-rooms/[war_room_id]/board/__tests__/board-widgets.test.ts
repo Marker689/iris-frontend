@@ -7,13 +7,17 @@ import {
 	boardSlots,
 	boardStepHex,
 	boardWidgetProblem,
+	boardWidgetSummary,
 	boardWidgetTitle,
 	boardWidgetsBody,
+	boardZoneAddable,
 	breakdownColumns,
+	changeBoardWidgetType,
 	isTrackerWidget,
 	missingBuiltins,
 	moveBoardWidget,
 	newBoardWidget,
+	placeBoardWidget,
 	removeBoardWidget,
 	setBoardWidgetColumn,
 	updateBoardWidget
@@ -228,5 +232,145 @@ describe('donut helpers', () => {
 			{ length: 0, offset: -0 },
 			{ length: 0, offset: -0 }
 		]);
+	});
+});
+
+describe('placeBoardWidget', () => {
+	const ids = (list: WarRoomBoardWidget[]) => list.map((w) => w.id);
+
+	it('drops a widget before another of its zone', () => {
+		expect(ids(placeBoardWidget(BOARD, 'w_a', 'kpi_tasks'))).toEqual([
+			'w_a',
+			'kpi_tasks',
+			'cases',
+			'decisions',
+			'w_b',
+			'w_c'
+		]);
+		// A tile cannot land among the panels.
+		expect(placeBoardWidget(BOARD, 'w_a', 'cases')).toBe(BOARD);
+		expect(placeBoardWidget(BOARD, 'w_a', 'w_a')).toBe(BOARD);
+		expect(placeBoardWidget(BOARD, 'nope', null)).toBe(BOARD);
+	});
+
+	it('moves a panel to the other column, before a widget or at its end', () => {
+		const before = placeBoardWidget(BOARD, 'cases', 'w_c', 'side');
+		expect(ids(before)).toEqual(['kpi_tasks', 'w_a', 'decisions', 'w_b', 'cases', 'w_c']);
+		expect(before[4].column).toBe('side');
+		const end = placeBoardWidget(BOARD, 'w_b', null, 'side');
+		expect(ids(end)).toEqual(['kpi_tasks', 'cases', 'w_a', 'decisions', 'w_c', 'w_b']);
+		expect(end[5].column).toBe('side');
+		// Already the last of its column: nothing changes.
+		expect(placeBoardWidget(BOARD, 'w_c', null, 'side')).toBe(BOARD);
+	});
+});
+
+describe('changeBoardWidgetType', () => {
+	it('keeps the tracker, the steps and the filter', () => {
+		const count = widget({
+			id: 'w_a',
+			type: 'tracker_count',
+			config: {
+				tracker_id: 2,
+				step_ids: [5],
+				of_total: true,
+				filter: { column_key: 'sector', values: ['Energy'] }
+			}
+		});
+		const progress = changeBoardWidgetType(count, 'tracker_progress', TRACKERS);
+		expect(progress).toMatchObject({ id: 'w_a', type: 'tracker_progress', column: 'main' });
+		expect(progress.config).toEqual({
+			tracker_id: 2,
+			step_ids: [5],
+			display: 'bars',
+			filter: { column_key: 'sector', values: ['Energy'] }
+		});
+		const breakdown = changeBoardWidgetType(progress, 'tracker_breakdown', TRACKERS);
+		expect(breakdown.config).toEqual({ tracker_id: 2, column_key: 'sector', step_ids: [5] });
+		const back = changeBoardWidgetType(
+			{ ...count, config: { tracker_id: 1 } },
+			'tracker_list',
+			TRACKERS
+		);
+		expect(back.config).toEqual({ tracker_id: 1, step_ids: [], filter: null });
+		expect(changeBoardWidgetType(progress, 'tracker_count', TRACKERS).column).toBeNull();
+		expect(changeBoardWidgetType(count, 'tracker_count', TRACKERS)).toBe(count);
+	});
+
+	it('keeps the column of a panel', () => {
+		const list = widget({
+			id: 'w_l',
+			type: 'tracker_list',
+			column: 'side',
+			config: { tracker_id: 1 }
+		});
+		expect(changeBoardWidgetType(list, 'tracker_progress', TRACKERS).column).toBe('side');
+	});
+});
+
+describe('boardZoneAddable', () => {
+	it('offers the types of the zone and the built-ins it lacks', () => {
+		expect(boardZoneAddable('tile', BOARD, () => true)).toEqual({
+			configurable: ['tracker_count'],
+			builtins: [
+				'kpi_compromised',
+				'kpi_decisions',
+				'kpi_exceptions',
+				'flags',
+				'vuln_open',
+				'vuln_exploited',
+				'vuln_overdue',
+				'vuln_kev',
+				'vuln_assets'
+			]
+		});
+		const panels = boardZoneAddable('panel', BOARD, (t) => t !== 'attention');
+		expect(panels.configurable).toEqual([
+			'tracker_progress',
+			'tracker_list',
+			'tracker_breakdown',
+			'tasks',
+			'note'
+		]);
+		expect(panels.builtins).toEqual([]);
+		expect(boardZoneAddable('banner', BOARD, () => true).builtins).toEqual(['ai_suggestions']);
+	});
+});
+
+describe('boardWidgetSummary', () => {
+	const ctx = {
+		trackers: [{ id: 2, name: 'Entities', columns: TRACKERS[1].columns }],
+		steps: [
+			{ id: 5, name: 'Contacted' },
+			{ id: 6, name: 'Ack' }
+		],
+		teams: [{ team_id: 3, name: 'Blue' }]
+	};
+	const sum = (over: Partial<WarRoomBoardWidget> & Pick<WarRoomBoardWidget, 'type'>) =>
+		boardWidgetSummary(widget({ id: 'x', ...over }), ctx);
+
+	it('says what each widget shows', () => {
+		expect(
+			sum({ type: 'tracker_count', config: { tracker_id: 2, step_ids: [5, 6], of_total: true } })
+		).toBe('Entities · Contacted, Ack · out of all rows');
+		expect(
+			sum({
+				type: 'tracker_list',
+				config: { tracker_id: 2, step_ids: [], filter: { column_key: 'ack', values: [true] } }
+			})
+		).toBe('Entities · every row · Acknowledged is Yes');
+		expect(
+			sum({ type: 'tracker_progress', config: { tracker_id: 9, display: 'donut', step_ids: null } })
+		).toBe('No tracker · donut · offered steps');
+		expect(
+			sum({ type: 'tracker_breakdown', config: { tracker_id: 2, column_key: 'sector' } })
+		).toBe('Entities · by Sector');
+		expect(sum({ type: 'tasks', config: { in_progress_only: true, team_ids: [3] } })).toBe(
+			'In progress only · Blue'
+		);
+		expect(sum({ type: 'note', config: { text: '\n## Brief\nmore' } })).toBe('Brief');
+		expect(sum({ type: 'note', config: { text: '' } })).toBe('Empty note');
+		expect(sum({ type: 'cases', config: { highlight_step_ids: [6] } })).toBe('Flags Ack');
+		expect(sum({ type: 'decisions' })).toBe('The open decisions and their targets');
 	});
 });

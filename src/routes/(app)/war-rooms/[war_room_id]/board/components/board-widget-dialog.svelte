@@ -1,6 +1,8 @@
 <!--
   Settings of one widget of the room's board, in "Edit board": its title,
-  its column (panels) and what its type needs — the tracker, the steps
+  its column (panels), the kind of a tracker widget ("Show as": a count,
+  progress, rows or a breakdown, keeping its tracker, steps and filter)
+  and what its type needs — the tracker, the steps
   counted or listed, how progress is drawn, a filter on a column of the
   tracker, the column a breakdown groups by, the teams of a tasks widget,
   the text of a note, the steps flagged on the case cards. "Apply" hands
@@ -19,17 +21,21 @@
 		BOARD_WIDGET_PLACES,
 		boardValueLabel,
 		type BoardFilterValue,
+		type BoardConfigurableType,
 		type BoardProgressDisplay,
 		type BoardWidgetConfig,
+		type BoardWidgetType,
 		type WarRoomBoardWidget
 	} from '$lib/services/war-room-board.service';
 	import type { Tracker, TrackerStep } from '$lib/services/war-room-trackers.service';
 	import type { WarRoomTeam } from '$lib/services/war-room-teams.service';
 	import {
+		BOARD_TRACKER_KINDS,
 		BOARD_WIDGET_TYPES,
 		boardWidgetProblem,
 		boardWidgetTitle,
 		breakdownColumns,
+		changeBoardWidgetType,
 		isTrackerWidget
 	} from '../board-widgets';
 
@@ -56,6 +62,7 @@
 	let title = $state('');
 	let column = $state<'main' | 'side'>('main');
 	let config = $state<BoardWidgetConfig>({});
+	let kind = $state<BoardWidgetType>('note');
 
 	$effect(() => {
 		if (!open || !widget) return;
@@ -64,12 +71,13 @@
 			title = w.title ?? '';
 			column = w.column ?? 'main';
 			config = structuredClone($state.snapshot(w.config)) as BoardWidgetConfig;
+			kind = w.type;
 		});
 	});
 
-	const type = $derived(widget?.type ?? 'note');
+	const type = $derived(widget ? kind : 'note');
 	const isPanel = $derived(BOARD_WIDGET_PLACES[type].zone === 'panel');
-	const isTracker = $derived(widget ? isTrackerWidget(widget) : false);
+	const isTracker = $derived(widget ? isTrackerWidget({ type }) : false);
 	const tracker = $derived(trackers.find((t) => t.id === config.tracker_id) ?? null);
 	// The steps a tracker widget can pick from: the ones its tracker offers.
 	const trackerSteps = $derived(
@@ -91,6 +99,7 @@
 		widget
 			? {
 					...widget,
+					type,
 					title: title.trim() || null,
 					column: isPanel ? column : null,
 					config
@@ -119,6 +128,18 @@
 				? { column_key: breakdownColumns(next?.columns ?? [])[0]?.key }
 				: {})
 		};
+	};
+
+	const setKind = (next: BoardConfigurableType) => {
+		if (!widget || next === type) return;
+		const changed = changeBoardWidgetType(
+			{ ...widget, type, column: isPanel ? column : null, config },
+			next,
+			trackers
+		);
+		kind = changed.type;
+		column = changed.column ?? 'main';
+		config = changed.config;
 	};
 
 	const setFilterColumn = (key: string) => {
@@ -203,6 +224,34 @@
 			</div>
 
 			{#if isTracker}
+				<fieldset class="flex flex-col gap-1">
+					<legend class="mb-1 text-2xs uppercase tracking-wide text-muted-foreground">
+						Show as
+					</legend>
+					<div class="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="radiogroup">
+						{#each BOARD_TRACKER_KINDS as k (k)}
+							<button
+								type="button"
+								role="radio"
+								aria-checked={type === k}
+								class={[
+									'rounded-md border px-2 py-1.5 text-left text-xs',
+									type === k
+										? 'border-primary bg-primary/5 font-medium'
+										: 'text-muted-foreground hover:bg-muted/40'
+								]}
+								title={BOARD_WIDGET_TYPES[k].description}
+								onclick={() => setKind(k)}
+								data-testid={`board-widget-kind-${k}`}
+							>
+								{BOARD_WIDGET_TYPES[k].label.replace(/^Tracker /, '')}
+								<span class="block text-[10px] font-normal text-muted-foreground">
+									{BOARD_WIDGET_PLACES[k].zone === 'tile' ? 'Indicator' : 'Panel'}
+								</span>
+							</button>
+						{/each}
+					</div>
+				</fieldset>
 				<div class="flex flex-col gap-1">
 					<label
 						for="board-widget-tracker"
