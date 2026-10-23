@@ -192,6 +192,8 @@ export interface TrackerTimelineSummary {
 	war_room_rows: number;
 	/** Changes mode backfill: past changes still to write (call again). */
 	remaining?: number;
+	/** Changes mode backfill: past changes of rows the user cannot see, left for the members who can. */
+	remaining_restricted?: number;
 }
 
 export interface Tracker {
@@ -210,7 +212,7 @@ export interface Tracker {
 	sort_order: number;
 	/** Rows the caller can see. */
 	row_count: number;
-	/** Changes mode: past changes not written to the timelines yet. */
+	/** Changes mode: past changes of the rows the caller sees not written to the timelines yet. */
 	timeline_backfill?: number;
 	created_by: TrackerUserRef | null;
 	created_at: string | null;
@@ -580,6 +582,12 @@ export const trackerTimelineWarning = (
 			`${summary.war_room_rows} row${summary.war_room_rows > 1 ? 's' : ''} without a case written to the war-room timeline`
 		);
 	}
+	const hidden = summary.remaining_restricted ?? 0;
+	if (hidden) {
+		parts.push(
+			`${hidden} past change${hidden > 1 ? 's' : ''} of rows you cannot see left for the members who can`
+		);
+	}
 	return parts.length ? `${parts.join('; ')}.` : null;
 };
 
@@ -762,9 +770,10 @@ export class WarRoomTrackersService {
 	/**
 	 * Write a tracker to the timelines after the fact. State mode: the
 	 * current state of the rows the user sees (creates the missing events,
-	 * refreshes the others). Changes mode: the past changes not written yet,
-	 * oldest first and dated at the change, up to 2000 per call (`remaining`
-	 * tells what is left).
+	 * refreshes the others). Changes mode: the past changes of the rows the
+	 * user sees not written yet, oldest first and dated at the change, up to
+	 * 2000 per call (`remaining` tells what is left, `remaining_restricted`
+	 * what is left for the members who see the other rows).
 	 */
 	static syncTimeline(
 		warRoomId: number,

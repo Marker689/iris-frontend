@@ -396,6 +396,16 @@ describe('tracker timeline helpers', () => {
 				war_room_rows: 2
 			})
 		).toBe('2 rows without a case written to the war-room timeline.');
+		expect(
+			trackerTimelineWarning({
+				events: 0,
+				skipped_case_ids: [],
+				restricted_rows: 0,
+				war_room_rows: 0,
+				remaining: 0,
+				remaining_restricted: 3
+			})
+		).toBe('3 past changes of rows you cannot see left for the members who can.');
 	});
 
 	it('titles a sync with what is left of the past changes', () => {
