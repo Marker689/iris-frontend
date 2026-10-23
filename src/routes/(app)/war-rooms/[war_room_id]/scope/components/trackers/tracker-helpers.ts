@@ -1,10 +1,12 @@
 /**
- * Small pure helpers of the tracker views (history wording, members).
+ * Small pure helpers of the tracker views (history wording, members,
+ * the step board).
  */
 import type { RequestResponse } from '$lib/services/api.service';
 import type {
 	TrackerColumn,
 	TrackerEvent,
+	TrackerRow,
 	TrackerStep
 } from '$lib/services/war-room-trackers.service';
 
@@ -67,3 +69,60 @@ export const describeTrackerEvent = (
 			return String(event.action).replace(/_/g, ' ');
 	}
 };
+
+/** How a tracker shows its rows: the table, or one column per step. */
+export type TrackerView = 'list' | 'board';
+
+export const isTrackerView = (v: unknown): v is TrackerView => v === 'list' || v === 'board';
+
+export interface TrackerBoardColumn {
+	key: string;
+	/** null = the rows without any of the listed steps. */
+	step: TrackerStep | null;
+	rows: TrackerRow[];
+}
+
+/**
+ * The step board: "No step", then one column per step in the given
+ * order. A row carrying several steps shows in each of their columns;
+ * one carrying none of them goes to "No step".
+ */
+export function trackerBoardColumns(
+	rows: TrackerRow[],
+	steps: TrackerStep[]
+): TrackerBoardColumn[] {
+	const listed = new Set(steps.map((s) => s.id));
+	const buckets = new Map<number | null, TrackerRow[]>();
+	const push = (key: number | null, row: TrackerRow) => {
+		const list = buckets.get(key);
+		if (list) list.push(row);
+		else buckets.set(key, [row]);
+	};
+	for (const row of rows) {
+		const carried = row.steps.filter((s) => listed.has(s.step_id));
+		if (carried.length === 0) push(null, row);
+		for (const s of carried) push(s.step_id, row);
+	}
+	return [
+		{ key: 'none', step: null, rows: buckets.get(null) ?? [] },
+		...steps.map((step) => ({ key: String(step.id), step, rows: buckets.get(step.id) ?? [] }))
+	];
+}
+
+/**
+ * The step change of a card dragged from the column of step `from` to the
+ * one of step `to` (null = "No step"): the row loses the first and gets
+ * the second, keeping its other steps. Null when nothing changes.
+ */
+export function trackerBoardMove(
+	row: Pick<TrackerRow, 'steps'>,
+	from: number | null,
+	to: number | null
+): { add_step_ids: number[]; remove_step_ids: number[] } | null {
+	if (from === to) return null;
+	const carried = new Set(row.steps.map((s) => s.step_id));
+	const add = to !== null && !carried.has(to) ? [to] : [];
+	const remove = from !== null && carried.has(from) ? [from] : [];
+	if (add.length === 0 && remove.length === 0) return null;
+	return { add_step_ids: add, remove_step_ids: remove };
+}

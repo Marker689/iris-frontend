@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { describeTrackerEvent } from '../trackers/tracker-helpers';
+import type { TrackerRow } from '$lib/services/war-room-trackers.service';
+import {
+	describeTrackerEvent,
+	isTrackerView,
+	trackerBoardColumns,
+	trackerBoardMove
+} from '../trackers/tracker-helpers';
 
 describe('describeTrackerEvent', () => {
 	const steps = [
@@ -41,5 +47,50 @@ describe('describeTrackerEvent', () => {
 			'renamed "a" to "b"'
 		);
 		expect(describeTrackerEvent({ action: 'row_moved', details: null })).toBe('row moved');
+	});
+});
+
+describe('tracker board', () => {
+	const step = (id: number, name: string) => ({
+		id,
+		name,
+		description: null,
+		color: 'sky',
+		icon: null,
+		sort_order: id
+	});
+	const row = (key: string, stepIds: number[]) =>
+		({
+			key,
+			steps: stepIds.map((step_id) => ({ step_id, set_by: null, set_at: null }))
+		}) as unknown as TrackerRow;
+	const ROWS = [row('a', []), row('b', [1]), row('c', [1, 2]), row('d', [9])];
+
+	it('puts each row in the column of every listed step it carries', () => {
+		const cols = trackerBoardColumns(ROWS, [step(1, 'Contacted'), step(2, 'Acknowledged')]);
+		expect(cols.map((c) => [c.key, c.rows.map((r) => r.key)])).toEqual([
+			// d only carries a step that is not listed.
+			['none', ['a', 'd']],
+			['1', ['b', 'c']],
+			['2', ['c']]
+		]);
+		expect(trackerBoardColumns([], [])).toEqual([{ key: 'none', step: null, rows: [] }]);
+	});
+
+	it('moves a card: drops the step it came from, adds the new one', () => {
+		expect(trackerBoardMove(ROWS[1], 1, 2)).toEqual({ add_step_ids: [2], remove_step_ids: [1] });
+		expect(trackerBoardMove(ROWS[0], null, 2)).toEqual({ add_step_ids: [2], remove_step_ids: [] });
+		expect(trackerBoardMove(ROWS[2], 1, null)).toEqual({ add_step_ids: [], remove_step_ids: [1] });
+		// Already carrying the target step: only the source one goes.
+		expect(trackerBoardMove(ROWS[2], 2, 1)).toEqual({ add_step_ids: [], remove_step_ids: [2] });
+		expect(trackerBoardMove(ROWS[1], 1, 1)).toBeNull();
+		expect(trackerBoardMove(ROWS[0], 5, null)).toBeNull();
+	});
+
+	it('tells the views apart', () => {
+		expect(isTrackerView('board')).toBe(true);
+		expect(isTrackerView('list')).toBe(true);
+		expect(isTrackerView('table')).toBe(false);
+		expect(isTrackerView(null)).toBe(false);
 	});
 });

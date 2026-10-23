@@ -32,6 +32,7 @@ import {
 	trackerStepCounts,
 	trackerTabKey,
 	trackerTimelineDateColumns,
+	trackerTimelineSyncTitle,
 	trackerTimelineWarning,
 	trackerValueText,
 	type TrackerColumn,
@@ -395,5 +396,16 @@ describe('tracker timeline helpers', () => {
 				war_room_rows: 2
 			})
 		).toBe('2 rows without a case written to the war-room timeline.');
+	});
+
+	it('titles a sync with what is left of the past changes', () => {
+		const summary = { events: 1, skipped_case_ids: [], restricted_rows: 0, war_room_rows: 0 };
+		expect(trackerTimelineSyncTitle(summary)).toBe('1 timeline event written');
+		expect(trackerTimelineSyncTitle({ ...summary, events: 2000, remaining: 0 })).toBe(
+			'2000 timeline events written'
+		);
+		expect(trackerTimelineSyncTitle({ ...summary, events: 2000, remaining: 1 })).toBe(
+			'2000 timeline events written, 1 past change left'
+		);
 	});
 });

@@ -3,12 +3,18 @@
  * for the tab bar and shared with the tracker views and dialogs, which
  * write back through `setTrackers` / `setSteps` / `upsertTracker`.
  */
+import { toast } from '$lib/components/ui/toast';
 import {
 	WarRoomTrackersService,
 	sortTrackerSteps,
+	trackerTimelineSyncTitle,
+	trackerTimelineWarning,
 	type Tracker,
 	type TrackerStep
 } from '$lib/services/war-room-trackers.service';
+import { UsersService } from '$lib/services/users.service';
+import { errorMessage } from '../helpers';
+import { isTrackerView, okObject, type TrackerView } from './tracker-helpers';
 
 const byOrder = (a: Tracker, b: Tracker) => a.sort_order - b.sort_order || a.id - b.id;
 
@@ -28,7 +34,11 @@ export class TrackersState {
 	saveTemplateOpen = $state(false);
 	saveTemplateTrackerId = $state<number | null>(null);
 
+	/** This user's view of each tracker (the list when unset). */
+	views = $state<Record<string, TrackerView>>({});
+
 	readonly #warRoomId: () => number;
+	#viewsRoom: number | null = null;
 	#trackersSeq = 0;
 	#stepsSeq = 0;
 
@@ -119,9 +129,72 @@ export class TrackersState {
 		this.rowsVersion += 1;
 	}
 
+	/**
+	 * Write a tracker to the timelines after the fact (its state, or its
+	 * past changes not written yet), toast the outcome and refresh the
+	 * pending counts. False on failure.
+	 */
+	async writeTimeline(trackerId: number): Promise<boolean> {
+		const res = await WarRoomTrackersService.syncTimeline(this.warRoomId, trackerId);
+		const summary = okObject(res);
+		if (!summary) {
+			if (res.status !== 403) {
+				toast({
+					title: 'Could not write to the timelines',
+					description: errorMessage(res, 'The server refused the request.'),
+					variant: 'destructive'
+				});
+			}
+			return false;
+		}
+		const warning = trackerTimelineWarning(summary);
+		toast({
+			title: trackerTimelineSyncTitle(summary),
+			description: warning ?? undefined,
+			variant: warning ? 'warning' : 'success'
+		});
+		if (summary.remaining !== undefined) void this.loadTrackers();
+		return true;
+	}
+
+	get #viewsKey(): string {
+		return `war_room_tracker_views_${this.warRoomId}`;
+	}
+
+	/** Read this user's tracker views, once per war room. */
+	async loadViews() {
+		const room = this.warRoomId;
+		if (this.#viewsRoom === room) return;
+		this.#viewsRoom = room;
+		const res = await UsersService.getMyPreference<unknown>(this.#viewsKey);
+		const value = res.ok && res.data && typeof res.data === 'object' ? res.data.value : null;
+		if (room !== this.warRoomId || !value || typeof value !== 'object') return;
+		const read: Record<string, TrackerView> = {};
+		for (const [id, view] of Object.entries(value)) if (isTrackerView(view)) read[id] = view;
+		// A view picked before the preference landed wins.
+		this.views = { ...read, ...this.views };
+	}
+
+	view(trackerId: number): TrackerView {
+		return this.views[String(trackerId)] ?? 'list';
+	}
+
+	setView(trackerId: number, view: TrackerView) {
+		if (this.view(trackerId) === view) return;
+		const next = { ...this.views, [String(trackerId)]: view };
+		if (view === 'list') delete next[String(trackerId)];
+		this.views = next;
+		void UsersService.setMyPreference(
+			this.#viewsKey,
+			Object.keys(next).length ? $state.snapshot(next) : null
+		);
+	}
+
 	reset() {
 		this.trackers = [];
 		this.steps = [];
 		this.loaded = false;
+		this.views = {};
+		this.#viewsRoom = null;
 	}
 }

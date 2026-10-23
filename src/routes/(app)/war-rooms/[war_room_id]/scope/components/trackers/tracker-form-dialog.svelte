@@ -57,6 +57,8 @@
 	let columns = $state<TrackerColumn[]>([]);
 	let showFlags = $state(false);
 	let timelineSync = $state<TrackerTimelineSync | null>(null);
+	/** Write what happened before the sync was turned on, once saved. */
+	let timelineBackfill = $state(true);
 	let roomTimelines = $state<WarRoomTimeline[]>([]);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
@@ -76,6 +78,7 @@
 				: [];
 			showFlags = t?.show_asset_flags ?? false;
 			timelineSync = t?.timeline_sync ? { ...t.timeline_sync } : null;
+			timelineBackfill = true;
 			error = null;
 			busy = false;
 			void loadRoomTimelines();
@@ -98,6 +101,15 @@
 		}
 		return sync;
 	};
+
+	// An existing tracker getting a mode it did not have (or still holding
+	// past changes not written) can be written after the fact.
+	const backfillMode = $derived.by(() => {
+		const mode = timelineSync?.mode;
+		if (!editing || !mode) return null;
+		if (editing.timeline_sync?.mode !== mode) return mode;
+		return mode === 'changes' && (editing.timeline_backfill ?? 0) > 0 ? mode : null;
+	});
 
 	const flagsApplicable = $derived(source === 'assets' || source === 'manual');
 
@@ -125,6 +137,8 @@
 			show_asset_flags: flagsApplicable && showFlags,
 			timeline_sync: timelineSyncBody(bodyColumns)
 		};
+		// Read before the dialog closes (and its tracker goes).
+		const backfill = timelineBackfill ? backfillMode : null;
 		busy = true;
 		error = null;
 		try {
@@ -135,13 +149,22 @@
 				error = errorMessage(res, 'Unable to save the tracker');
 				return;
 			}
-			store.upsertTracker(res.data);
+			const saved = res.data;
+			store.upsertTracker(saved);
 			toast({
-				title: editing ? 'Tracker saved' : `Tracker "${res.data.name}" created`,
+				title: editing ? 'Tracker saved' : `Tracker "${saved.name}" created`,
 				variant: 'success'
 			});
 			open = false;
-			onSaved?.(res.data);
+			onSaved?.(saved);
+			const mode = saved.timeline_sync?.mode;
+			if (
+				backfill &&
+				mode === backfill &&
+				(mode === 'state' || (saved.timeline_backfill ?? 0) > 0)
+			) {
+				await store.writeTimeline(saved.id);
+			}
 		} finally {
 			busy = false;
 		}
@@ -300,6 +323,18 @@
 					warRoomTimelines={roomTimelines}
 					disabled={busy}
 				/>
+				{#if backfillMode}
+					<label class="mt-1 flex items-center gap-2 text-xs">
+						<Checkbox
+							bind:checked={timelineBackfill}
+							disabled={busy}
+							data-testid="tracker-timeline-backfill-on-save"
+						/>
+						{backfillMode === 'changes'
+							? 'Also write the changes made before, dated when they were made'
+							: 'Also write the current state of the rows now'}
+					</label>
+				{/if}
 			</fieldset>
 
 			{#if error}

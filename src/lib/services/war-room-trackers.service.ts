@@ -190,6 +190,8 @@ export interface TrackerTimelineSummary {
 	restricted_rows: number;
 	/** Rows without a case written to the war-room timeline (case target only). */
 	war_room_rows: number;
+	/** Changes mode backfill: past changes still to write (call again). */
+	remaining?: number;
 }
 
 export interface Tracker {
@@ -208,6 +210,8 @@ export interface Tracker {
 	sort_order: number;
 	/** Rows the caller can see. */
 	row_count: number;
+	/** Changes mode: past changes not written to the timelines yet. */
+	timeline_backfill?: number;
 	created_by: TrackerUserRef | null;
 	created_at: string | null;
 	updated_at: string | null;
@@ -579,6 +583,13 @@ export const trackerTimelineWarning = (
 	return parts.length ? `${parts.join('; ')}.` : null;
 };
 
+/** Toast title of a timeline sync: what was written, and what is left. */
+export const trackerTimelineSyncTitle = (summary: TrackerTimelineSummary): string => {
+	const written = `${summary.events} timeline ${summary.events === 1 ? 'event' : 'events'} written`;
+	const left = summary.remaining ?? 0;
+	return left > 0 ? `${written}, ${left} past ${left === 1 ? 'change' : 'changes'} left` : written;
+};
+
 /** Apply returned rows onto the listed ones (matched by key). */
 export const mergeTrackerRows = (rows: TrackerRow[], updated: TrackerRow[]): TrackerRow[] => {
 	if (updated.length === 0) return rows;
@@ -749,8 +760,11 @@ export class WarRoomTrackersService {
 	}
 
 	/**
-	 * State timeline mode only: write the current state of the rows the
-	 * user sees (creates the missing events, refreshes the others).
+	 * Write a tracker to the timelines after the fact. State mode: the
+	 * current state of the rows the user sees (creates the missing events,
+	 * refreshes the others). Changes mode: the past changes not written yet,
+	 * oldest first and dated at the change, up to 2000 per call (`remaining`
+	 * tells what is left).
 	 */
 	static syncTimeline(
 		warRoomId: number,

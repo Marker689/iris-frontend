@@ -2,8 +2,10 @@
   One tracker tab of the Scope: the rows with their steps, asset flags,
   extra columns and note, all editable in place; search and step
   filters; bulk step changes; row history and tracker activity. Manual
-  trackers also add and delete rows. Export copies the rows as a table or
-  downloads them as CSV, picking the columns first.
+  trackers also add and delete rows. The rows show as a table or as a
+  board with one column per step (each user picks, per tracker). Export
+  copies the rows as a table or downloads them as CSV, picking the
+  columns first.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
@@ -11,10 +13,12 @@
 		ArrowLeft,
 		ArrowRight,
 		CalendarClock,
+		Columns3,
 		History,
 		Loader2,
 		Pencil,
 		Plus,
+		Rows3,
 		Search,
 		Settings2,
 		Trash2,
@@ -69,11 +73,17 @@
 	import { SELECT_CHECKBOX_CLASS, errorMessage } from '../helpers';
 	import { trackerExportColumns } from '../scope-export';
 	import TrackerAddRowsDialog from './tracker-add-rows-dialog.svelte';
+	import TrackerBoard from './tracker-board.svelte';
 	import TrackerHistoryDialog from './tracker-history-dialog.svelte';
 	import TrackerItemCell from './tracker-item-cell.svelte';
 	import TrackerStepsCell from './tracker-steps-cell.svelte';
 	import TrackerValueCell from './tracker-value-cell.svelte';
-	import { TRACKER_NOTE_COLUMN, okObject, type TrackerMemberOption } from './tracker-helpers';
+	import {
+		TRACKER_NOTE_COLUMN,
+		okObject,
+		trackerBoardMove,
+		type TrackerMemberOption
+	} from './tracker-helpers';
 	import type { TrackersState } from './trackers-state.svelte';
 
 	type Props = {
@@ -139,7 +149,11 @@
 	const isManual = $derived(tracker.source === 'manual');
 	const offered = $derived(trackerOfferedSteps(tracker, store.steps));
 	const counts = $derived(trackerStepCounts(rows));
-	const filtered = $derived(filterTrackerRows(rows, { q, step: stepFilter }, tracker.columns));
+	const view = $derived(store.view(tracker.id));
+	// The board's columns are the steps: only the search applies there.
+	const filtered = $derived(
+		filterTrackerRows(rows, { q, step: view === 'board' ? null : stepFilter }, tracker.columns)
+	);
 	const visible = $derived(filtered.slice(0, shownCount));
 	const existingKeys = $derived(new Set(rows.map((r) => r.key)));
 	const selectedRows = $derived(rows.filter((r) => selected.has(r.key)));
@@ -212,6 +226,10 @@
 			historyVersion += 1;
 			void loadRows();
 		});
+	});
+
+	$effect(() => {
+		void store.loadViews();
 	});
 
 	$effect(() => {
@@ -318,6 +336,51 @@
 				variant: 'destructive'
 			});
 		}
+	};
+
+	const setSteps = (key: string, stepIds: number[]) => {
+		const row = rows.find((r) => r.key === key);
+		if (!row) return;
+		const kept = row.steps.filter((s) => stepIds.includes(s.step_id));
+		const added = stepIds
+			.filter((id) => !kept.some((s) => s.step_id === id))
+			.map((step_id) => ({ step_id, set_by: null, set_at: new Date().toISOString() }));
+		rows = mergeTrackerRows(rows, [{ ...row, steps: [...kept, ...added] }]);
+	};
+
+	/** Board: a card moved from one step column to another, at once; put back if refused. */
+	const moveCard = async (row: TrackerRow, from: number | null, to: number | null) => {
+		const change = trackerBoardMove(row, from, to);
+		const ref = trackerRowRef(row);
+		if (!change || ref === null) return;
+		const before = row.steps.map((s) => s.step_id);
+		setSteps(row.key, [
+			...before.filter((id) => !change.remove_step_ids.includes(id)),
+			...change.add_step_ids
+		]);
+		const ok = await withBusy([row.key], async () => {
+			const res = await WarRoomTrackersService.updateState(store.warRoomId, trackerId, {
+				rows: [ref],
+				...change
+			});
+			const body = okObject(res);
+			if (body && Array.isArray(body.data)) {
+				markSynced();
+				rows = mergeTrackerRows(rows, body.data);
+				historyVersion += 1;
+				warnTimeline(body.timeline);
+				return true;
+			}
+			if (res.status !== 403) {
+				toast({
+					title: 'Could not move the row',
+					description: errorMessage(res, 'The server refused the request.'),
+					variant: 'destructive'
+				});
+			}
+			return false;
+		});
+		if (!ok) setSteps(row.key, before);
 	};
 
 	const saveValue = (row: TrackerRow, key: string, value: TrackerValue) =>
@@ -430,33 +493,20 @@
 
 	let timelineSyncing = $state(false);
 
-	/** State timeline mode: write the current state of every visible row. */
+	/** Write the state of the visible rows, or the past changes not written yet. */
 	const syncTimeline = async () => {
 		if (timelineSyncing) return;
 		timelineSyncing = true;
 		try {
-			const res = await WarRoomTrackersService.syncTimeline(store.warRoomId, tracker.id);
-			const body = okObject(res);
-			if (!body) {
-				if (res.status !== 403) {
-					toast({
-						title: 'Could not write to the timelines',
-						description: errorMessage(res, 'The server refused the request.'),
-						variant: 'destructive'
-					});
-				}
-				return;
-			}
-			const warning = trackerTimelineWarning(body);
-			toast({
-				title: `${body.events} timeline ${body.events === 1 ? 'event' : 'events'} written`,
-				description: warning ?? undefined,
-				variant: warning ? 'warning' : 'success'
-			});
+			await store.writeTimeline(tracker.id);
 		} finally {
 			timelineSyncing = false;
 		}
 	};
+
+	const timelineBackfill = $derived(
+		tracker.timeline_sync?.mode === 'changes' ? (tracker.timeline_backfill ?? 0) : 0
+	);
 
 	// Export: "visible" is every row matching the search and step filter,
 	// not only the ones rendered before "Show more".
@@ -568,6 +618,16 @@
 							>
 								<CalendarClock class="mr-2 h-3.5 w-3.5" /> Write state to timelines
 							</DropdownMenu.Item>
+						{:else if timelineBackfill > 0}
+							<DropdownMenu.Item
+								disabled={timelineSyncing}
+								onclick={syncTimeline}
+								data-testid="tracker-timeline-backfill"
+							>
+								<CalendarClock class="mr-2 h-3.5 w-3.5" />
+								Write {timelineBackfill}
+								{timelineBackfill === 1 ? 'past change' : 'past changes'} to timelines
+							</DropdownMenu.Item>
 						{/if}
 						<DropdownMenu.Separator />
 						<DropdownMenu.Item disabled={index <= 0} onclick={() => move(-1)}>
@@ -600,6 +660,34 @@
 	</div>
 
 	<div class="flex flex-wrap items-center gap-2">
+		<div class="flex items-center gap-0.5 rounded-md border p-0.5" role="group" aria-label="View">
+			<Button
+				size="icon"
+				variant={view === 'list' ? 'secondary' : 'ghost'}
+				class="h-7 w-7"
+				onclick={() => store.setView(tracker.id, 'list')}
+				aria-label="List view"
+				aria-pressed={view === 'list'}
+				title="List view"
+				data-testid="tracker-view-list"
+			>
+				<Rows3 class="h-4 w-4" />
+			</Button>
+			<Button
+				size="icon"
+				variant={view === 'board' ? 'secondary' : 'ghost'}
+				class="h-7 w-7"
+				onclick={() => store.setView(tracker.id, 'board')}
+				aria-label="Board view"
+				aria-pressed={view === 'board'}
+				title={canWrite
+					? 'Board view — drag a card to another step to move it'
+					: 'Board view — one column per step'}
+				data-testid="tracker-view-board"
+			>
+				<Columns3 class="h-4 w-4" />
+			</Button>
+		</div>
 		<div class="relative">
 			<Search
 				class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
@@ -612,48 +700,50 @@
 				data-testid="tracker-search"
 			/>
 		</div>
-		<div class="flex flex-wrap items-center gap-1" role="group" aria-label="Filter by step">
-			<button
-				type="button"
-				class="rounded-full border px-2 py-0.5 text-2xs {stepFilter === null
-					? 'border-primary bg-primary/10 text-foreground'
-					: 'text-muted-foreground hover:text-foreground'}"
-				aria-pressed={stepFilter === null}
-				onclick={() => (stepFilter = null)}
-			>
-				All <span class="tabular-nums">{rows.length}</span>
-			</button>
-			{#each filterSteps as s (s.id)}
+		{#if view === 'list'}
+			<div class="flex flex-wrap items-center gap-1" role="group" aria-label="Filter by step">
 				<button
 					type="button"
-					class="inline-flex items-center gap-1 rounded-full p-0.5 {stepFilter === s.id
-						? 'ring-2 ring-primary'
-						: ''}"
-					aria-pressed={stepFilter === s.id}
-					onclick={() => (stepFilter = stepFilter === s.id ? null : s.id)}
-					data-testid="tracker-step-filter"
+					class="rounded-full border px-2 py-0.5 text-2xs {stepFilter === null
+						? 'border-primary bg-primary/10 text-foreground'
+						: 'text-muted-foreground hover:text-foreground'}"
+					aria-pressed={stepFilter === null}
+					onclick={() => (stepFilter = null)}
 				>
-					<TrackerStepChip step={s} muted={!counts.byStep.get(s.id)} />
-					<span class="pr-1 text-2xs tabular-nums text-muted-foreground">
-						{counts.byStep.get(s.id) ?? 0}
-					</span>
+					All <span class="tabular-nums">{rows.length}</span>
 				</button>
-			{/each}
-			<button
-				type="button"
-				class="rounded-full border border-dashed px-2 py-0.5 text-2xs {stepFilter === 'none'
-					? 'border-primary bg-primary/10 text-foreground'
-					: 'text-muted-foreground hover:text-foreground'}"
-				aria-pressed={stepFilter === 'none'}
-				onclick={() => (stepFilter = stepFilter === 'none' ? null : 'none')}
-				data-testid="tracker-step-filter-none"
-			>
-				No step <span class="tabular-nums">{counts.none}</span>
-			</button>
-		</div>
+				{#each filterSteps as s (s.id)}
+					<button
+						type="button"
+						class="inline-flex items-center gap-1 rounded-full p-0.5 {stepFilter === s.id
+							? 'ring-2 ring-primary'
+							: ''}"
+						aria-pressed={stepFilter === s.id}
+						onclick={() => (stepFilter = stepFilter === s.id ? null : s.id)}
+						data-testid="tracker-step-filter"
+					>
+						<TrackerStepChip step={s} muted={!counts.byStep.get(s.id)} />
+						<span class="pr-1 text-2xs tabular-nums text-muted-foreground">
+							{counts.byStep.get(s.id) ?? 0}
+						</span>
+					</button>
+				{/each}
+				<button
+					type="button"
+					class="rounded-full border border-dashed px-2 py-0.5 text-2xs {stepFilter === 'none'
+						? 'border-primary bg-primary/10 text-foreground'
+						: 'text-muted-foreground hover:text-foreground'}"
+					aria-pressed={stepFilter === 'none'}
+					onclick={() => (stepFilter = stepFilter === 'none' ? null : 'none')}
+					data-testid="tracker-step-filter-none"
+				>
+					No step <span class="tabular-nums">{counts.none}</span>
+				</button>
+			</div>
+		{/if}
 	</div>
 
-	{#if canWrite && selectedRows.length > 0}
+	{#if canWrite && view === 'list' && selectedRows.length > 0}
 		<div
 			class="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs"
 			data-testid="tracker-bulk-bar"
@@ -750,6 +840,25 @@
 				The war room has no {sourceLabel?.toLowerCase()} yet.
 			{/if}
 		</div>
+	{:else if view === 'board'}
+		{#if q.trim() && filtered.length === 0}
+			<p class="py-8 text-center text-xs text-muted-foreground">No row matches the search.</p>
+		{:else}
+			<TrackerBoard
+				rows={filtered}
+				columnSteps={filterSteps}
+				steps={store.steps}
+				{offered}
+				{canWrite}
+				{busyKeys}
+				showType={mixedTypes}
+				showFlags={tracker.show_asset_flags}
+				onMove={moveCard}
+				onToggle={toggleStep}
+				onHistory={openHistory}
+				onFlags={(row) => openFlag([row])}
+			/>
+		{/if}
 	{:else}
 		<div class="max-h-[70vh] overflow-auto rounded-md border">
 			<table class="w-full caption-bottom text-sm" data-testid="tracker-table">
