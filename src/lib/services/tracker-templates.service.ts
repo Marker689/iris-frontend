@@ -10,7 +10,17 @@
  */
 import { ApiService } from './api.service';
 import type { ApiOptions, RequestResponse } from './api.service';
-import type { TrackerColumn, TrackerSource, TrackerUserRef } from './war-room-trackers.service';
+import type {
+	BoardPanelColumn,
+	BoardProgressDisplay,
+	BoardRowFilter
+} from './war-room-board.service';
+import type {
+	TrackerColumn,
+	TrackerSource,
+	TrackerTimelineSync,
+	TrackerUserRef
+} from './war-room-trackers.service';
 
 export interface TrackerTemplateStep {
 	name: string;
@@ -28,6 +38,28 @@ export interface TrackerTemplateTracker {
 	step_names: string[] | null;
 	columns: TrackerColumn[];
 	show_asset_flags: boolean;
+	/** The war-room timeline is never kept: a new war room has its own. */
+	timeline_sync?: TrackerTimelineSync | null;
+	/** Widgets added to the war-room board with the tracker. */
+	board_widgets?: TrackerTemplateBoardWidget[];
+}
+
+/**
+ * A tracker widget of the war-room board (see `WarRoomBoardWidget`), with
+ * the steps by name and without its tracker: the template tracker's.
+ */
+export interface TrackerTemplateBoardWidget {
+	type: 'tracker_count' | 'tracker_progress' | 'tracker_list' | 'tracker_breakdown';
+	title: string | null;
+	column: BoardPanelColumn | null;
+	config: {
+		/** Names of template steps; null = every step the tracker offers. */
+		step_names: string[] | null;
+		display?: BoardProgressDisplay;
+		of_total?: boolean;
+		filter?: BoardRowFilter | null;
+		column_key?: string;
+	};
 }
 
 export interface TrackerTemplate {
@@ -88,7 +120,9 @@ export const trackerTemplateToExport = (
 		source: t.source,
 		step_names: t.step_names ?? null,
 		columns: t.columns ?? [],
-		show_asset_flags: !!t.show_asset_flags
+		show_asset_flags: !!t.show_asset_flags,
+		timeline_sync: t.timeline_sync ? { ...t.timeline_sync, war_room_timeline_id: null } : null,
+		board_widgets: (t.board_widgets ?? []).map((w) => structuredClone(w))
 	}))
 });
 

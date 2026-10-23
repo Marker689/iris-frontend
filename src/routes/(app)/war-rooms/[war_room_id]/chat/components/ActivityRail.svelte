@@ -41,6 +41,7 @@
 		STREAM_LANES,
 		burstSummary,
 		foldBursts,
+		isPlainTextKind,
 		latestTime,
 		messageTime,
 		muteTargetFor,
@@ -311,8 +312,8 @@
 </script>
 
 {#snippet rowBody(m: ChatMessage)}
-	{#if m.kind === 'tracker'}
-		<!-- Tracker lines quote names and IOC values verbatim. -->
+	{#if isPlainTextKind(m.kind)}
+		<!-- Activity and tracker lines quote names verbatim (see PLAIN_TEXT_KINDS). -->
 		<span>{m.body ?? ''}</span>
 	{:else}
 		<ChatMessageBody

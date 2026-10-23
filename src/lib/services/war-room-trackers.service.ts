@@ -9,6 +9,15 @@
  * read. Row state (steps, note, extra column values) is stored per
  * item and created on the first edit; every change is logged per row.
  *
+ * A tracker can also write to the timelines (`timeline_sync`): either
+ * one event per change, or one event per row kept up to date with its
+ * state; dated by the change or by a date column of the tracker; sent
+ * to the timeline of the case(s) of each row, or to the war-room
+ * timeline. Case timelines are only written where the user has full
+ * access to the case (the others are reported back), and war-room
+ * events about a case item are only shown to the members who can read
+ * one of its cases.
+ *
  * Wraps `/api/v2/war-rooms/{id}/tracker-steps` and
  * `/api/v2/war-rooms/{id}/trackers`.
  */
@@ -125,6 +134,64 @@ export interface TrackerColumn {
 	options?: string[];
 }
 
+export type TrackerTimelineMode = 'changes' | 'state';
+
+export type TrackerTimelineTarget = 'cases' | 'war_room';
+
+/** `date` of a timeline sync dated by the change itself. */
+export const TRACKER_TIMELINE_CHANGED_AT = 'changed_at';
+
+export interface TrackerTimelineSync {
+	mode: TrackerTimelineMode;
+	target: TrackerTimelineTarget;
+	/** `changed_at`, or the key of a date / datetime column. */
+	date: string;
+	/** War-room target: the timeline to write to; null = a "Trackers" timeline. */
+	war_room_timeline_id: number | null;
+}
+
+export const TRACKER_TIMELINE_MODES: { value: TrackerTimelineMode; label: string; help: string }[] =
+	[
+		{
+			value: 'changes',
+			label: 'Every change',
+			help: 'One event per change: steps set or cleared, note, columns.'
+		},
+		{
+			value: 'state',
+			label: 'Current state',
+			help: 'One event per row, updated in place as its steps, note and columns change.'
+		}
+	];
+
+export const TRACKER_TIMELINE_TARGETS: {
+	value: TrackerTimelineTarget;
+	label: string;
+	help: string;
+}[] = [
+	{
+		value: 'cases',
+		label: 'Case timelines',
+		help: 'The "War-room trackers" timeline of each case of the row (asset, IOC, case, customer, registry asset). Free-text rows go to the war-room timeline.'
+	},
+	{
+		value: 'war_room',
+		label: 'War-room timeline',
+		help: 'Members only see the events of items from cases they can read.'
+	}
+];
+
+/** What a row change wrote to the timelines. */
+export interface TrackerTimelineSummary {
+	events: number;
+	/** Cases not written: the user has no full access to them. */
+	skipped_case_ids: number[];
+	/** Rows not written: the user cannot read their item. */
+	restricted_rows: number;
+	/** Rows without a case written to the war-room timeline (case target only). */
+	war_room_rows: number;
+}
+
 export interface Tracker {
 	id: number;
 	war_room_id: number;
@@ -136,6 +203,8 @@ export interface Tracker {
 	step_ids: number[] | null;
 	columns: TrackerColumn[];
 	show_asset_flags: boolean;
+	/** null = the tracker writes nothing to the timelines. */
+	timeline_sync: TrackerTimelineSync | null;
 	sort_order: number;
 	/** Rows the caller can see. */
 	row_count: number;
@@ -152,6 +221,7 @@ export interface TrackerCreateBody {
 	step_ids?: number[] | null;
 	columns?: TrackerColumn[];
 	show_asset_flags?: boolean;
+	timeline_sync?: TrackerTimelineSync | null;
 }
 
 /** The source cannot change once created. */
@@ -241,6 +311,12 @@ export interface TrackerRow {
 	values: Record<string, TrackerValue>;
 	updated_at: string | null;
 	updated_by: TrackerUserRef | null;
+}
+
+/** Rows returned by a change; `timeline` when the tracker writes to the timelines. */
+export interface TrackerRowsResult {
+	data: TrackerRow[];
+	timeline?: TrackerTimelineSummary;
 }
 
 export interface TrackerRowList {
@@ -454,6 +530,55 @@ export const newTrackerColumnKey = (label: string, taken: Iterable<string> = [])
 	return key;
 };
 
+/** The columns that can date timeline events. */
+export const trackerTimelineDateColumns = (columns: TrackerColumn[]): TrackerColumn[] =>
+	columns.filter((c) => c.type === 'date' || c.type === 'datetime');
+
+/**
+ * A timeline sync whose date column is gone (or no longer a date) falls
+ * back to the change time, as the server refuses it otherwise.
+ */
+export const normalizeTrackerTimelineSync = (
+	sync: TrackerTimelineSync | null,
+	columns: TrackerColumn[]
+): TrackerTimelineSync | null => {
+	if (!sync) return null;
+	const dated = trackerTimelineDateColumns(columns).some((c) => c.key === sync.date);
+	return dated || sync.date === TRACKER_TIMELINE_CHANGED_AT
+		? sync
+		: { ...sync, date: TRACKER_TIMELINE_CHANGED_AT };
+};
+
+/**
+ * A warning about what a change could not write to the timelines, or
+ * null when everything was written.
+ */
+export const trackerTimelineWarning = (
+	summary: TrackerTimelineSummary | null | undefined
+): string | null => {
+	if (!summary) return null;
+	const parts: string[] = [];
+	const skipped = summary.skipped_case_ids.length;
+	if (skipped) {
+		parts.push(
+			`${skipped} case timeline${skipped > 1 ? 's' : ''} not written (no full access: ${summary.skipped_case_ids
+				.map((id) => `#${id}`)
+				.join(', ')})`
+		);
+	}
+	if (summary.restricted_rows) {
+		parts.push(
+			`${summary.restricted_rows} restricted row${summary.restricted_rows > 1 ? 's' : ''} not written`
+		);
+	}
+	if (summary.war_room_rows) {
+		parts.push(
+			`${summary.war_room_rows} row${summary.war_room_rows > 1 ? 's' : ''} without a case written to the war-room timeline`
+		);
+	}
+	return parts.length ? `${parts.join('; ')}.` : null;
+};
+
 /** Apply returned rows onto the listed ones (matched by key). */
 export const mergeTrackerRows = (rows: TrackerRow[], updated: TrackerRow[]): TrackerRow[] => {
 	if (updated.length === 0) return rows;
@@ -573,7 +698,7 @@ export class WarRoomTrackersService {
 		trackerId: number,
 		body: TrackerAddRowsBody,
 		options: ApiOptions = {}
-	): Promise<RequestResponse<{ data: TrackerRow[] }>> {
+	): Promise<RequestResponse<TrackerRowsResult>> {
 		return ApiService.post(rowsPath(warRoomId, trackerId), body, options);
 	}
 
@@ -583,7 +708,7 @@ export class WarRoomTrackersService {
 		trackerId: number,
 		body: TrackerStateBody,
 		options: ApiOptions = {}
-	): Promise<RequestResponse<{ data: TrackerRow[] }>> {
+	): Promise<RequestResponse<TrackerRowsResult>> {
 		return ApiService.post(`${rowsPath(warRoomId, trackerId)}/state`, body, options);
 	}
 
@@ -621,6 +746,18 @@ export class WarRoomTrackersService {
 			),
 			options
 		);
+	}
+
+	/**
+	 * State timeline mode only: write the current state of the rows the
+	 * user sees (creates the missing events, refreshes the others).
+	 */
+	static syncTimeline(
+		warRoomId: number,
+		trackerId: number,
+		options: ApiOptions = {}
+	): Promise<RequestResponse<TrackerTimelineSummary>> {
+		return ApiService.post(`${trackersPath(warRoomId)}/${trackerId}/timeline/sync`, {}, options);
 	}
 
 	// --- Templates ------------------------------------------------------------

@@ -64,6 +64,7 @@
 		activityAnchorId,
 		activityQuote,
 		feedKinds,
+		isPlainTextKind,
 		latestTime,
 		messageTime,
 		parseStreamPrefs,
@@ -2511,9 +2512,9 @@
 															{actor}
 														</span>
 													{/if}
-													{#if m.kind === 'tracker'}
-														<!-- Tracker lines quote names and IOC values verbatim:
-														     plain text, never markdown links, chips or mentions. -->
+													{#if isPlainTextKind(m.kind)}
+														<!-- Activity and tracker lines quote names and tool ids
+														     verbatim: plain text, never markdown (see PLAIN_TEXT_KINDS). -->
 														<span>{m.body ?? ''}</span>
 													{:else}
 														<!--

@@ -10,6 +10,7 @@
 	import {
 		ArrowLeft,
 		ArrowRight,
+		CalendarClock,
 		History,
 		Loader2,
 		Pencil,
@@ -42,11 +43,13 @@
 		trackerRowLabel,
 		trackerRowRef,
 		trackerStepCounts,
+		trackerTimelineWarning,
 		type Tracker,
 		type TrackerAssetItem,
 		type TrackerRow,
 		type TrackerRowRef,
 		type TrackerStateBody,
+		type TrackerTimelineSummary,
 		type TrackerValue
 	} from '$lib/services/war-room-trackers.service';
 	import { assetFlags, loadAssetFlags } from '$lib/stores/asset-flags.store.svelte';
@@ -119,6 +122,13 @@
 		syncedAt = Date.now();
 	};
 	const isEcho = () => Date.now() - syncedAt < ECHO_MS;
+
+	/** Tell what a change could not write to the timelines (no case access). */
+	const warnTimeline = (summary: TrackerTimelineSummary | undefined) => {
+		const warning = trackerTimelineWarning(summary);
+		if (warning)
+			toast({ title: 'Timelines partly updated', description: warning, variant: 'warning' });
+	};
 
 	// Only the id: the store replaces the tracker object on every reload,
 	// which must not count as another tracker being shown.
@@ -250,6 +260,7 @@
 					markSynced();
 					rows = mergeTrackerRows(rows, body.data);
 					historyVersion += 1;
+					warnTimeline(body.timeline);
 					return true;
 				}
 				if (res.status !== 403) {
@@ -296,6 +307,7 @@
 			markSynced();
 			if (left === 0) rows = mergeTrackerRows(rows, body.data);
 			historyVersion += 1;
+			warnTimeline(body.timeline);
 			return;
 		}
 		flipStep(key, stepId, !on);
@@ -416,6 +428,36 @@
 
 	const index = $derived(store.trackers.findIndex((t) => t.id === tracker.id));
 
+	let timelineSyncing = $state(false);
+
+	/** State timeline mode: write the current state of every visible row. */
+	const syncTimeline = async () => {
+		if (timelineSyncing) return;
+		timelineSyncing = true;
+		try {
+			const res = await WarRoomTrackersService.syncTimeline(store.warRoomId, tracker.id);
+			const body = okObject(res);
+			if (!body) {
+				if (res.status !== 403) {
+					toast({
+						title: 'Could not write to the timelines',
+						description: errorMessage(res, 'The server refused the request.'),
+						variant: 'destructive'
+					});
+				}
+				return;
+			}
+			const warning = trackerTimelineWarning(body);
+			toast({
+				title: `${body.events} timeline ${body.events === 1 ? 'event' : 'events'} written`,
+				description: warning ?? undefined,
+				variant: warning ? 'warning' : 'success'
+			});
+		} finally {
+			timelineSyncing = false;
+		}
+	};
+
 	// Export: "visible" is every row matching the search and step filter,
 	// not only the ones rendered before "Show more".
 	const exportColumns = $derived(
@@ -518,6 +560,15 @@
 						<DropdownMenu.Item onclick={() => (store.stepsOpen = true)}>
 							Manage steps…
 						</DropdownMenu.Item>
+						{#if tracker.timeline_sync?.mode === 'state'}
+							<DropdownMenu.Item
+								disabled={timelineSyncing}
+								onclick={syncTimeline}
+								data-testid="tracker-timeline-sync"
+							>
+								<CalendarClock class="mr-2 h-3.5 w-3.5" /> Write state to timelines
+							</DropdownMenu.Item>
+						{/if}
 						<DropdownMenu.Separator />
 						<DropdownMenu.Item disabled={index <= 0} onclick={() => move(-1)}>
 							<ArrowLeft class="mr-2 h-3.5 w-3.5" /> Move left

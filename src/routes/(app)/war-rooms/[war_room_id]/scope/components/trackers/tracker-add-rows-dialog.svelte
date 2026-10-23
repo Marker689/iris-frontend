@@ -17,6 +17,7 @@
 	import {
 		TRACKER_ITEM_TYPE_LABEL,
 		WarRoomTrackersService,
+		trackerTimelineWarning,
 		type Tracker,
 		type TrackerItemType,
 		type TrackerNewRow,
@@ -219,10 +220,17 @@
 			}
 			const added = body.data ?? [];
 			const skipped = rows.length - added.length;
+			const timelineWarning = trackerTimelineWarning(body.timeline);
+			const description = [
+				skipped > 0 ? `${skipped} already in the tracker.` : null,
+				timelineWarning
+			]
+				.filter(Boolean)
+				.join(' ');
 			toast({
 				title: `${added.length} ${added.length === 1 ? 'row' : 'rows'} added`,
-				description: skipped > 0 ? `${skipped} already in the tracker.` : undefined,
-				variant: 'success'
+				description: description || undefined,
+				variant: timelineWarning ? 'warning' : 'success'
 			});
 			open = false;
 			onAdded?.(added);

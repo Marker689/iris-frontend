@@ -1,11 +1,14 @@
 <!--
   Create / edit a tracker template: name, description, the steps it
   brings (name, colour, icon) and its trackers (source, offered steps by
-  name, extra columns, asset flags column).
+  name, extra columns, asset flags column, timeline settings, the
+  war-room board widgets it comes with). Board widgets are set up on a
+  war room's board and saved with it as a template: here they can only
+  be removed.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ChevronDown, ChevronUp, Palette, Plus, Trash2 } from 'lucide-svelte';
+	import { ChevronDown, ChevronUp, Palette, Plus, Trash2, X } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -16,16 +19,21 @@
 	import FlagIconPicker from '$lib/components/common/assets/FlagIconPicker.svelte';
 	import TrackerColumnsEditor from '$lib/components/common/trackers/TrackerColumnsEditor.svelte';
 	import TrackerStepChip from '$lib/components/common/trackers/TrackerStepChip.svelte';
+	import TrackerTimelineEditor from '$lib/components/common/trackers/TrackerTimelineEditor.svelte';
 	import { TRACKER_ICONS } from '$lib/components/common/trackers/tracker-icon';
 	import {
 		TrackerTemplatesService,
 		trackerTemplateToExport,
 		type TrackerTemplate,
 		type TrackerTemplateInput,
+		type TrackerTemplateBoardWidget,
 		type TrackerTemplateStep,
 		type TrackerTemplateTracker
 	} from '$lib/services/tracker-templates.service';
-	import { TRACKER_SOURCES } from '$lib/services/war-room-trackers.service';
+	import {
+		TRACKER_SOURCES,
+		normalizeTrackerTimelineSync
+	} from '$lib/services/war-room-trackers.service';
 
 	type Props = {
 		open: boolean;
@@ -56,6 +64,7 @@
 			trackers = copy.trackers.map((t) => ({
 				...t,
 				step_names: t.step_names ? [...t.step_names] : null,
+				board_widgets: t.board_widgets ?? [],
 				columns: t.columns.map((c) => ({ ...c, options: c.options ? [...c.options] : undefined }))
 			}));
 			styling = null;
@@ -83,18 +92,23 @@
 	const removeStep = (index: number) => {
 		const gone = steps[index].name;
 		steps = steps.filter((_, i) => i !== index);
-		trackers = trackers.map((t) =>
-			t.step_names ? { ...t, step_names: t.step_names.filter((n) => n !== gone) } : t
-		);
+		trackers = trackers.map((t) => ({
+			...t,
+			step_names: t.step_names ? t.step_names.filter((n) => n !== gone) : null,
+			board_widgets: renameWidgetSteps(t.board_widgets, (n) => (n === gone ? null : n))
+		}));
 		styling = null;
 	};
 
 	const renameStep = (index: number, value: string) => {
 		const old = steps[index].name;
 		steps[index].name = value;
-		trackers = trackers.map((t) =>
-			t.step_names ? { ...t, step_names: t.step_names.map((n) => (n === old ? value : n)) } : t
-		);
+		const rename = (n: string) => (n === old ? value : n);
+		trackers = trackers.map((t) => ({
+			...t,
+			step_names: t.step_names ? t.step_names.map(rename) : null,
+			board_widgets: renameWidgetSteps(t.board_widgets, rename)
+		}));
 	};
 
 	const addTracker = () => {
@@ -107,7 +121,9 @@
 				source: 'manual',
 				step_names: null,
 				columns: [],
-				show_asset_flags: false
+				show_asset_flags: false,
+				timeline_sync: null,
+				board_widgets: []
 			}
 		];
 	};
@@ -117,6 +133,53 @@
 		t.step_names = current.includes(stepName)
 			? current.filter((n) => n !== stepName)
 			: [...current, stepName];
+	};
+
+	const WIDGET_LABELS: Record<TrackerTemplateBoardWidget['type'], string> = {
+		tracker_count: 'Tracker count',
+		tracker_progress: 'Tracker progress',
+		tracker_list: 'Tracker rows',
+		tracker_breakdown: 'Tracker breakdown'
+	};
+
+	/** Rename the steps of board widgets; a null name drops the step. */
+	const renameWidgetSteps = (
+		widgets: TrackerTemplateBoardWidget[] | undefined,
+		rename: (n: string) => string | null
+	): TrackerTemplateBoardWidget[] =>
+		(widgets ?? []).map((w) => ({
+			...w,
+			config: {
+				...w.config,
+				step_names:
+					w.config.step_names === null ? null : w.config.step_names.flatMap((n) => rename(n) ?? [])
+			}
+		}));
+
+	/**
+	 * The widgets that still fit the tracker's columns: a breakdown whose
+	 * column is gone is dropped, a filter on a gone column is cleared.
+	 */
+	const fittingWidgets = (t: TrackerTemplateTracker): TrackerTemplateBoardWidget[] => {
+		const keys = new Set(t.columns.map((c) => c.key));
+		return (t.board_widgets ?? [])
+			.filter((w) => w.type !== 'tracker_breakdown' || keys.has(w.config.column_key ?? ''))
+			.map((w) =>
+				w.config.filter && !keys.has(w.config.filter.column_key)
+					? { ...w, config: { ...w.config, filter: null } }
+					: w
+			);
+	};
+
+	const removeWidget = (t: TrackerTemplateTracker, index: number) => {
+		t.board_widgets = (t.board_widgets ?? []).filter((_, i) => i !== index);
+	};
+
+	const widgetSteps = (w: TrackerTemplateBoardWidget): string => {
+		const names = w.config.step_names;
+		if (names === null) return 'every step';
+		if (!names.length) return 'every row';
+		return names.join(', ');
 	};
 
 	const validate = (): string | null => {
@@ -143,13 +206,18 @@
 			name: name.trim(),
 			description: description.trim() || null,
 			steps: steps.map((s) => ({ ...s, name: s.name.trim() })),
-			trackers: trackers.map((t) => ({
-				...t,
-				name: t.name.trim(),
-				step_names: t.step_names ? t.step_names.map((n) => n.trim()) : null,
-				columns: t.columns.map((c) => ({ ...c, label: c.label.trim() })),
-				show_asset_flags: (t.source === 'assets' || t.source === 'manual') && t.show_asset_flags
-			}))
+			trackers: trackers.map((t) => {
+				const columns = t.columns.map((c) => ({ ...c, label: c.label.trim() }));
+				return {
+					...t,
+					name: t.name.trim(),
+					step_names: t.step_names ? t.step_names.map((n) => n.trim()) : null,
+					columns,
+					show_asset_flags: (t.source === 'assets' || t.source === 'manual') && t.show_asset_flags,
+					timeline_sync: normalizeTrackerTimelineSync(t.timeline_sync ?? null, columns),
+					board_widgets: renameWidgetSteps(fittingWidgets(t), (n) => n.trim())
+				};
+			})
 		};
 		busy = true;
 		error = null;
@@ -432,6 +500,47 @@
 								bind:columns={t.columns}
 								disabled={busy}
 								idPrefix={`tt-col-${i}`}
+							/>
+						</div>
+
+						{#if t.board_widgets?.length}
+							<div class="flex flex-col gap-1">
+								<span class={LABEL}>Board widgets</span>
+								<ul class="divide-y rounded-md border" data-testid="template-board-widgets">
+									{#each t.board_widgets as w, j (j)}
+										<li class="flex items-center gap-2 px-2 py-1.5 text-xs">
+											<span class="min-w-0 flex-1 truncate">
+												<span class="font-medium">{w.title || WIDGET_LABELS[w.type]}</span>
+												<span class="text-2xs text-muted-foreground">
+													· {WIDGET_LABELS[w.type]} · {widgetSteps(w)}
+												</span>
+											</span>
+											<button
+												type="button"
+												class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+												onclick={() => removeWidget(t, j)}
+												disabled={busy}
+												aria-label={`Remove the ${w.title || WIDGET_LABELS[w.type]} widget`}
+											>
+												<X class="h-3.5 w-3.5" />
+											</button>
+										</li>
+									{/each}
+								</ul>
+								<span class="text-2xs text-muted-foreground">
+									Added to the war-room board with the tracker. Set them up on a war room's board,
+									then save the war room as a template.
+								</span>
+							</div>
+						{/if}
+
+						<div class="flex flex-col gap-1">
+							<span class={LABEL}>Timelines</span>
+							<TrackerTimelineEditor
+								bind:value={() => t.timeline_sync ?? null, (v) => (t.timeline_sync = v)}
+								columns={t.columns}
+								disabled={busy}
+								idPrefix={`tt-timeline-${i}`}
 							/>
 						</div>
 					</div>

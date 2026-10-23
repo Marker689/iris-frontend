@@ -1,139 +1,47 @@
 /**
- * War-room board layout: which widgets a user shows, in which order, and
- * (for the panels) in which column. Stored per user in the
- * `war_room_board_layout` preference, so it applies to every war room.
+ * War-room board layout: the personal tweaks a user makes to the room's
+ * board — which widgets they hide, in which order they see them and (for
+ * the panels) in which column. The widgets themselves are the room's (set
+ * by its writers, see board-widgets.ts); the layout only refers to them
+ * by id. Stored per user and per room in the
+ * `war_room_board_layout_<war room id>` preference; the older
+ * `war_room_board_layout` preference (one layout for every room) is read
+ * when a room has none.
  *
- * Widgets live in zones rendered top to bottom: the AI suggestions
- * banner, the KPI tiles grid, then the panels split in a wide main column
- * and a narrow side column. Reordering stays within a zone (and, for the
- * panels, within a column). Unknown ids from an older or newer client are
- * dropped and widgets missing from a saved layout come back at their
- * default place, so adding a widget later never hides it from anyone.
+ * Widgets live in zones rendered top to bottom: the banner, the tiles
+ * grid, then the panels split in a wide main column and a narrow side
+ * column. Reordering stays within a zone (and, for the panels, within a
+ * column). Ids the room no longer has are dropped and widgets missing
+ * from a saved layout come back at their room place, so a widget added
+ * to the room later is never hidden from anyone.
  */
+import type { BoardPanelColumn, BoardWidgetZone } from '$lib/services/war-room-board.service';
 
-export const BOARD_LAYOUT_PREF_KEY = 'war_room_board_layout';
+export type { BoardPanelColumn, BoardWidgetZone };
 
-export type BoardWidgetZone = 'banner' | 'tile' | 'panel';
-export type BoardPanelColumn = 'main' | 'side';
+export const BOARD_LAYOUT_LEGACY_PREF_KEY = 'war_room_board_layout';
 
-export interface BoardWidgetDef {
+export const boardLayoutPrefKey = (warRoomId: number): string =>
+	`${BOARD_LAYOUT_LEGACY_PREF_KEY}_${warRoomId}`;
+
+/** A widget of the room's board, in the room's order. */
+export interface BoardSlot {
 	id: string;
-	label: string;
-	description: string;
 	zone: BoardWidgetZone;
-	/** Default column of a panel. */
-	column?: BoardPanelColumn;
-	/** Tile spanning two grid columns. */
-	wide?: boolean;
-	/** Needs `vulnerabilities_read` (the backend omits the data otherwise). */
-	vulnerabilities?: boolean;
+	/** Panels only: the room's column. */
+	column: BoardPanelColumn | null;
 }
 
-export const BOARD_WIDGETS: readonly BoardWidgetDef[] = [
-	{
-		id: 'ai_suggestions',
-		label: 'AI suggestions',
-		description: 'Open suggestions on this war room',
-		zone: 'banner'
-	},
-	{
-		id: 'kpi_compromised',
-		label: 'Compromised',
-		description: 'Compromised assets and the ones without a flag',
-		zone: 'tile'
-	},
-	{
-		id: 'kpi_decisions',
-		label: 'Open decisions',
-		description: 'Open, overdue and due-soon decisions',
-		zone: 'tile'
-	},
-	{
-		id: 'kpi_exceptions',
-		label: 'Exceptions',
-		description: 'Assets with an exception flag',
-		zone: 'tile'
-	},
-	{ id: 'kpi_tasks', label: 'Open tasks', description: 'Open war-room tasks', zone: 'tile' },
-	{
-		id: 'flags',
-		label: 'Flags',
-		description: 'Progress and assets by status flag',
-		zone: 'tile',
-		wide: true
-	},
-	{
-		id: 'vuln_open',
-		label: 'Open vulnerabilities',
-		description: 'Open findings on case assets',
-		zone: 'tile',
-		vulnerabilities: true
-	},
-	{
-		id: 'vuln_exploited',
-		label: 'Exploited & open',
-		description: 'Exploited findings not fixed yet',
-		zone: 'tile',
-		vulnerabilities: true
-	},
-	{
-		id: 'vuln_overdue',
-		label: 'Overdue vulnerabilities',
-		description: 'Open findings past their due date',
-		zone: 'tile',
-		vulnerabilities: true
-	},
-	{
-		id: 'vuln_kev',
-		label: 'KEV open',
-		description: 'Open findings listed in CISA KEV',
-		zone: 'tile',
-		vulnerabilities: true
-	},
-	{
-		id: 'vuln_assets',
-		label: 'Vulnerable assets',
-		description: 'Assets with an open finding',
-		zone: 'tile',
-		vulnerabilities: true
-	},
-	{
-		id: 'cases',
-		label: 'Cases',
-		description: 'One card per attached case',
-		zone: 'panel',
-		column: 'main'
-	},
-	{
-		id: 'decisions',
-		label: 'Open decisions list',
-		description: 'The open decisions and their target dates',
-		zone: 'panel',
-		column: 'side'
-	},
-	{
-		id: 'attention',
-		label: 'Needs attention',
-		description: 'What needs a look now',
-		zone: 'panel',
-		column: 'side'
-	}
-];
-
-const DEFS = new Map(BOARD_WIDGETS.map((w) => [w.id, w]));
-
-export const boardWidget = (id: string): BoardWidgetDef | undefined => DEFS.get(id);
-
 export interface BoardLayout {
-	/** Every known widget, in display order. */
+	/** Every widget of the room, in display order. */
 	order: string[];
 	hidden: string[];
-	/** Panel columns differing from the default. */
+	/** Panel columns differing from the room's. */
 	columns: Record<string, BoardPanelColumn>;
 }
 
-export const defaultBoardLayout = (): BoardLayout => ({
-	order: BOARD_WIDGETS.map((w) => w.id),
+export const defaultBoardLayout = (slots: BoardSlot[]): BoardLayout => ({
+	order: slots.map((s) => s.id),
 	hidden: [],
 	columns: {}
 });
@@ -141,61 +49,74 @@ export const defaultBoardLayout = (): BoardLayout => ({
 const isRecord = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
 
-const knownIds = (v: unknown): string[] =>
+const knownIds = (v: unknown, known: Set<string>): string[] =>
 	Array.isArray(v)
-		? [...new Set(v.filter((id): id is string => typeof id === 'string' && DEFS.has(id)))]
+		? [...new Set(v.filter((id): id is string => typeof id === 'string' && known.has(id)))]
 		: [];
 
 /** A saved (or garbage) value turned into a complete, valid layout. */
-export function normalizeBoardLayout(raw: unknown): BoardLayout {
-	if (!isRecord(raw)) return defaultBoardLayout();
-	const order = knownIds(raw.order);
-	// Missing widgets go back after the default widget preceding them.
-	BOARD_WIDGETS.forEach((w, i) => {
-		if (order.includes(w.id)) return;
+export function normalizeBoardLayout(raw: unknown, slots: BoardSlot[]): BoardLayout {
+	if (!isRecord(raw)) return defaultBoardLayout(slots);
+	const byId = new Map(slots.map((s) => [s.id, s]));
+	const known = new Set(byId.keys());
+	const order = knownIds(raw.order, known);
+	// Missing widgets go back after the room widget preceding them.
+	slots.forEach((slot, i) => {
+		if (order.includes(slot.id)) return;
 		let at = 0;
 		for (let j = i - 1; j >= 0; j--) {
-			const k = order.indexOf(BOARD_WIDGETS[j].id);
+			const k = order.indexOf(slots[j].id);
 			if (k !== -1) {
 				at = k + 1;
 				break;
 			}
 		}
-		order.splice(at, 0, w.id);
+		order.splice(at, 0, slot.id);
 	});
 	const columns: Record<string, BoardPanelColumn> = {};
 	if (isRecord(raw.columns)) {
 		for (const [id, col] of Object.entries(raw.columns)) {
-			const def = DEFS.get(id);
-			if (def?.zone === 'panel' && (col === 'main' || col === 'side') && col !== def.column) {
+			const slot = byId.get(id);
+			if (slot?.zone === 'panel' && (col === 'main' || col === 'side') && col !== slot.column) {
 				columns[id] = col;
 			}
 		}
 	}
-	return { order, hidden: knownIds(raw.hidden), columns };
+	return { order, hidden: knownIds(raw.hidden, known), columns };
 }
 
-export const panelColumn = (layout: BoardLayout, id: string): BoardPanelColumn =>
-	layout.columns[id] ?? DEFS.get(id)?.column ?? 'main';
+export const panelColumn = (layout: BoardLayout, slot: BoardSlot): BoardPanelColumn =>
+	layout.columns[slot.id] ?? slot.column ?? 'main';
 
-/** Visible widgets of a zone (and panel column), in order. */
-export function visibleWidgets(
+/** Widgets of a zone (and panel column) in the user's order, hidden ones included. */
+export function zoneWidgets(
 	layout: BoardLayout,
+	slots: BoardSlot[],
 	zone: BoardWidgetZone,
-	available: (def: BoardWidgetDef) => boolean = () => true,
+	available: (slot: BoardSlot) => boolean = () => true,
 	column?: BoardPanelColumn
-): BoardWidgetDef[] {
+): BoardSlot[] {
+	const byId = new Map(slots.map((s) => [s.id, s]));
 	return layout.order
-		.map((id) => DEFS.get(id))
+		.map((id) => byId.get(id))
 		.filter(
-			(def): def is BoardWidgetDef =>
-				!!def &&
-				def.zone === zone &&
-				!layout.hidden.includes(def.id) &&
-				available(def) &&
-				(column === undefined || panelColumn(layout, def.id) === column)
+			(slot): slot is BoardSlot =>
+				!!slot &&
+				slot.zone === zone &&
+				available(slot) &&
+				(column === undefined || panelColumn(layout, slot) === column)
 		);
 }
+
+/** Visible widgets of a zone (and panel column), in order. */
+export const visibleWidgets = (
+	layout: BoardLayout,
+	slots: BoardSlot[],
+	zone: BoardWidgetZone,
+	available: (slot: BoardSlot) => boolean = () => true,
+	column?: BoardPanelColumn
+): BoardSlot[] =>
+	zoneWidgets(layout, slots, zone, available, column).filter((s) => !layout.hidden.includes(s.id));
 
 export function setWidgetVisible(layout: BoardLayout, id: string, visible: boolean): BoardLayout {
 	const hidden = layout.hidden.filter((h) => h !== id);
@@ -203,28 +124,28 @@ export function setWidgetVisible(layout: BoardLayout, id: string, visible: boole
 	return { ...layout, hidden };
 }
 
-const sameGroup = (layout: BoardLayout, a: string, b: string): boolean => {
-	const da = DEFS.get(a);
-	const db = DEFS.get(b);
-	if (!da || !db || da.zone !== db.zone) return false;
-	return da.zone !== 'panel' || panelColumn(layout, a) === panelColumn(layout, b);
-};
-
 /**
  * Swap a widget with its previous (`-1`) or next (`1`) neighbour of the
  * same zone and column, skipping `skip` (e.g. widgets the user can't see).
  */
 export function moveWidget(
 	layout: BoardLayout,
+	slots: BoardSlot[],
 	id: string,
 	delta: -1 | 1,
 	skip: (id: string) => boolean = () => false
 ): BoardLayout {
+	const byId = new Map(slots.map((s) => [s.id, s]));
+	const self = byId.get(id);
 	const order = [...layout.order];
 	const from = order.indexOf(id);
-	if (from === -1) return layout;
+	if (!self || from === -1) return layout;
+	const sameGroup = (other: BoardSlot | undefined) =>
+		!!other &&
+		other.zone === self.zone &&
+		(self.zone !== 'panel' || panelColumn(layout, self) === panelColumn(layout, other));
 	for (let j = from + delta; j >= 0 && j < order.length; j += delta) {
-		if (skip(order[j]) || !sameGroup(layout, id, order[j])) continue;
+		if (skip(order[j]) || !sameGroup(byId.get(order[j]))) continue;
 		[order[from], order[j]] = [order[j], order[from]];
 		return { ...layout, order };
 	}
@@ -233,23 +154,22 @@ export function moveWidget(
 
 export function setPanelColumn(
 	layout: BoardLayout,
-	id: string,
+	slot: BoardSlot,
 	column: BoardPanelColumn
 ): BoardLayout {
-	const def = DEFS.get(id);
-	if (def?.zone !== 'panel') return layout;
+	if (slot.zone !== 'panel') return layout;
 	const columns = { ...layout.columns };
-	if (column === def.column) delete columns[id];
-	else columns[id] = column;
+	if (column === slot.column) delete columns[slot.id];
+	else columns[slot.id] = column;
 	return { ...layout, columns };
 }
 
-export function isDefaultBoardLayout(layout: BoardLayout): boolean {
-	const def = defaultBoardLayout();
+/** The layout is the room's board as is (nothing worth saving). */
+export function isDefaultBoardLayout(layout: BoardLayout, slots: BoardSlot[]): boolean {
 	return (
 		layout.hidden.length === 0 &&
 		Object.keys(layout.columns).length === 0 &&
-		layout.order.length === def.order.length &&
-		layout.order.every((id, i) => id === def.order[i])
+		layout.order.length === slots.length &&
+		layout.order.every((id, i) => id === slots[i].id)
 	);
 }

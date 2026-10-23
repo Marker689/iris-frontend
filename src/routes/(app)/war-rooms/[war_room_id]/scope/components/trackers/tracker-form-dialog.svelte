@@ -1,7 +1,8 @@
 <!--
   Create or edit a tracker tab: name, icon, source (fixed once created),
   the steps it offers (all of the war room by default), its extra
-  columns and, for asset rows, the asset flags column.
+  columns, for asset rows the asset flags column and what it writes to
+  the timelines. What the war-room board shows of it is set on the board.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
@@ -15,14 +16,21 @@
 	import FlagIconPicker from '$lib/components/common/assets/FlagIconPicker.svelte';
 	import TrackerColumnsEditor from '$lib/components/common/trackers/TrackerColumnsEditor.svelte';
 	import TrackerStepChip from '$lib/components/common/trackers/TrackerStepChip.svelte';
+	import TrackerTimelineEditor from '$lib/components/common/trackers/TrackerTimelineEditor.svelte';
 	import { TRACKER_ICONS } from '$lib/components/common/trackers/tracker-icon';
 	import {
 		TRACKER_SOURCES,
 		WarRoomTrackersService,
+		normalizeTrackerTimelineSync,
 		type Tracker,
 		type TrackerColumn,
-		type TrackerSource
+		type TrackerSource,
+		type TrackerTimelineSync
 	} from '$lib/services/war-room-trackers.service';
+	import {
+		WarRoomTimelinesService,
+		type WarRoomTimeline
+	} from '$lib/services/war-room-timelines.service';
 	import { errorMessage } from '../helpers';
 	import type { TrackersState } from './trackers-state.svelte';
 
@@ -48,6 +56,8 @@
 	let stepIds = $state<number[]>([]);
 	let columns = $state<TrackerColumn[]>([]);
 	let showFlags = $state(false);
+	let timelineSync = $state<TrackerTimelineSync | null>(null);
+	let roomTimelines = $state<WarRoomTimeline[]>([]);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 
@@ -65,10 +75,29 @@
 				? t.columns.map((c) => ({ ...c, options: c.options ? [...c.options] : undefined }))
 				: [];
 			showFlags = t?.show_asset_flags ?? false;
+			timelineSync = t?.timeline_sync ? { ...t.timeline_sync } : null;
 			error = null;
 			busy = false;
+			void loadRoomTimelines();
 		});
 	});
+
+	const loadRoomTimelines = async () => {
+		const res = await WarRoomTimelinesService.list(store.warRoomId);
+		roomTimelines = res.ok && Array.isArray(res.data) ? res.data : [];
+	};
+
+	/** The sync to send: the date column must still be there, the timeline still exist. */
+	const timelineSyncBody = (cols: TrackerColumn[]): TrackerTimelineSync | null => {
+		const sync = normalizeTrackerTimelineSync(timelineSync, cols);
+		if (
+			sync?.war_room_timeline_id != null &&
+			!roomTimelines.some((t) => t.timeline_id === sync.war_room_timeline_id)
+		) {
+			return { ...sync, war_room_timeline_id: null };
+		}
+		return sync;
+	};
 
 	const flagsApplicable = $derived(source === 'assets' || source === 'manual');
 
@@ -86,13 +115,15 @@
 			error = 'Every column needs a label';
 			return;
 		}
+		const bodyColumns = columns.map((c) => ({ ...c, label: c.label.trim() }));
 		const body = {
 			name: trimmed,
 			icon,
 			description: description.trim() || null,
 			step_ids: allSteps ? null : stepIds.filter((id) => store.steps.some((s) => s.id === id)),
-			columns: columns.map((c) => ({ ...c, label: c.label.trim() })),
-			show_asset_flags: flagsApplicable && showFlags
+			columns: bodyColumns,
+			show_asset_flags: flagsApplicable && showFlags,
+			timeline_sync: timelineSyncBody(bodyColumns)
 		};
 		busy = true;
 		error = null;
@@ -257,6 +288,18 @@
 					Extra columns
 				</legend>
 				<TrackerColumnsEditor bind:columns disabled={busy} />
+			</fieldset>
+
+			<fieldset class="flex flex-col gap-1">
+				<legend class="mb-1 text-2xs uppercase tracking-wide text-muted-foreground"
+					>Timelines</legend
+				>
+				<TrackerTimelineEditor
+					bind:value={timelineSync}
+					{columns}
+					warRoomTimelines={roomTimelines}
+					disabled={busy}
+				/>
 			</fieldset>
 
 			{#if error}

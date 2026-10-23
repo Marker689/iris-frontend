@@ -23,6 +23,7 @@ import {
 	filterTrackerRows,
 	mergeTrackerRows,
 	newTrackerColumnKey,
+	normalizeTrackerTimelineSync,
 	sortTrackerSteps,
 	trackerIdFromTab,
 	trackerOfferedSteps,
@@ -30,7 +31,10 @@ import {
 	trackerRowRef,
 	trackerStepCounts,
 	trackerTabKey,
+	trackerTimelineDateColumns,
+	trackerTimelineWarning,
 	trackerValueText,
+	type TrackerColumn,
 	type TrackerRow,
 	type TrackerStep
 } from '../war-room-trackers.service';
@@ -180,6 +184,28 @@ describe('WarRoomTrackersService', () => {
 		});
 	});
 
+	describe('timeline', () => {
+		it('writes the state of the rows to the timelines', async () => {
+			await WarRoomTrackersService.syncTimeline(3, 5);
+			expect(ApiService.post).toHaveBeenCalledWith('/war-rooms/3/trackers/5/timeline/sync', {}, {});
+		});
+
+		it('sends the timeline settings with the tracker', async () => {
+			const timeline_sync = {
+				mode: 'changes' as const,
+				target: 'cases' as const,
+				date: 'c_due',
+				war_room_timeline_id: null
+			};
+			await WarRoomTrackersService.update(3, 5, { timeline_sync });
+			expect(ApiService.patch).toHaveBeenCalledWith(
+				'/war-rooms/3/trackers/5',
+				{ timeline_sync },
+				{}
+			);
+		});
+	});
+
 	describe('templates', () => {
 		it('applies a template and saves the room as one', async () => {
 			await WarRoomTrackersService.applyTemplate(3, 7);
@@ -306,5 +332,68 @@ describe('tracker helpers', () => {
 		const merged = mergeTrackerRows(rows, [row({ key: 'b', note: 'x' })]);
 		expect(merged.map((r) => r.note)).toEqual([null, 'x']);
 		expect(mergeTrackerRows(rows, [])).toBe(rows);
+	});
+});
+
+describe('tracker timeline helpers', () => {
+	const columns: TrackerColumn[] = [
+		{ key: 'c_due', label: 'Due', type: 'date' },
+		{ key: 'c_at', label: 'At', type: 'datetime' },
+		{ key: 'c_ticket', label: 'Ticket', type: 'text' }
+	];
+	const sync = {
+		mode: 'state' as const,
+		target: 'cases' as const,
+		date: 'c_due',
+		war_room_timeline_id: null
+	};
+
+	it('offers the date and datetime columns', () => {
+		expect(trackerTimelineDateColumns(columns).map((c) => c.key)).toEqual(['c_due', 'c_at']);
+	});
+
+	it('falls back to the change time when the date column is gone', () => {
+		expect(normalizeTrackerTimelineSync(null, columns)).toBeNull();
+		expect(normalizeTrackerTimelineSync(sync, columns)).toBe(sync);
+		expect(normalizeTrackerTimelineSync(sync, columns.slice(1))?.date).toBe('changed_at');
+		expect(normalizeTrackerTimelineSync({ ...sync, date: 'c_ticket' }, columns)?.date).toBe(
+			'changed_at'
+		);
+	});
+
+	it('warns about what was not written', () => {
+		expect(trackerTimelineWarning(undefined)).toBeNull();
+		expect(
+			trackerTimelineWarning({
+				events: 2,
+				skipped_case_ids: [],
+				restricted_rows: 0,
+				war_room_rows: 0
+			})
+		).toBeNull();
+		expect(
+			trackerTimelineWarning({
+				events: 0,
+				skipped_case_ids: [4, 9],
+				restricted_rows: 1,
+				war_room_rows: 0
+			})
+		).toBe('2 case timelines not written (no full access: #4, #9); 1 restricted row not written.');
+		expect(
+			trackerTimelineWarning({
+				events: 0,
+				skipped_case_ids: [4],
+				restricted_rows: 0,
+				war_room_rows: 0
+			})
+		).toBe('1 case timeline not written (no full access: #4).');
+		expect(
+			trackerTimelineWarning({
+				events: 2,
+				skipped_case_ids: [],
+				restricted_rows: 0,
+				war_room_rows: 2
+			})
+		).toBe('2 rows without a case written to the war-room timeline.');
 	});
 });

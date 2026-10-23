@@ -4,11 +4,13 @@ import {
 	activityAnchorId,
 	activityQuote,
 	burstSummary,
+	escapeMarkdownText,
 	defaultLaneRoutes,
 	defaultStreamSettings,
 	feedKinds,
 	foldBursts,
 	isMutedEvent,
+	isPlainTextKind,
 	latestTime,
 	muteTargetFor,
 	parseStreamPrefs,
@@ -253,7 +255,16 @@ describe('discuss in chat', () => {
 		const m = caseActivity(4, 'ioc.created', 'added IOC\n`1.2.3.4`');
 		m.message_id = -12;
 		expect(activityQuote(m, '#4 Phishing')).toBe(
-			'> **Alice** added IOC `1.2.3.4` · #4 Phishing · [Show in activity](#activity--12)'
+			'> **Alice** added IOC \\`1.2.3.4\\` · #4 Phishing · [Show in activity](#activity--12)'
+		);
+	});
+
+	it('escapes the tool names and the actor of the quoted row', () => {
+		const m = caseActivity(4, 'case.other', 'Mcp:iris_case_assets_update perm=standard_user');
+		m.author_name = 'tines_bot';
+		m.message_id = 7;
+		expect(activityQuote(m)).toBe(
+			'> **tines\\_bot** Mcp:iris\\_case\\_assets\\_update perm=standard\\_user · [Show in activity](#activity-7)'
 		);
 	});
 
@@ -263,5 +274,24 @@ describe('discuss in chat', () => {
 		expect(activityAnchorId('#activity-x')).toBeNull();
 		expect(activityAnchorId('/case/4')).toBeNull();
 		expect(activityAnchorId(null)).toBeNull();
+	});
+});
+
+describe('plain-text rows', () => {
+	it('shows the activity and tracker lines verbatim, the others as markdown', () => {
+		expect(isPlainTextKind('case_activity')).toBe(true);
+		expect(isPlainTextKind('war_room_activity')).toBe(true);
+		expect(isPlainTextKind('tracker')).toBe(true);
+		expect(isPlainTextKind('message')).toBe(false);
+		expect(isPlainTextKind('decision')).toBe(false);
+	});
+
+	it('escapes what markdown would interpret', () => {
+		expect(
+			escapeMarkdownText('[ai-workflow:11] iris_case_assets_update *x* `y` #1 a|b ~z~ \\')
+		).toBe(
+			'\\[ai-workflow:11\\] iris\\_case\\_assets\\_update \\*x\\* \\`y\\` \\#1 a\\|b \\~z\\~ \\\\'
+		);
+		expect(escapeMarkdownText('plain words')).toBe('plain words');
 	});
 });

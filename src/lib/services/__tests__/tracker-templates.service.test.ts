@@ -34,7 +34,9 @@ const template: TrackerTemplate = {
 			source: 'customers',
 			step_names: null,
 			columns: [{ key: 'c_contact', label: 'Contact', type: 'text' }],
-			show_asset_flags: false
+			show_asset_flags: false,
+			timeline_sync: null,
+			board_widgets: []
 		}
 	],
 	created_by: { id: 1, name: 'admin' },
@@ -99,6 +101,43 @@ describe('tracker template helpers', () => {
 		});
 		expect(out).not.toHaveProperty('id');
 		expect(out).not.toHaveProperty('created_by');
+	});
+
+	it('exports the timeline settings without the war-room timeline', () => {
+		const sync = {
+			mode: 'state' as const,
+			target: 'war_room' as const,
+			date: 'changed_at',
+			war_room_timeline_id: 12
+		};
+		const out = trackerTemplateToExport({
+			...template,
+			trackers: [{ ...template.trackers[0], timeline_sync: sync }]
+		});
+		expect(out.trackers[0].timeline_sync).toEqual({ ...sync, war_room_timeline_id: null });
+		expect(sync.war_room_timeline_id).toBe(12);
+	});
+
+	it('exports the board widgets as copies', () => {
+		const board_widgets = [
+			{
+				type: 'tracker_count' as const,
+				title: 'Contacted',
+				column: null,
+				config: { step_names: ['Sent'], of_total: true }
+			}
+		];
+		const out = trackerTemplateToExport({
+			...template,
+			trackers: [{ ...template.trackers[0], board_widgets }]
+		});
+		expect(out.trackers[0].board_widgets).toEqual(board_widgets);
+		expect(out.trackers[0].board_widgets?.[0]).not.toBe(board_widgets[0]);
+		const older = trackerTemplateToExport({
+			...template,
+			trackers: [{ ...template.trackers[0], board_widgets: undefined }]
+		});
+		expect(older.trackers[0].board_widgets).toEqual([]);
 	});
 
 	it('parses an exported file back', () => {
