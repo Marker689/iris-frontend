@@ -58,7 +58,10 @@
 </svelte:head>
 
 <CaseWorkspace bare>
-	<div class="flex flex-col gap-4 p-4" data-testid="case-trackers">
+	<div
+		class="mx-auto flex w-full min-w-0 max-w-screen-2xl flex-col gap-4 p-4"
+		data-testid="case-trackers"
+	>
 		<TrackerTabs {store} active={shown?.id ?? null} onSelect={select} {canWrite} {isAdmin} />
 
 		{#if !store.loaded}
