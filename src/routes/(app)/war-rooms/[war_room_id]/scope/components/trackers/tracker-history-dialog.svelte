@@ -22,7 +22,7 @@
 		type TrackerStep
 	} from '$lib/services/war-room-trackers.service';
 	import { mediumDateTimeFormatter } from '$lib/utils/time-formatter';
-	import { describeTrackerEvent } from './tracker-helpers';
+	import { describeTrackerEvent } from '$lib/components/common/trackers/tracker-helpers';
 
 	type Props = {
 		open: boolean;

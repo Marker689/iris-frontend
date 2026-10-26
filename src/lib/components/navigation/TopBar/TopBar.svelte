@@ -114,7 +114,8 @@
 		{ label: 'Timeline', path: 'timeline' },
 		{ label: 'Graph', path: 'graph' },
 		{ label: 'Tasks', path: 'tasks' },
-		{ label: 'Evidence', path: 'evidence' }
+		{ label: 'Evidence', path: 'evidence' },
+		{ label: 'Trackers', path: 'trackers' }
 	];
 
 	const isCaseButtonActive = (path: string) => {

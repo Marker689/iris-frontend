@@ -20,12 +20,12 @@
 	} from '$lib/services/war-room-trackers.service';
 	import { mediumDateTimeFormatter } from '$lib/utils/time-formatter';
 	import TrackerItemCell from './tracker-item-cell.svelte';
-	import TrackerStepsCell from './tracker-steps-cell.svelte';
+	import TrackerStepsCell from '$lib/components/common/trackers/TrackerStepsCell.svelte';
 	import {
 		trackerBoardColumns,
 		trackerBoardMove,
 		type TrackerBoardColumn
-	} from './tracker-helpers';
+	} from '$lib/components/common/trackers/tracker-helpers';
 
 	type Props = {
 		/** The rows matching the search. */

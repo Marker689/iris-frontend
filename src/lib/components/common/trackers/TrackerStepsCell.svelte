@@ -11,8 +11,8 @@
 	import { formatDateTime } from '$lib/utils/time-formatter';
 
 	type Props = {
-		row: TrackerRow;
-		/** Every step of the war room (chips of steps no longer offered still show). */
+		row: Pick<TrackerRow, 'steps' | 'restricted'>;
+		/** Every step (chips of steps no longer offered still show). */
 		steps: TrackerStep[];
 		/** Steps this tracker offers, in order. */
 		offered: TrackerStep[];

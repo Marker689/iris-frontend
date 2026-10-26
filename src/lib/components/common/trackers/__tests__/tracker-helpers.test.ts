@@ -5,7 +5,7 @@ import {
 	isTrackerView,
 	trackerBoardColumns,
 	trackerBoardMove
-} from '../trackers/tracker-helpers';
+} from '../tracker-helpers';
 
 describe('describeTrackerEvent', () => {
 	const steps = [

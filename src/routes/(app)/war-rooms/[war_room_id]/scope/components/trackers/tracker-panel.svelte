@@ -76,14 +76,14 @@
 	import TrackerBoard from './tracker-board.svelte';
 	import TrackerHistoryDialog from './tracker-history-dialog.svelte';
 	import TrackerItemCell from './tracker-item-cell.svelte';
-	import TrackerStepsCell from './tracker-steps-cell.svelte';
-	import TrackerValueCell from './tracker-value-cell.svelte';
+	import TrackerStepsCell from '$lib/components/common/trackers/TrackerStepsCell.svelte';
+	import TrackerValueCell from '$lib/components/common/trackers/TrackerValueCell.svelte';
 	import {
 		TRACKER_NOTE_COLUMN,
 		okObject,
 		trackerBoardMove,
 		type TrackerMemberOption
-	} from './tracker-helpers';
+	} from '$lib/components/common/trackers/tracker-helpers';
 	import type { TrackersState } from './trackers-state.svelte';
 
 	type Props = {

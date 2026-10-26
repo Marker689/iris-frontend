@@ -26,7 +26,7 @@
 	} from '$lib/services/war-room-trackers.service';
 	import { caseNumberedName } from '$lib/utils/case-name';
 	import { errorMessage } from '../helpers';
-	import { okObject } from './tracker-helpers';
+	import { okObject } from '$lib/components/common/trackers/tracker-helpers';
 
 	type Props = {
 		open: boolean;

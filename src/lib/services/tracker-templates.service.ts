@@ -1,9 +1,10 @@
 /**
- * Tracker templates — global bundles of war-room tracker steps and
- * tracker definitions, managed in Settings > Tracker templates
- * (server administrators). Applying one to a war room merges its steps
- * by name and creates its trackers; a war room's steps and trackers can
- * be saved back as a template.
+ * Tracker templates — global bundles of tracker steps and tracker
+ * definitions, managed in Settings > Tracker templates (server
+ * administrators). Applying one to a war room or a case merges its steps
+ * by name and creates its trackers (those of a source the target does
+ * not have are skipped); the steps and trackers of either can be saved
+ * back as a template.
  *
  * Wraps `/api/v2/manage/tracker-templates`. The presets are defined by
  * the server (`/presets`) and created there on demand.
@@ -15,12 +16,27 @@ import type {
 	BoardProgressDisplay,
 	BoardRowFilter
 } from './war-room-board.service';
+import type { CaseTrackerSource } from './case-trackers.service';
 import type {
 	TrackerColumn,
 	TrackerSource,
 	TrackerTimelineSync,
 	TrackerUserRef
 } from './war-room-trackers.service';
+
+/** A war-room source, or a case one (tasks, evidences). */
+export type TrackerTemplateSource = TrackerSource | CaseTrackerSource;
+
+export const TRACKER_TEMPLATE_SOURCES: { value: TrackerTemplateSource; label: string }[] = [
+	{ value: 'manual', label: 'Manual' },
+	{ value: 'assets', label: 'Assets' },
+	{ value: 'iocs', label: 'IOCs' },
+	{ value: 'customers', label: 'Customers (war rooms only)' },
+	{ value: 'cases', label: 'Cases (war rooms only)' },
+	{ value: 'registry_assets', label: 'Registry assets (war rooms only)' },
+	{ value: 'tasks', label: 'Tasks (cases only)' },
+	{ value: 'evidences', label: 'Evidences (cases only)' }
+];
 
 export interface TrackerTemplateStep {
 	name: string;
@@ -33,7 +49,7 @@ export interface TrackerTemplateTracker {
 	name: string;
 	icon: string | null;
 	description: string | null;
-	source: TrackerSource;
+	source: TrackerTemplateSource;
 	/** Names of the template steps offered; null = all of them. */
 	step_names: string[] | null;
 	columns: TrackerColumn[];

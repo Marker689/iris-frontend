@@ -544,10 +544,10 @@ export const trackerTimelineDateColumns = (columns: TrackerColumn[]): TrackerCol
  * A timeline sync whose date column is gone (or no longer a date) falls
  * back to the change time, as the server refuses it otherwise.
  */
-export const normalizeTrackerTimelineSync = (
-	sync: TrackerTimelineSync | null,
+export const normalizeTrackerTimelineSync = <S extends Pick<TrackerTimelineSync, 'date'>>(
+	sync: S | null,
 	columns: TrackerColumn[]
-): TrackerTimelineSync | null => {
+): S | null => {
 	if (!sync) return null;
 	const dated = trackerTimelineDateColumns(columns).some((c) => c.key === sync.date);
 	return dated || sync.date === TRACKER_TIMELINE_CHANGED_AT
@@ -599,7 +599,10 @@ export const trackerTimelineSyncTitle = (summary: TrackerTimelineSummary): strin
 };
 
 /** Apply returned rows onto the listed ones (matched by key). */
-export const mergeTrackerRows = (rows: TrackerRow[], updated: TrackerRow[]): TrackerRow[] => {
+export const mergeTrackerRows = <R extends Pick<TrackerRow, 'key'>>(
+	rows: R[],
+	updated: R[]
+): R[] => {
 	if (updated.length === 0) return rows;
 	const byKey = new Map(updated.map((r) => [r.key, r]));
 	return rows.map((r) => byKey.get(r.key) ?? r);

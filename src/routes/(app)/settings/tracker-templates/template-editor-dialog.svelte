@@ -22,6 +22,7 @@
 	import TrackerTimelineEditor from '$lib/components/common/trackers/TrackerTimelineEditor.svelte';
 	import { TRACKER_ICONS } from '$lib/components/common/trackers/tracker-icon';
 	import {
+		TRACKER_TEMPLATE_SOURCES,
 		TrackerTemplatesService,
 		trackerTemplateToExport,
 		type TrackerTemplate,
@@ -30,10 +31,7 @@
 		type TrackerTemplateStep,
 		type TrackerTemplateTracker
 	} from '$lib/services/tracker-templates.service';
-	import {
-		TRACKER_SOURCES,
-		normalizeTrackerTimelineSync
-	} from '$lib/services/war-room-trackers.service';
+	import { normalizeTrackerTimelineSync } from '$lib/services/war-room-trackers.service';
 
 	type Props = {
 		open: boolean;
@@ -407,7 +405,7 @@
 									bind:value={t.source}
 									disabled={busy}
 								>
-									{#each TRACKER_SOURCES as src (src.value)}
+									{#each TRACKER_TEMPLATE_SOURCES as src (src.value)}
 										<option value={src.value}>{src.label}</option>
 									{/each}
 								</select>

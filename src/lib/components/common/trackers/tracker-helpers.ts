@@ -14,7 +14,7 @@ import type {
 export const okObject = <T extends object>(res: RequestResponse<T>): T | null =>
 	res.ok && res.data !== null && typeof res.data === 'object' ? (res.data as T) : null;
 
-/** A war-room member offered by `user` columns. */
+/** A member (of the war room, or with access to the case) offered by `user` columns. */
 export interface TrackerMemberOption {
 	id: number;
 	name: string;
@@ -75,11 +75,11 @@ export type TrackerView = 'list' | 'board';
 
 export const isTrackerView = (v: unknown): v is TrackerView => v === 'list' || v === 'board';
 
-export interface TrackerBoardColumn {
+export interface TrackerBoardColumn<R extends Pick<TrackerRow, 'steps'> = TrackerRow> {
 	key: string;
 	/** null = the rows without any of the listed steps. */
 	step: TrackerStep | null;
-	rows: TrackerRow[];
+	rows: R[];
 }
 
 /**
@@ -87,13 +87,13 @@ export interface TrackerBoardColumn {
  * order. A row carrying several steps shows in each of their columns;
  * one carrying none of them goes to "No step".
  */
-export function trackerBoardColumns(
-	rows: TrackerRow[],
+export function trackerBoardColumns<R extends Pick<TrackerRow, 'steps'>>(
+	rows: R[],
 	steps: TrackerStep[]
-): TrackerBoardColumn[] {
+): TrackerBoardColumn<R>[] {
 	const listed = new Set(steps.map((s) => s.id));
-	const buckets = new Map<number | null, TrackerRow[]>();
-	const push = (key: number | null, row: TrackerRow) => {
+	const buckets = new Map<number | null, R[]>();
+	const push = (key: number | null, row: R) => {
 		const list = buckets.get(key);
 		if (list) list.push(row);
 		else buckets.set(key, [row]);

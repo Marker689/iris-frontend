@@ -1,8 +1,9 @@
 <!--
   Tracker templates admin page.
 
-  Global bundles of war-room tracker steps and trackers (source, offered
-  steps, extra columns). A war room applies one from its scope "+" menu;
+  Global bundles of tracker steps and trackers (source, offered steps,
+  extra columns). A war room applies one from its scope "+" menu, a case
+  from its Trackers page;
   its steps are merged by name and its trackers created. Master/detail
   like the asset flags page: list on the left, details on the right,
   one dialog for add/edit. JSON import/export to move templates between
@@ -36,11 +37,12 @@
 		parseTrackerTemplateJson,
 		trackerTemplateToExport,
 		TRACKER_TEMPLATE_FORMAT,
+		TRACKER_TEMPLATE_SOURCES,
 		type TrackerTemplate,
 		type TrackerTemplateExport,
 		type TrackerTemplatePreset
 	} from '$lib/services/tracker-templates.service';
-	import { TRACKER_COLUMN_TYPES, TRACKER_SOURCES } from '$lib/services/war-room-trackers.service';
+	import { TRACKER_COLUMN_TYPES } from '$lib/services/war-room-trackers.service';
 	import TemplateEditorDialog from './template-editor-dialog.svelte';
 
 	let templates = $state<TrackerTemplate[]>([]);
@@ -56,7 +58,7 @@
 	const selected = $derived(templates.find((t) => t.id === selectedId) ?? null);
 
 	const sourceLabel = (value: string) =>
-		TRACKER_SOURCES.find((s) => s.value === value)?.label ?? value;
+		TRACKER_TEMPLATE_SOURCES.find((s) => s.value === value)?.label ?? value;
 	const columnTypeLabel = (value: string) =>
 		TRACKER_COLUMN_TYPES.find((c) => c.value === value)?.label ?? value;
 
